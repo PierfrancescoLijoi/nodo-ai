@@ -34,7 +34,9 @@ def load(db: PostgresDatabase, entities: int, relations: int) -> None:
     with db.admin() as conn:
         apply_migrations(conn)
         conn.execute(f"GRANT USAGE ON SCHEMA public TO {ROLE}")
-        conn.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {ROLE}")
+        conn.execute(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {ROLE}"
+        )
         for workspace, owner, n_ent, n_rel in [
             (BIG, OWNER, entities, relations),
             *[(f"ws-{i}", "u1", 2000, 8000) for i in range(SMALL_WORKSPACES)],
@@ -83,7 +85,9 @@ def main() -> None:
     started = time.perf_counter()
     if not os.environ.get("NODO_BENCH_SKIP_LOAD"):
         load(admin, entities, relations)
-    print(f"loaded {entities} entities and {relations} relations (+ noise) in {time.perf_counter() - started:.0f}s")
+    print(
+        f"loaded {entities} entities and {relations} relations (+ noise) in {time.perf_counter() - started:.0f}s"
+    )
     params = conninfo_to_dict(dsn)
     params.update(user=ROLE, password=PASSWORD)
     app = PostgresDatabase.from_dsn(make_conninfo(**params))
@@ -100,13 +104,27 @@ def main() -> None:
     mid = store.find_entities(BIG, OWNER, [f"entity {entities // 2}"], 1)[0].id
     kwargs = dict(node_limit=60, fanout=15, include_proposed=False, as_of=None)
     print()
-    print("find_entities (substring)  ", timed(lambda: store.find_entities(BIG, OWNER, ["entity 1234"], 5)))
+    print(
+        "find_entities (substring)  ",
+        timed(lambda: store.find_entities(BIG, OWNER, ["entity 1234"], 5)),
+    )
     print("overview (60)              ", timed(lambda: store.overview(BIG, OWNER, 60)))
-    print("depth 1 from the biggest hub", timed(lambda: store.neighborhood(BIG, OWNER, [hub], depth=1, **kwargs)))
-    print("depth 2 from the biggest hub", timed(lambda: store.neighborhood(BIG, OWNER, [hub], depth=2, **kwargs)))
-    print("depth 2 from an ordinary node", timed(lambda: store.neighborhood(BIG, OWNER, [mid], depth=2, **kwargs)))
+    print(
+        "depth 1 from the biggest hub",
+        timed(lambda: store.neighborhood(BIG, OWNER, [hub], depth=1, **kwargs)),
+    )
+    print(
+        "depth 2 from the biggest hub",
+        timed(lambda: store.neighborhood(BIG, OWNER, [hub], depth=2, **kwargs)),
+    )
+    print(
+        "depth 2 from an ordinary node",
+        timed(lambda: store.neighborhood(BIG, OWNER, [mid], depth=2, **kwargs)),
+    )
     sub = store.neighborhood(BIG, OWNER, [hub], depth=2, **kwargs)
-    print(f"  hub subgraph: {len(sub.nodes)} nodes, {len(sub.edges)} edges, truncated={sub.truncated}")
+    print(
+        f"  hub subgraph: {len(sub.nodes)} nodes, {len(sub.edges)} edges, truncated={sub.truncated}"
+    )
 
     with app.workspace(BIG) as conn:
         frontier = [hub, mid]
