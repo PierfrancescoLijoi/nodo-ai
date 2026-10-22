@@ -20,6 +20,9 @@ ENV VIRTUAL_ENV=/opt/venv \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# Build tooling is not needed at run time; removing it also removes its vulnerabilities.
+RUN python -m pip uninstall -y setuptools wheel 2>/dev/null; python -m pip install --no-cache-dir --upgrade pip
+
 RUN groupadd --gid 10001 nodo \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin nodo
 
