@@ -17,7 +17,7 @@
     "i18next": "^26.5.5",
     "phosphor-react-native": "^3.0.6",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
+    "react-dom": "19.3.1",
     "react-i18next": "^17.1.1",
     "react-native": "0.88.0",
     "react-native-safe-area-context": "~5.10.1",
