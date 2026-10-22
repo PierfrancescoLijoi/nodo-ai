@@ -61,6 +61,16 @@ class Meeting:
     title: str | None = None
     summary: str | None = None
     duration_ms: int | None = None
+    # (speaker label, name the owner gave) pairs; a tuple keeps the meeting immutable
+    speaker_names: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SpeakerSummary:
+    id: str
+    name: str | None
+    segments: int
+    talk_ms: int
 
 
 @dataclass(frozen=True, slots=True)

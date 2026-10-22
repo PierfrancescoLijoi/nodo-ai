@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
@@ -8,6 +9,7 @@ from uuid import uuid4
 
 from nodo_api.domain.graph import EntityType, Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
+from nodo_api.errors import NotFoundError
 from nodo_api.ports import GraphStore, LlmClient, MeetingRepository, Retriever, TranscriptRepository
 
 MAX_GRAPH_DEPTH = 2
@@ -85,14 +87,14 @@ class EvidenceValidator:
         generated: GeneratedAnswer,
         retrieved: tuple[TranscriptSegment, ...],
         graph: Subgraph | None = None,
-        allowed_meeting_ids: frozenset[str] | None = None,
+        owns: Callable[[str], bool] | None = None,
     ) -> GeneratedAnswer:
         retrieved_keys = {(segment.meeting_id, segment.id) for segment in retrieved}
         valid = tuple(
             citation
             for citation in generated.citations
             if (citation.meeting_id, citation.segment_id) in retrieved_keys
-            and (allowed_meeting_ids is None or citation.meeting_id in allowed_meeting_ids)
+            and (owns is None or owns(citation.meeting_id))
             and self._accessible(workspace_id, citation)
         )
         if not valid:
@@ -144,17 +146,33 @@ class QueryService:
         self._validator = validator
         self._graph_node_limit = graph_node_limit
 
+    def _owner_check(self, workspace_id: str, user_id: str) -> Callable[[str], bool]:
+        """Second look at every cited meeting (a handful), independent of the search filter."""
+        cache: dict[str, bool] = {}
+
+        def owns(meeting_id: str) -> bool:
+            if meeting_id not in cache:
+                try:
+                    self._meetings.get_owned(workspace_id, user_id, meeting_id)
+                    cache[meeting_id] = True
+                except NotFoundError:
+                    cache[meeting_id] = False
+            return cache[meeting_id]
+
+        return owns
+
     def query(self, workspace_id: str, user_id: str, request: QueryRequest) -> QueryResult:
-        allowed = self._meetings.owned_ids(workspace_id, user_id)
         filters = request.filters.as_dict() if request.filters else None
         evidence = self._retriever.search(
-            workspace_id, request.question, filters, allowed, MAX_EVIDENCE
+            workspace_id, user_id, request.question, filters, MAX_EVIDENCE
         )[:MAX_EVIDENCE]
         graph = self._context_graph(workspace_id, user_id, request.question)
         generated = self._llm.answer(
             workspace_id, request.question, request.ui_locale, evidence, graph
         )
-        validated = self._validator.validate(workspace_id, generated, evidence, graph, allowed)
+        validated = self._validator.validate(
+            workspace_id, generated, evidence, graph, self._owner_check(workspace_id, user_id)
+        )
         return QueryResult(
             answer=validated.answer,
             answerability=validated.answerability,

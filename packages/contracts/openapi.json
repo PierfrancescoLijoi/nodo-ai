@@ -777,6 +777,14 @@
           "recording_attestation": {
             "$ref": "#/components/schemas/AttestationOutput"
           },
+          "speakers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SpeakerOutput"
+            },
+            "title": "Speakers",
+            "type": "array"
+          },
           "state": {
             "$ref": "#/components/schemas/MeetingState"
           },
@@ -1064,6 +1072,59 @@
           "locale"
         ],
         "title": "SegmentOutput",
+        "type": "object"
+      },
+      "SpeakerNameInput": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "SpeakerNameInput",
+        "type": "object"
+      },
+      "SpeakerOutput": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "segments": {
+            "title": "Segments",
+            "type": "integer"
+          },
+          "talk_ms": {
+            "title": "Talk Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "segments",
+          "talk_ms"
+        ],
+        "title": "SpeakerOutput",
         "type": "object"
       },
       "SubgraphOutput": {
@@ -1750,6 +1811,65 @@
           }
         },
         "summary": "Review Meeting"
+      }
+    },
+    "/v1/meetings/{meeting_id}/speakers/{speaker_id}": {
+      "patch": {
+        "operationId": "name_speaker_v1_meetings__meeting_id__speakers__speaker_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "meeting_id",
+            "required": true,
+            "schema": {
+              "title": "Meeting Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "speaker_id",
+            "required": true,
+            "schema": {
+              "pattern": "^S[1-9][0-9]{0,3}$",
+              "title": "Speaker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakerNameInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Name Speaker"
       }
     },
     "/v1/meetings/{meeting_id}/transcript": {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 from uuid import uuid4
@@ -191,23 +192,31 @@ class MemoryJobQueue:
 class MockRetriever:
     def __init__(self) -> None:
         self._segments: dict[tuple[str, str, str], TranscriptSegment] = {}
+        self._owners: dict[tuple[str, str], str] = {}
 
-    def index(self, workspace_id: str, segment: TranscriptSegment) -> None:
-        self._segments[(workspace_id, segment.meeting_id, segment.id)] = segment
+    def index(
+        self, workspace_id: str, owner_id: str, segments: Sequence[TranscriptSegment]
+    ) -> None:
+        for segment in segments:
+            self._segments[(workspace_id, segment.meeting_id, segment.id)] = segment
+            self._owners[(workspace_id, segment.meeting_id)] = owner_id
 
     def search(
         self,
         workspace_id: str,
+        owner_id: str,
         query: str,
         filters: dict[str, Any] | None,
-        allowed_meeting_ids: frozenset[str],
         limit: int,
     ) -> tuple[TranscriptSegment, ...]:
         terms = {term for term in re.findall(r"\w+", query.lower()) if len(term) > 3}
         project = (filters or {}).get("project")
         results = []
         for (stored_workspace, meeting_id, _), segment in sorted(self._segments.items()):
-            if stored_workspace != workspace_id or meeting_id not in allowed_meeting_ids:
+            if (
+                stored_workspace != workspace_id
+                or self._owners.get((workspace_id, meeting_id)) != owner_id
+            ):
                 continue
             if project and segment.project != project:
                 continue
@@ -217,6 +226,7 @@ class MockRetriever:
         return tuple(results[:limit])
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
+        self._owners.pop((workspace_id, meeting_id), None)
         for key in list(self._segments):
             if key[:2] == (workspace_id, meeting_id):
                 del self._segments[key]
@@ -375,7 +385,7 @@ def seed_memory_adapters(
             "NODO",
         )
         transcripts.add_version(workspace, meeting_id, (segment,))
-        retriever.index(workspace, segment)
+        retriever.index(workspace, owner, (segment,))
         _, build, relations = extractions[meeting_id]
         graph.upsert_extraction(
             workspace,

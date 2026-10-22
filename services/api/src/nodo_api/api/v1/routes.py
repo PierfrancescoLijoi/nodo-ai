@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response, status
 
 from nodo_api.api.v1.mapping import (
     decode_cursor,
@@ -28,6 +28,7 @@ from nodo_api.api.v1.schemas import (
     ReviewInput,
     ReviewOutput,
     ReviewRelationInput,
+    SpeakerNameInput,
     SubgraphOutput,
     TranscriptPage,
     UploadSessionOutput,
@@ -119,8 +120,28 @@ def list_meetings(
 def get_meeting(meeting_id: str, actor: PrincipalDep, request: Request):
     container = request.app.state.container
     meeting = container.meeting_service.get(actor.workspace_id, actor.user_id, meeting_id)
-    digest = container.graph_service.digests(actor.workspace_id, actor.user_id, [meeting_id])
-    return meeting_output(meeting, digest.get(meeting_id))
+    return _detail(container, actor, meeting)
+
+
+def _detail(container, actor: Principal, meeting) -> MeetingOutput:
+    digest = container.graph_service.digests(actor.workspace_id, actor.user_id, [meeting.id])
+    speakers = container.meeting_service.speakers(actor.workspace_id, actor.user_id, meeting)
+    return meeting_output(meeting, digest.get(meeting.id), speakers)
+
+
+@router.patch("/meetings/{meeting_id}/speakers/{speaker_id}", response_model=MeetingOutput)
+def name_speaker(
+    meeting_id: str,
+    speaker_id: Annotated[str, Path(pattern=r"^S[1-9][0-9]{0,3}$")],
+    body: SpeakerNameInput,
+    actor: PrincipalDep,
+    request: Request,
+):
+    container = request.app.state.container
+    meeting = container.meeting_service.name_speaker(
+        actor.workspace_id, actor.user_id, meeting_id, speaker_id, body.name
+    )
+    return _detail(container, actor, meeting)
 
 
 @router.get("/meetings/{meeting_id}/transcript", response_model=TranscriptPage)

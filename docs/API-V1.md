@@ -25,9 +25,14 @@ MeetingOutput {
     topics:    { id, label }[],
     decisions: { id, label, status: "proposed"|"approved"|"superseded", effective_at: string|null }[],
     actions:   { id, label, owner_label: string|null, due_at: string|null, status: "proposed"|"approved" }[]
-  }
+  },
+  speakers: { id: "S1"|"S2"|..., name: string|null, segments: number, talk_ms: number }[]
 }
 ```
+
+`speakers` is empty until the transcript exists. `name` is what the owner called that speaker, `null` if unnamed.
+
+`PATCH /v1/meetings/{id}/speakers/{speaker_id}` with `{ name: string | null }` names a speaker (or clears the name with `null`) and returns the updated `MeetingOutput`. Rules: `speaker_id` matches `S<n>` and must exist in the transcript (404 otherwise); only meetings in `review` or `ready` can be edited (409); names are 1 to 80 characters, at most 5 words, letters, digits, marks, spaces, `.` `'` `-` (422 otherwise, no control characters). A change queues a background re-analysis, so the named person appears in the graph and in `insights.people` a few seconds later. Names belong to one meeting; nothing links them across meetings and no voice data is kept.
 
 `POST /v1/meetings` accepts an optional `title` (1 to 120 characters). `GET /v1/meetings/{id}/transcript?limit&offset` is unchanged: items have `id, meeting_id, speaker_id ("S1", "S2"), start_ms, end_ms, text, confidence, version, locale`.
 

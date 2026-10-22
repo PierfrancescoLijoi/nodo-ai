@@ -114,6 +114,17 @@ def test_meeting_round_trip_and_ownership(db) -> None:
     assert "m-own" not in repo.owned_ids(A, "mallory")
 
 
+def test_speaker_names_survive_a_save_and_unicode_round_trips(db) -> None:
+    repo = PgMeetingRepository(db)
+    meeting = repo.add(A, _meeting("m-names"), "key-names-01", "hash-n")
+    assert meeting.speaker_names == ()
+    repo.save(A, replace(meeting, speaker_names=(("S1", "Zoë"), ("S2", "Łukasz"))))
+    stored = repo.get_owned(A, "alice", "m-names")
+    assert stored.speaker_names == (("S1", "Zoë"), ("S2", "Łukasz"))
+    repo.save(A, replace(stored, speaker_names=()))
+    assert repo.get_owned(A, "alice", "m-names").speaker_names == ()
+
+
 def test_idempotency_is_per_user_and_returns_the_stored_hash(db) -> None:
     repo = PgMeetingRepository(db)
     first = repo.add(A, _meeting("m-idem-a", "alice"), "shared-key-1", "hash-a")

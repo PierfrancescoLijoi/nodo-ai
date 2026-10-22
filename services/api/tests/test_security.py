@@ -221,7 +221,7 @@ def test_related_entities_must_be_backed_by_cited_segments(app) -> None:
         ("ingestion", "payroll", "<script>alert(1)</script>", "x" * 200),
     )
     validated = EvidenceValidator(container.transcripts).validate(
-        WORKSPACE, generated, (segment,), graph, frozenset({segment.meeting_id})
+        WORKSPACE, generated, (segment,), graph, lambda meeting_id: True
     )
     assert validated.related_entities == ("ingestion",)
 
@@ -234,7 +234,7 @@ def test_citation_to_a_meeting_the_caller_does_not_own_is_dropped(app) -> None:
     )
     generated = GeneratedAnswer("Grounded", Answerability.SUPPORTED, (citation,), ())
     validated = EvidenceValidator(container.transcripts).validate(
-        WORKSPACE, generated, (segment,), None, frozenset({"seed-m2"})
+        WORKSPACE, generated, (segment,), None, lambda meeting_id: meeting_id == "seed-m2"
     )
     assert validated.answerability is Answerability.UNANSWERABLE
 

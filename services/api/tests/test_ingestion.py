@@ -70,8 +70,8 @@ def test_processing_saves_a_transcript_indexes_it_and_reaches_review(app, attest
     assert container.meetings.get_owned(WORKSPACE, USER, meeting.id).state is MeetingState.REVIEW
     segments = container.transcripts.latest(WORKSPACE, meeting.id)
     assert [s.speaker_id for s in segments] == ["S1", "S2", "S1"]
-    allowed = frozenset({meeting.id})
-    found = container.retriever.search(WORKSPACE, "ingestion queue", None, allowed, 10)
+    found = container.retriever.search(WORKSPACE, USER, "ingestion queue", None, 10)
+    assert not container.retriever.search(WORKSPACE, "someone-else", "ingestion queue", None, 10)
     assert any(s.meeting_id == meeting.id for s in found)
     done = container.meetings.get_owned(WORKSPACE, USER, meeting.id)
     assert done.title and done.summary and done.duration_ms
@@ -131,11 +131,11 @@ def test_extraction_is_retried_without_transcribing_again(app, attestation) -> N
     class Flaky:
         calls = 0
 
-        def extract(self, segments, locale, known_decisions):
+        def extract(self, segments, locale, known_decisions, speakers=None):
             Flaky.calls += 1
             if Flaky.calls == 1:
                 raise RuntimeError("model unavailable")
-            return KeywordExtractor().extract(segments, locale, known_decisions)
+            return KeywordExtractor().extract(segments, locale, known_decisions, speakers)
 
     flaky = IngestionService(
         container.meetings,

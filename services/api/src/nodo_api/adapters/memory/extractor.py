@@ -5,6 +5,7 @@ good."""
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 from nodo_api.domain.graph import (
     EXISTING_PREFIX,
@@ -29,6 +30,7 @@ class KeywordExtractor:
         segments: tuple[TranscriptSegment, ...],
         locale: Locale,
         known_decisions: tuple[Entity, ...],
+        speakers: Mapping[str, str] | None = None,
     ) -> Extraction:
         entities: dict[str, ExtractedEntity] = {}
         relations: list[ExtractedRelation] = []

@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from nodo_api.domain.graph import EntityType, MeetingRef, validate_extraction
+from nodo_api.domain.graph import (
+    EntityType,
+    ExtractedEntity,
+    Extraction,
+    MeetingRef,
+    normalize_label,
+    validate_extraction,
+)
 from nodo_api.domain.models import Locale, Meeting, MeetingState, SpokenPhrase, TranscriptSegment
 from nodo_api.domain.rules import InvalidStateTransition, transition_meeting
 from nodo_api.errors import NotFoundError
@@ -25,7 +32,9 @@ from nodo_api.ports import (
 
 FIRST_VERSION = 1
 KNOWN_DECISIONS = 20
+SPEAKER_EVIDENCE = 3  # segments cited as proof that a named speaker took part
 PROCESSABLE = (MeetingState.TRANSCRIBING, MeetingState.EXTRACTING)
+REANALYZABLE = (MeetingState.REVIEW, MeetingState.READY)
 
 
 def locale_of(bcp47: str, fallback: Locale) -> Locale:
@@ -60,6 +69,23 @@ def default_title(meeting: Meeting) -> str:
     return meeting.title or f"Meeting {meeting.created_at:%Y-%m-%d %H:%M}"
 
 
+def with_named_speakers(
+    raw: Extraction, segments: tuple[TranscriptSegment, ...], names: dict[str, str]
+) -> Extraction:
+    """A speaker the owner named is a participant: add the person with a few of their segments as
+    proof, unless the model already found someone with that name."""
+    known = {normalize_label(e.label) for e in raw.entities if e.type is EntityType.PERSON}
+    added = []
+    for speaker, name in names.items():
+        spoken = [s.id for s in segments if s.speaker_id == speaker][:SPEAKER_EVIDENCE]
+        if spoken and normalize_label(name) not in known:
+            known.add(normalize_label(name))
+            added.append(
+                ExtractedEntity(f"speaker:{speaker}", EntityType.PERSON, name, tuple(spoken))
+            )
+    return replace(raw, entities=(*raw.entities, *added)) if added else raw
+
+
 class IngestionService:
     def __init__(
         self,
@@ -90,33 +116,49 @@ class IngestionService:
         if meeting.state not in PROCESSABLE:
             return False
         segments = self._existing_or_new_transcript(workspace_id, meeting_id, meeting)
-        for segment in segments:
-            self._retriever.index(workspace_id, segment)
+        self._retriever.index(workspace_id, meeting.owner_id, segments)
         if meeting.state is MeetingState.TRANSCRIBING:
             meeting = self._meetings.save(
                 workspace_id, transition_meeting(meeting, MeetingState.EXTRACTING)
             )
-        self._extract(workspace_id, meeting, segments)
+        clean = self._analyze(workspace_id, meeting, segments)
+        done = replace(
+            transition_meeting(meeting, MeetingState.REVIEW),
+            title=default_title(meeting),
+            summary=clean.summary or None,
+            duration_ms=max(s.end_ms for s in segments),
+        )
+        self._meetings.save(workspace_id, done)
         return True
 
-    def _extract(self, workspace_id: str, meeting: Meeting, segments) -> None:
+    def reanalyze(self, workspace_id: str, meeting_id: str) -> bool:
+        """Run the extraction again on the latest transcript, e.g. after the owner named a speaker
+        or corrected the text. Reviewed decisions survive (replace-by-meeting)."""
+        try:
+            meeting = self._meetings.get_for_processing(workspace_id, meeting_id)
+            segments = self._transcripts.latest(workspace_id, meeting_id)
+        except NotFoundError:
+            return False
+        if meeting.state not in REANALYZABLE:
+            return False
+        clean = self._analyze(workspace_id, meeting, segments)
+        if clean.summary:
+            self._meetings.save(workspace_id, replace(meeting, summary=clean.summary))
+        return True
+
+    def _analyze(self, workspace_id: str, meeting: Meeting, segments) -> Extraction:
         known = self._graph.recent_decisions(workspace_id, meeting.owner_id, KNOWN_DECISIONS)
-        raw = self._extractor.extract(segments, meeting.attestation.locale, known)
+        names = dict(meeting.speaker_names)
+        raw = self._extractor.extract(segments, meeting.attestation.locale, known, names)
+        raw = with_named_speakers(raw, segments, names)
         clean = validate_extraction(
             raw,
             frozenset(s.id for s in segments),
             {d.id: EntityType.DECISION for d in known},
         )
-        title = default_title(meeting)
-        ref = MeetingRef(meeting.id, title, meeting.created_at)
+        ref = MeetingRef(meeting.id, default_title(meeting), meeting.created_at)
         self._graph.upsert_extraction(workspace_id, meeting.owner_id, ref, clean)
-        done = replace(
-            transition_meeting(meeting, MeetingState.REVIEW),
-            title=title,
-            summary=clean.summary or None,
-            duration_ms=max(s.end_ms for s in segments),
-        )
-        self._meetings.save(workspace_id, done)
+        return clean
 
     def _existing_or_new_transcript(self, workspace_id, meeting_id, meeting):
         try:

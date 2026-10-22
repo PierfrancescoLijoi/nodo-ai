@@ -10,12 +10,8 @@ WORKSPACE = "workspace-a"
 USER = "user-a"
 
 
-def _allowed(container: AppContainer, workspace: str = WORKSPACE, user: str = USER):
-    return container.meetings.owned_ids(workspace, user)
-
-
-def _search(container: AppContainer, query: str, workspace: str = WORKSPACE):
-    return container.retriever.search(workspace, query, None, _allowed(container), 20)
+def _search(container: AppContainer, query: str, workspace: str = WORKSPACE, user: str = USER):
+    return container.retriever.search(workspace, user, query, None, 20)
 
 
 def test_create_is_idempotent_and_complete_publishes_once(app, attestation) -> None:

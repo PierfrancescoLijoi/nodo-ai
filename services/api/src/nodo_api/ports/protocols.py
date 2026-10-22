@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -92,16 +92,24 @@ class JobQueue(Protocol):
 
 
 class Retriever(Protocol):
-    def index(self, workspace_id: str, segment: TranscriptSegment) -> None: ...
+    def index(
+        self, workspace_id: str, owner_id: str, segments: Sequence[TranscriptSegment]
+    ) -> None:
+        """Add or replace segments. One call per transcript: adapters batch the embedding and the
+        upload, a long meeting must not cost one round trip per sentence."""
+        ...
 
     def search(
         self,
         workspace_id: str,
+        owner_id: str,
         query: str,
         filters: dict[str, Any] | None,
-        allowed_meeting_ids: frozenset[str],
         limit: int,
-    ) -> tuple[TranscriptSegment, ...]: ...
+    ) -> tuple[TranscriptSegment, ...]:
+        """Only segments of meetings this owner owns. The owner is a field of every indexed
+        document, so the access check costs the same however many meetings there are."""
+        ...
 
     def erase(self, workspace_id: str, meeting_id: str) -> None: ...
 
@@ -170,6 +178,7 @@ class Extractor(Protocol):
         segments: tuple[TranscriptSegment, ...],
         locale: Locale,
         known_decisions: tuple[Entity, ...],
+        speakers: Mapping[str, str] | None = None,
     ) -> Extraction: ...
 
 

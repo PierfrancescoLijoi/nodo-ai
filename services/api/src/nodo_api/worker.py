@@ -17,6 +17,7 @@ logger = logging.getLogger("nodo_worker")
 MAX_DELIVERIES = 5
 IDLE_SECONDS = 30
 TRANSCRIBE = "transcribe"
+REANALYZE = "reanalyze"
 
 
 class Worker:
@@ -33,11 +34,14 @@ class Worker:
         except (ValueError, KeyError, TypeError):
             receiver.dead_letter_message(message, reason="malformed", error_description="bad body")
             return "dead_lettered"
-        if job_type != TRANSCRIBE:
+        if job_type not in (TRANSCRIBE, REANALYZE):
             receiver.dead_letter_message(message, reason="unknown_job_type")
             return "dead_lettered"
         try:
-            self._ingestion.process(workspace_id, meeting_id)
+            if job_type == TRANSCRIBE:
+                self._ingestion.process(workspace_id, meeting_id)
+            else:
+                self._ingestion.reanalyze(workspace_id, meeting_id)
         except Exception as error:
             # Log the error type only: messages and transcripts never go to the logs.
             logger.error(

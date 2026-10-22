@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -46,8 +47,8 @@ SYSTEM_PROMPT = (
     "existing:<id>), CONTRADICTS (a decision in tension with an existing one). Every entity and "
     "relation must cite the numbered segments that support it. Never invent names. Labels are "
     "short noun phrases or statements in {language}. Write the summary in {language}, two "
-    "sentences at most. Speakers are anonymous (S1, S2): only create a person when a name "
-    "is spoken."
+    "sentences at most. Speakers are labelled S1, S2 unless the owner named them: a named "
+    "speaker is a participant. Otherwise only create a person when a name is spoken."
 )
 
 EXTRACTION_SCHEMA: dict[str, Any] = {
@@ -96,9 +97,15 @@ class ExtractionError(RuntimeError):
     pass
 
 
-def _prompt(segments: tuple[TranscriptSegment, ...], known: tuple[Entity, ...]) -> str:
+def _prompt(
+    segments: tuple[TranscriptSegment, ...],
+    known: tuple[Entity, ...],
+    speakers: Mapping[str, str] | None = None,
+) -> str:
+    names = speakers or {}
     lines = [
-        f"[{i}] {s.speaker_id}: {_TAG.sub(' ', s.text)}" for i, s in enumerate(segments, start=1)
+        f"[{i}] {names.get(s.speaker_id, s.speaker_id)}: {_TAG.sub(' ', s.text)}"
+        for i, s in enumerate(segments, start=1)
     ]
     decisions = "\n".join(f"existing:{d.id} {d.label}" for d in known) or "(none)"
     return (
@@ -157,6 +164,7 @@ class AzureOpenAiExtractor:
         segments: tuple[TranscriptSegment, ...],
         locale: Locale,
         known_decisions: tuple[Entity, ...],
+        speakers: Mapping[str, str] | None = None,
     ) -> Extraction:
         response = self._client.chat.completions.create(
             model=self._deployment,
@@ -165,7 +173,7 @@ class AzureOpenAiExtractor:
                     "role": "system",
                     "content": SYSTEM_PROMPT.format(language=LANGUAGE_NAMES[locale]),
                 },
-                {"role": "user", "content": _prompt(segments, known_decisions)},
+                {"role": "user", "content": _prompt(segments, known_decisions, speakers)},
             ],
             response_format={
                 "type": "json_schema",

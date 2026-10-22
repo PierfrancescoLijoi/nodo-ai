@@ -61,6 +61,17 @@ class Insights(FrozenModel):
     actions: tuple[InsightAction, ...] = ()
 
 
+class SpeakerOutput(FrozenModel):
+    id: str
+    name: str | None
+    segments: int
+    talk_ms: int
+
+
+class SpeakerNameInput(FrozenModel):
+    name: str | None = Field(default=None, max_length=80)
+
+
 class MeetingOutput(FrozenModel):
     id: str
     workspace_id: str
@@ -73,6 +84,7 @@ class MeetingOutput(FrozenModel):
     summary: str | None
     recording_attestation: AttestationOutput
     insights: Insights = Insights()
+    speakers: tuple[SpeakerOutput, ...] = ()
 
 
 class MeetingListItem(FrozenModel):

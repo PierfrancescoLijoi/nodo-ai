@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from nodo_api.domain.models import (
@@ -102,12 +103,13 @@ def _meeting(row: dict[str, Any], attestation: dict[str, Any]) -> Meeting:
         title=row["title"],
         summary=row["summary"],
         duration_ms=row["duration_ms"],
+        speaker_names=tuple(sorted((row["speaker_names"] or {}).items())),
     )
 
 
 _MEETING_SELECT = """
     SELECT m.workspace_id, m.id, m.owner_id, m.state, m.project, m.created_at, m.tombstoned_at,
-           m.title, m.summary, m.duration_ms,
+           m.title, m.summary, m.duration_ms, m.speaker_names,
            a.user_id, a.meeting_id, a.notice_version, a.locale, a.retention_policy_id,
            a.acknowledged_at, a.audit_event_id, a.signature
     FROM meetings m
@@ -236,7 +238,8 @@ class PgMeetingRepository:
         with self._db.workspace(workspace_id) as conn:
             cursor = conn.execute(
                 "UPDATE meetings SET state = %s, project = %s, tombstoned_at = %s, title = %s,"
-                " summary = %s, duration_ms = %s WHERE workspace_id = %s AND id = %s",
+                " summary = %s, duration_ms = %s, speaker_names = %s"
+                " WHERE workspace_id = %s AND id = %s",
                 (
                     meeting.state.value,
                     meeting.project,
@@ -244,6 +247,7 @@ class PgMeetingRepository:
                     meeting.title,
                     meeting.summary,
                     meeting.duration_ms,
+                    Jsonb(dict(meeting.speaker_names)),
                     workspace_id,
                     meeting.id,
                 ),

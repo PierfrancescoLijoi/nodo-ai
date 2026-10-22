@@ -5,6 +5,7 @@ field accepts only one analyzer (docs/AZURE-ARCHITECTURE.md section 7)."""
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from typing import Any
 
 from azure.search.documents.indexes.models import (
@@ -41,6 +42,7 @@ SELECT_FIELDS = [
     *TEXT_FIELDS,
 ]
 ERASE_PAGE = 500
+INDEX_BATCH = 256  # one embedding request and one upload per 256 segments
 VECTOR_PROFILE = "nodo-vector"
 
 
@@ -54,13 +56,12 @@ def odata_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def access_filter(
-    workspace_id: str, allowed_meeting_ids: frozenset[str], project: str | None = None
-) -> str:
-    ids = ",".join(sorted(allowed_meeting_ids))
+def access_filter(workspace_id: str, owner_id: str, project: str | None = None) -> str:
+    """Two equality clauses however many meetings the owner has (a meeting list in the filter would
+    grow with the history and slow every question)."""
     clauses = [
         f"workspace_id eq {odata_string(workspace_id)}",
-        f"search.in(meeting_id, {odata_string(ids)}, ',')",
+        f"owner_id eq {odata_string(owner_id)}",
     ]
     if project:
         clauses.append(f"project eq {odata_string(project)}")
@@ -71,6 +72,7 @@ def build_index(name: str, dimensions: int) -> SearchIndex:
     fields = [
         SearchField(name="id", type=SearchFieldDataType.STRING, key=True, filterable=True),
         SearchField(name="workspace_id", type=SearchFieldDataType.STRING, filterable=True),
+        SearchField(name="owner_id", type=SearchFieldDataType.STRING, filterable=True),
         SearchField(name="meeting_id", type=SearchFieldDataType.STRING, filterable=True),
         SearchField(name="segment_id", type=SearchFieldDataType.STRING, retrievable=True),
         SearchField(name="speaker_id", type=SearchFieldDataType.STRING, retrievable=True),
@@ -125,40 +127,52 @@ def _segment(doc: dict[str, Any]) -> TranscriptSegment:
     )
 
 
+def _document(
+    workspace_id: str, owner_id: str, segment: TranscriptSegment, vector: list[float]
+) -> dict[str, Any]:
+    return {
+        "id": document_key(workspace_id, segment.meeting_id, segment.id),
+        "workspace_id": workspace_id,
+        "owner_id": owner_id,
+        "meeting_id": segment.meeting_id,
+        "segment_id": segment.id,
+        "speaker_id": segment.speaker_id,
+        "start_ms": segment.start_ms,
+        "end_ms": segment.end_ms,
+        "version": segment.version,
+        "confidence": segment.confidence,
+        "project": segment.project,
+        "locale": segment.locale.value,
+        f"text_{segment.locale.value}": segment.text,
+        "vector": vector,
+    }
+
+
 class AzureSearchRetriever:
     def __init__(self, search_client: Any, embedder: Embedder) -> None:
         self._client = search_client
         self._embedder = embedder
 
-    def index(self, workspace_id: str, segment: TranscriptSegment) -> None:
-        vector = self._embedder.embed([segment.text])[0]
-        document = {
-            "id": document_key(workspace_id, segment.meeting_id, segment.id),
-            "workspace_id": workspace_id,
-            "meeting_id": segment.meeting_id,
-            "segment_id": segment.id,
-            "speaker_id": segment.speaker_id,
-            "start_ms": segment.start_ms,
-            "end_ms": segment.end_ms,
-            "version": segment.version,
-            "confidence": segment.confidence,
-            "project": segment.project,
-            "locale": segment.locale.value,
-            f"text_{segment.locale.value}": segment.text,
-            "vector": vector,
-        }
-        self._client.merge_or_upload_documents([document])
+    def index(
+        self, workspace_id: str, owner_id: str, segments: Sequence[TranscriptSegment]
+    ) -> None:
+        for start in range(0, len(segments), INDEX_BATCH):
+            batch = segments[start : start + INDEX_BATCH]
+            vectors = self._embedder.embed([s.text for s in batch])
+            documents = [
+                _document(workspace_id, owner_id, segment, vector)
+                for segment, vector in zip(batch, vectors, strict=True)
+            ]
+            self._client.merge_or_upload_documents(documents)
 
     def search(
         self,
         workspace_id: str,
+        owner_id: str,
         query: str,
         filters: dict[str, Any] | None,
-        allowed_meeting_ids: frozenset[str],
         limit: int,
     ) -> tuple[TranscriptSegment, ...]:
-        if not allowed_meeting_ids:
-            return ()
         vector = self._embedder.embed([query])[0]
         results = self._client.search(
             search_text=query,
@@ -166,7 +180,7 @@ class AzureSearchRetriever:
             vector_queries=[
                 VectorizedQuery(vector=vector, k_nearest_neighbors=limit, fields="vector")
             ],
-            filter=access_filter(workspace_id, allowed_meeting_ids, (filters or {}).get("project")),
+            filter=access_filter(workspace_id, owner_id, (filters or {}).get("project")),
             select=SELECT_FIELDS,
             top=limit,
         )

@@ -16,10 +16,11 @@ from nodo_api.api.v1.schemas import (
     Insights,
     MeetingListItem,
     MeetingOutput,
+    SpeakerOutput,
     SubgraphOutput,
 )
 from nodo_api.domain.graph import EntityType, MeetingDigest, Relation, Subgraph
-from nodo_api.domain.models import Meeting
+from nodo_api.domain.models import Meeting, SpeakerSummary
 from nodo_api.errors import ValidationFailed
 from nodo_api.services.ingestion import default_title
 
@@ -71,7 +72,11 @@ def insights(digest: MeetingDigest) -> Insights:
     )
 
 
-def meeting_output(meeting: Meeting, digest: MeetingDigest | None = None) -> MeetingOutput:
+def meeting_output(
+    meeting: Meeting,
+    digest: MeetingDigest | None = None,
+    speakers: tuple[SpeakerSummary, ...] = (),
+) -> MeetingOutput:
     a = meeting.attestation
     return MeetingOutput(
         id=meeting.id,
@@ -92,6 +97,10 @@ def meeting_output(meeting: Meeting, digest: MeetingDigest | None = None) -> Mee
             "signature": a.signature,
         },
         insights=insights(digest) if digest else Insights(),
+        speakers=tuple(
+            SpeakerOutput(id=s.id, name=s.name, segments=s.segments, talk_ms=s.talk_ms)
+            for s in speakers
+        ),
     )
 
 
