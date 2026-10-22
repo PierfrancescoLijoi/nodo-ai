@@ -11,6 +11,7 @@ import { Button } from '@/ui/Button';
 import { Screen } from '@/ui/Screen';
 import { Segmented } from '@/ui/Segmented';
 import { SettingsButton } from '@/ui/SettingsButton';
+import { ErrorNotice } from '@/ui/ErrorNotice';
 import { Skeleton } from '@/ui/Skeleton';
 import { Surface } from '@/ui/Surface';
 import { Tag } from '@/ui/Tag';
@@ -131,7 +132,9 @@ export default function GraphScreen() {
           { value: 'map', label: t('graph.viewMap') },
         ]}
       />
-      {graph.status !== 'ready' ? (
+      {graph.status === 'error' ? (
+        <ErrorNotice />
+      ) : graph.status !== 'ready' ? (
         <Skeleton height={240} />
       ) : view === 'list' ? (
         <EntityList graph={graph.data} selected={selected} onSelect={setSelected} />

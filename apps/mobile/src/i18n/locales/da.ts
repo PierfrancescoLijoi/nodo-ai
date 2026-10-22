@@ -8,6 +8,7 @@ const da = {
     settings: 'Indstillinger',
     seeAll: 'Se alle',
     aiDraft: 'AI-udkast',
+    loadError: 'Indholdet kunne ikke indlæses. Prøv igen.',
     sampleData: 'Eksempeldata. Denne version optager ikke lyd.',
   },
   home: {

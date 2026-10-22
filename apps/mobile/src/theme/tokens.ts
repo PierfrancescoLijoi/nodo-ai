@@ -30,6 +30,7 @@ export interface Colors {
   surface: string;
   surfaceRaised: string;
   border: string;
+  borderStrong: string;
   text: string;
   textMuted: string;
   accent: string;
@@ -40,12 +41,13 @@ export interface Colors {
   danger: string;
 }
 
-// Single accent (teal). Muted text keeps >= 5.5:1 on the background in both themes.
+// Single accent (teal). Checked ratios: text >= 16:1, muted >= 5.5:1, accent text >= 4.5:1, control borders (borderStrong) >= 3:1.
 export const darkColors: Colors = {
   background: '#0B0F14',
   surface: '#121921',
   surfaceRaised: '#19222D',
   border: '#26323F',
+  borderStrong: '#5F7083',
   text: '#E9EEF3',
   textMuted: '#9AA8B7',
   accent: '#4FD1C0',
@@ -61,6 +63,7 @@ export const lightColors: Colors = {
   surface: '#FFFFFF',
   surfaceRaised: '#EDF1F4',
   border: '#D7DEE5',
+  borderStrong: '#76848F',
   text: '#0F1B26',
   textMuted: '#52606F',
   accent: '#0B7A6E',

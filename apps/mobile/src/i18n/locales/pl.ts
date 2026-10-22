@@ -10,6 +10,7 @@ const pl = {
     settings: 'Ustawienia',
     seeAll: 'Zobacz wszystkie',
     aiDraft: 'Szkic AI',
+    loadError: 'Nie udało się wczytać tej treści. Spróbuj ponownie.',
     sampleData: 'Dane przykładowe. Ta wersja nie nagrywa dźwięku.',
   },
   home: {

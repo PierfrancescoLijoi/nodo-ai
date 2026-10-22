@@ -28,7 +28,7 @@ export function TextField({ label, hideLabel, ...rest }: TextFieldProps) {
           paddingHorizontal: space[4],
           borderRadius: radius.control,
           borderWidth: focused ? 2 : 1,
-          borderColor: focused ? colors.accent : colors.border,
+          borderColor: focused ? colors.accent : colors.borderStrong,
           backgroundColor: colors.surface,
           color: colors.text,
           fontFamily: fonts.regular,

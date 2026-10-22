@@ -10,6 +10,7 @@ const en = {
     settings: 'Settings',
     seeAll: 'See all',
     aiDraft: 'AI draft',
+    loadError: 'Could not load this content. Please try again.',
     sampleData: 'Sample data. This build does not record audio.',
   },
   home: {

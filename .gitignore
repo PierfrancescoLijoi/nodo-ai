@@ -18,3 +18,5 @@ ios/
 .DS_Store
 graphify-out/
 tmp/
+apps/mobile/.claude/
+coverage/

@@ -12,6 +12,7 @@ import { radius, space } from '@/theme/tokens';
 import { Button } from '@/ui/Button';
 import { Screen } from '@/ui/Screen';
 import { SectionHeader } from '@/ui/SectionHeader';
+import { ErrorNotice } from '@/ui/ErrorNotice';
 import { Skeleton } from '@/ui/Skeleton';
 import { Surface } from '@/ui/Surface';
 import { Tag } from '@/ui/Tag';
@@ -114,6 +115,7 @@ export default function MeetingDetailScreen() {
   return (
     <Screen back title={meeting.status === 'ready' ? meeting.data?.title : undefined} bottomInset>
       {meeting.status === 'loading' ? <Skeleton height={160} /> : null}
+      {meeting.status === 'error' ? <ErrorNotice /> : null}
       {meeting.status === 'ready' && !meeting.data ? <Text tone="muted">{t('meeting.notFound')}</Text> : null}
       {meeting.status === 'ready' && meeting.data ? <Body meeting={meeting.data} highlight={seg} /> : null}
     </Screen>

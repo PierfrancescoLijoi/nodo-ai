@@ -8,6 +8,7 @@ import { space } from '@/theme/tokens';
 import { MeetingRow } from '@/ui/MeetingRow';
 import { Screen } from '@/ui/Screen';
 import { SettingsButton } from '@/ui/SettingsButton';
+import { ErrorNotice } from '@/ui/ErrorNotice';
 import { Skeleton } from '@/ui/Skeleton';
 import { Text } from '@/ui/Text';
 import { TextField } from '@/ui/TextField';
@@ -36,12 +37,13 @@ export default function MeetingsScreen() {
         autoCapitalize="none"
         returnKeyType="search"
       />
+      {meetings.status === 'error' ? <ErrorNotice /> : null}
       {meetings.status === 'loading' ? (
         <View style={{ gap: space[3] }}>
           <Skeleton height={112} />
           <Skeleton height={112} />
         </View>
-      ) : (
+      ) : meetings.status === 'ready' ? (
         <View style={{ gap: space[3] }}>
           <Text variant="label" tone="muted" accessibilityLiveRegion="polite">
             {t('meetings.count', { count: visible.length })}
@@ -51,7 +53,7 @@ export default function MeetingsScreen() {
             <MeetingRow key={meeting.id} meeting={meeting} locale={locale} />
           ))}
         </View>
-      )}
+      ) : null}
     </Screen>
   );
 }

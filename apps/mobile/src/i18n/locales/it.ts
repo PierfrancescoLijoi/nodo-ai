@@ -8,6 +8,7 @@ const it = {
     settings: 'Impostazioni',
     seeAll: 'Vedi tutti',
     aiDraft: 'Bozza AI',
+    loadError: 'Impossibile caricare questo contenuto. Riprova.',
     sampleData: 'Dati di esempio. Questa versione non registra audio.',
   },
   home: {
