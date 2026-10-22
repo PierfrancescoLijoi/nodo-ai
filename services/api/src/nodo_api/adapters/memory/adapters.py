@@ -21,30 +21,53 @@ from nodo_api.errors import NotFoundError
 class MemoryMeetingRepository:
     def __init__(self) -> None:
         self._meetings: dict[tuple[str, str], Meeting] = {}
-        self._idempotency: dict[tuple[str, str], str] = {}
+        self._idempotency: dict[tuple[str, str, str], tuple[str, str]] = {}
 
-    def add(self, workspace_id: str, meeting: Meeting, idempotency_key: str) -> Meeting:
-        existing = self.get_by_idempotency_key(workspace_id, idempotency_key)
+    def add(
+        self, workspace_id: str, meeting: Meeting, idempotency_key: str, request_hash: str
+    ) -> Meeting:
+        existing = self.get_by_idempotency_key(workspace_id, meeting.owner_id, idempotency_key)
         if existing is not None:
-            return existing
+            return existing[0]
         self._meetings[(workspace_id, meeting.id)] = meeting
-        self._idempotency[(workspace_id, idempotency_key)] = meeting.id
+        key = (workspace_id, meeting.owner_id, idempotency_key)
+        self._idempotency[key] = (meeting.id, request_hash)
         return meeting
 
-    def get(
-        self, workspace_id: str, meeting_id: str, *, include_tombstoned: bool = False
+    def get_by_idempotency_key(
+        self, workspace_id: str, user_id: str, key: str
+    ) -> tuple[Meeting, str] | None:
+        stored = self._idempotency.get((workspace_id, user_id, key))
+        if stored is None:
+            return None
+        meeting = self._meetings.get((workspace_id, stored[0]))
+        # A deleted meeting must not be handed back: the key starts a new meeting instead.
+        if meeting is None or meeting.tombstoned_at is not None:
+            return None
+        return meeting, stored[1]
+
+    def get_owned(
+        self, workspace_id: str, user_id: str, meeting_id: str, *, include_tombstoned: bool = False
     ) -> Meeting:
         meeting = self._meetings.get((workspace_id, meeting_id))
-        if meeting is None or (meeting.tombstoned_at and not include_tombstoned):
+        if meeting is None or meeting.owner_id != user_id:
+            raise NotFoundError
+        if meeting.tombstoned_at and not include_tombstoned:
             raise NotFoundError
         return meeting
 
-    def get_by_idempotency_key(self, workspace_id: str, key: str) -> Meeting | None:
-        meeting_id = self._idempotency.get((workspace_id, key))
-        return self._meetings.get((workspace_id, meeting_id)) if meeting_id else None
+    def owned_ids(self, workspace_id: str, user_id: str) -> frozenset[str]:
+        return frozenset(
+            meeting.id
+            for (stored_workspace, _), meeting in self._meetings.items()
+            if stored_workspace == workspace_id
+            and meeting.owner_id == user_id
+            and meeting.tombstoned_at is None
+        )
 
     def save(self, workspace_id: str, meeting: Meeting) -> Meeting:
-        self.get(workspace_id, meeting.id, include_tombstoned=True)
+        if (workspace_id, meeting.id) not in self._meetings:
+            raise NotFoundError
         self._meetings[(workspace_id, meeting.id)] = meeting
         return meeting
 
@@ -89,11 +112,16 @@ class MemoryTranscriptRepository:
             raise NotFoundError
         return self.get_version(workspace_id, meeting_id, max(versions))
 
-    def get_segment(self, workspace_id: str, segment_id: str) -> TranscriptSegment | None:
-        matching: list[TranscriptSegment] = []
-        for (stored_workspace, _, _), segments in self._versions.items():
-            if stored_workspace == workspace_id:
-                matching.extend(segment for segment in segments if segment.id == segment_id)
+    def get_segment(
+        self, workspace_id: str, meeting_id: str, segment_id: str
+    ) -> TranscriptSegment | None:
+        matching = [
+            segment
+            for (stored_workspace, stored_meeting, _), segments in self._versions.items()
+            if stored_workspace == workspace_id and stored_meeting == meeting_id
+            for segment in segments
+            if segment.id == segment_id
+        ]
         return max(matching, key=lambda segment: segment.version, default=None)
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
@@ -125,40 +153,47 @@ class MemoryJobQueue:
         self._jobs: dict[tuple[str, str, str], str] = {}
 
     def publish_once(
-        self, workspace_id: str, meeting_id: str, job_type: str, payload: dict[str, Any]
+        self, workspace_id: str, job_key: str, job_type: str, payload: dict[str, Any]
     ) -> str:
-        key = (workspace_id, meeting_id, job_type)
+        key = (workspace_id, job_key, job_type)
         self._jobs.setdefault(key, str(uuid4()))
         return self._jobs[key]
 
-    def publish_count(self, workspace_id: str, meeting_id: str, job_type: str) -> int:
-        return int((workspace_id, meeting_id, job_type) in self._jobs)
+    def publish_count(self, workspace_id: str, job_key: str, job_type: str) -> int:
+        return int((workspace_id, job_key, job_type) in self._jobs)
 
 
 class MockRetriever:
     def __init__(self) -> None:
-        self._segments: dict[tuple[str, str], TranscriptSegment] = {}
+        self._segments: dict[tuple[str, str, str], TranscriptSegment] = {}
 
     def index(self, workspace_id: str, segment: TranscriptSegment) -> None:
-        self._segments[(workspace_id, segment.id)] = segment
+        self._segments[(workspace_id, segment.meeting_id, segment.id)] = segment
 
     def search(
-        self, workspace_id: str, query: str, filters: dict[str, Any] | None
+        self,
+        workspace_id: str,
+        query: str,
+        filters: dict[str, Any] | None,
+        allowed_meeting_ids: frozenset[str],
+        limit: int,
     ) -> tuple[TranscriptSegment, ...]:
         terms = {term for term in re.findall(r"\w+", query.lower()) if len(term) > 3}
         project = (filters or {}).get("project")
         results = []
-        for (stored_workspace, _), segment in self._segments.items():
-            text = segment.text.lower()
-            if stored_workspace != workspace_id or (project and segment.project != project):
+        for (stored_workspace, meeting_id, _), segment in sorted(self._segments.items()):
+            if stored_workspace != workspace_id or meeting_id not in allowed_meeting_ids:
                 continue
-            if terms.intersection(re.findall(r"\w+", text)) or "ingestion" in query.lower():
+            if project and segment.project != project:
+                continue
+            words = set(re.findall(r"\w+", segment.text.lower()))
+            if terms & words or "ingestion" in query.lower():
                 results.append(segment)
-        return tuple(results)
+        return tuple(results[:limit])
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
-        for key, segment in list(self._segments.items()):
-            if key[0] == workspace_id and segment.meeting_id == meeting_id:
+        for key in list(self._segments):
+            if key[:2] == (workspace_id, meeting_id):
                 del self._segments[key]
 
 
@@ -172,14 +207,21 @@ class MemoryGraphStore:
         self._nodes[(workspace_id, node.id)] = node
 
     def lookup(
-        self, workspace_id: str, entity: str, depth: int, node_limit: int
+        self,
+        workspace_id: str,
+        entity: str,
+        depth: int,
+        node_limit: int,
+        allowed_meeting_ids: frozenset[str],
     ) -> tuple[GraphNode, ...]:
         self.last_depth = min(depth, 2)
         self.last_node_limit = node_limit
         return tuple(
             node
             for (stored_workspace, _), node in self._nodes.items()
-            if stored_workspace == workspace_id and entity.lower() in node.label.lower()
+            if stored_workspace == workspace_id
+            and node.meeting_id in allowed_meeting_ids
+            and entity.lower() in node.label.lower()
         )[:node_limit]
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
@@ -253,7 +295,7 @@ def seed_memory_adapters(
             attestation,
             "NODO",
         )
-        meetings.add("workspace-a", meeting, f"seed-{index}")
+        meetings.add("workspace-a", meeting, f"seed-{index}", "seed")
         segment = TranscriptSegment(
             segment_id,
             meeting_id,

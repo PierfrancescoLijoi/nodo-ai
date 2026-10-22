@@ -20,3 +20,9 @@ class ConflictError(NodoError):
     code = "conflict"
     status_code = 409
     public_message = "Request conflicts with current state"
+
+
+class ValidationFailed(NodoError):
+    code = "validation_error"
+    status_code = 422
+    public_message = "Request validation failed"

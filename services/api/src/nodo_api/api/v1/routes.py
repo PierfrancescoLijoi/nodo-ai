@@ -44,7 +44,10 @@ def create_meeting(
     payload: MeetingCreate,
     actor: PrincipalDep,
     request: Request,
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+    ],
 ):
     meeting = request.app.state.container.meeting_service.create(
         actor.workspace_id,
@@ -63,19 +66,23 @@ def create_meeting(
 )
 def upload_session(meeting_id: str, actor: PrincipalDep, request: Request):
     return request.app.state.container.meeting_service.upload_session(
-        actor.workspace_id, meeting_id
+        actor.workspace_id, actor.user_id, meeting_id
     )
 
 
 @router.post("/meetings/{meeting_id}/complete", response_model=MeetingOutput)
 def complete_meeting(meeting_id: str, actor: PrincipalDep, request: Request):
-    meeting = request.app.state.container.meeting_service.complete(actor.workspace_id, meeting_id)
+    meeting = request.app.state.container.meeting_service.complete(
+        actor.workspace_id, actor.user_id, meeting_id
+    )
     return _meeting_output(meeting)
 
 
 @router.get("/meetings/{meeting_id}", response_model=MeetingOutput)
 def get_meeting(meeting_id: str, actor: PrincipalDep, request: Request):
-    meeting = request.app.state.container.meetings.get(actor.workspace_id, meeting_id)
+    meeting = request.app.state.container.meeting_service.get(
+        actor.workspace_id, actor.user_id, meeting_id
+    )
     return _meeting_output(meeting)
 
 
@@ -88,7 +95,7 @@ def get_transcript(
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
     container = request.app.state.container
-    container.meetings.get(actor.workspace_id, meeting_id)
+    container.meeting_service.get(actor.workspace_id, actor.user_id, meeting_id)
     segments = container.transcripts.latest(actor.workspace_id, meeting_id)
     return TranscriptPage(
         items=segments[offset : offset + limit],
@@ -102,7 +109,11 @@ def get_transcript(
 @router.patch("/meetings/{meeting_id}/review", response_model=ReviewOutput)
 def review_meeting(meeting_id: str, payload: ReviewInput, actor: PrincipalDep, request: Request):
     segments = request.app.state.container.meeting_service.review(
-        actor.workspace_id, meeting_id, [item.model_dump() for item in payload.corrections]
+        actor.workspace_id,
+        actor.user_id,
+        meeting_id,
+        [item.model_dump() for item in payload.corrections],
+        payload.base_version,
     )
     return ReviewOutput(version=segments[0].version, segments=segments)
 
@@ -110,7 +121,9 @@ def review_meeting(meeting_id: str, payload: ReviewInput, actor: PrincipalDep, r
 @router.post("/query", response_model=QueryOutput)
 def query(payload: QueryInput, actor: PrincipalDep, request: Request):
     result = request.app.state.container.query_service.query(
-        actor.workspace_id, _query_request(payload.question, payload.ui_locale, payload.filters)
+        actor.workspace_id,
+        actor.user_id,
+        _query_request(payload.question, payload.ui_locale, payload.filters),
     )
     return result
 
@@ -119,6 +132,7 @@ def query(payload: QueryInput, actor: PrincipalDep, request: Request):
 def voice_query(payload: VoiceQueryInput, actor: PrincipalDep, request: Request):
     result = request.app.state.container.query_service.query(
         actor.workspace_id,
+        actor.user_id,
         _query_request(payload.transcript_text, payload.ui_locale, payload.filters),
     )
     return result
@@ -128,27 +142,31 @@ def voice_query(payload: VoiceQueryInput, actor: PrincipalDep, request: Request)
 def graph_subgraph(
     actor: PrincipalDep,
     request: Request,
-    entity: Annotated[str, Query(min_length=1)],
+    entity: Annotated[str, Query(min_length=1, max_length=128)],
     depth: Annotated[int, Query(ge=1, le=2)] = 2,
 ):
     container = request.app.state.container
-    nodes = container.graph.lookup(
-        actor.workspace_id, entity, depth, container.settings.graph_node_limit
-    )
+    allowed = container.meetings.owned_ids(actor.workspace_id, actor.user_id)
+    limit = container.settings.graph_node_limit
+    nodes = container.graph.lookup(actor.workspace_id, entity, min(depth, 2), limit, allowed)[
+        :limit
+    ]
     return GraphOutput(nodes=nodes, depth=depth)
 
 
 @router.post("/export", response_model=ExportOutput, status_code=status.HTTP_202_ACCEPTED)
 def export_data(payload: ExportInput, actor: PrincipalDep, request: Request):
     job_id = request.app.state.container.meeting_service.export(
-        actor.workspace_id, payload.meeting_id
+        actor.workspace_id, actor.user_id, payload.meeting_id
     )
     return ExportOutput(job_id=job_id)
 
 
 @router.delete("/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_meeting(meeting_id: str, actor: PrincipalDep, request: Request) -> Response:
-    request.app.state.container.meeting_service.delete(actor.workspace_id, meeting_id)
+    request.app.state.container.meeting_service.delete(
+        actor.workspace_id, actor.user_id, meeting_id
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

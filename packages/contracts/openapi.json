@@ -21,11 +21,13 @@
             "$ref": "#/components/schemas/Locale"
           },
           "notice_version": {
+            "maxLength": 64,
             "minLength": 1,
             "title": "Notice Version",
             "type": "string"
           },
           "retention_policy_id": {
+            "maxLength": 64,
             "minLength": 1,
             "title": "Retention Policy Id",
             "type": "string"
@@ -114,10 +116,13 @@
       "CorrectionInput": {
         "properties": {
           "segment_id": {
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Segment Id",
             "type": "string"
           },
           "text": {
+            "maxLength": 4000,
             "title": "Text",
             "type": "string"
           }
@@ -134,6 +139,7 @@
           "meeting_id": {
             "anyOf": [
               {
+                "maxLength": 128,
                 "type": "string"
               },
               {
@@ -253,6 +259,7 @@
           "project": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -337,6 +344,7 @@
           "project": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -386,6 +394,7 @@
             ]
           },
           "question": {
+            "maxLength": 2000,
             "minLength": 1,
             "title": "Question",
             "type": "string"
@@ -451,10 +460,23 @@
       },
       "ReviewInput": {
         "properties": {
+          "base_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Version"
+          },
           "corrections": {
             "items": {
               "$ref": "#/components/schemas/CorrectionInput"
             },
+            "maxItems": 500,
             "minItems": 1,
             "title": "Corrections",
             "type": "array"
@@ -651,6 +673,7 @@
             ]
           },
           "transcript_text": {
+            "maxLength": 2000,
             "minLength": 1,
             "title": "Transcript Text",
             "type": "string"
@@ -726,6 +749,7 @@
             "name": "entity",
             "required": true,
             "schema": {
+              "maxLength": 128,
               "minLength": 1,
               "title": "Entity",
               "type": "string"
@@ -778,7 +802,9 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
-              "minLength": 1,
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
               "title": "Idempotency-Key",
               "type": "string"
             }

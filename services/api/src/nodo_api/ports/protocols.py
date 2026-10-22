@@ -4,15 +4,29 @@ from typing import Any, Protocol
 
 from nodo_api.domain.models import GraphNode, Locale, Meeting, TranscriptSegment
 
+# Every method takes workspace_id (and, where data belongs to a person, the user or the set of
+# meeting ids that person may see) so that access control happens inside the store query,
+# before anything is retrieved, never after.
+
 
 class MeetingRepository(Protocol):
-    def add(self, workspace_id: str, meeting: Meeting, idempotency_key: str) -> Meeting: ...
-
-    def get(
-        self, workspace_id: str, meeting_id: str, *, include_tombstoned: bool = False
+    def add(
+        self, workspace_id: str, meeting: Meeting, idempotency_key: str, request_hash: str
     ) -> Meeting: ...
 
-    def get_by_idempotency_key(self, workspace_id: str, key: str) -> Meeting | None: ...
+    def get_by_idempotency_key(
+        self, workspace_id: str, user_id: str, key: str
+    ) -> tuple[Meeting, str] | None:
+        """Return the live meeting and the request hash stored with the key, or None."""
+        ...
+
+    def get_owned(
+        self, workspace_id: str, user_id: str, meeting_id: str, *, include_tombstoned: bool = False
+    ) -> Meeting:
+        """Return the meeting only if the user owns it, otherwise raise NotFoundError."""
+        ...
+
+    def owned_ids(self, workspace_id: str, user_id: str) -> frozenset[str]: ...
 
     def save(self, workspace_id: str, meeting: Meeting) -> Meeting: ...
 
@@ -30,7 +44,9 @@ class TranscriptRepository(Protocol):
 
     def latest(self, workspace_id: str, meeting_id: str) -> tuple[TranscriptSegment, ...]: ...
 
-    def get_segment(self, workspace_id: str, segment_id: str) -> TranscriptSegment | None: ...
+    def get_segment(
+        self, workspace_id: str, meeting_id: str, segment_id: str
+    ) -> TranscriptSegment | None: ...
 
     def erase(self, workspace_id: str, meeting_id: str) -> None: ...
 
@@ -43,13 +59,20 @@ class BlobStore(Protocol):
 
 class JobQueue(Protocol):
     def publish_once(
-        self, workspace_id: str, meeting_id: str, job_type: str, payload: dict[str, Any]
+        self, workspace_id: str, job_key: str, job_type: str, payload: dict[str, Any]
     ) -> str: ...
 
 
 class Retriever(Protocol):
+    def index(self, workspace_id: str, segment: TranscriptSegment) -> None: ...
+
     def search(
-        self, workspace_id: str, query: str, filters: dict[str, Any] | None
+        self,
+        workspace_id: str,
+        query: str,
+        filters: dict[str, Any] | None,
+        allowed_meeting_ids: frozenset[str],
+        limit: int,
     ) -> tuple[TranscriptSegment, ...]: ...
 
     def erase(self, workspace_id: str, meeting_id: str) -> None: ...
@@ -57,7 +80,12 @@ class Retriever(Protocol):
 
 class GraphStore(Protocol):
     def lookup(
-        self, workspace_id: str, entity: str, depth: int, node_limit: int
+        self,
+        workspace_id: str,
+        entity: str,
+        depth: int,
+        node_limit: int,
+        allowed_meeting_ids: frozenset[str],
     ) -> tuple[GraphNode, ...]: ...
 
     def erase(self, workspace_id: str, meeting_id: str) -> None: ...

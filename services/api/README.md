@@ -4,13 +4,15 @@ This package is the FastAPI modular monolith for meeting capture, compliance, re
 
 ## Run
 
-From `services/api`, activate the existing virtual environment and run:
+The service fails closed: with no configuration it refuses to start. For local development set the environment explicitly:
 
 ```powershell
+$env:NODO_ENVIRONMENT = "dev"; $env:NODO_AUTH_MODE = "dev"; $env:NODO_SEED_DEMO_DATA = "true"
+$env:NODO_ATTESTATION_HMAC_KEY = "local-development-key-0123456789"
 .\.venv\Scripts\python.exe -m uvicorn nodo_api.main:create_app --factory --app-dir src
 ```
 
-Development authentication uses the `NODO_DEV_TOKEN`, `NODO_DEV_USER_ID`, and `NODO_DEV_WORKSPACE_ID` settings. The default token is explicitly development-only. Set `NODO_AUTH_MODE=oidc` for OIDC validation; dev tokens are not accepted in that mode.
+Dev authentication, demo data and the default HMAC key only work when `NODO_ENVIRONMENT` is `dev` or `test`. Production needs `NODO_AUTH_MODE=oidc` (the default) with `NODO_OIDC_ISSUER`, `NODO_OIDC_AUDIENCE` over https and a random `NODO_ATTESTATION_HMAC_KEY` of at least 32 characters. Access control: a workspace is a tenant and a meeting belongs to its owner. See [docs/SECURITY-BACKLOG.md](../../docs/SECURITY-BACKLOG.md).
 
 ## Test and lint
 
@@ -23,7 +25,6 @@ Development authentication uses the `NODO_DEV_TOKEN`, `NODO_DEV_USER_ID`, and `N
 Generate the checked-in API contract with:
 
 ```powershell
-$env:PYTHONPATH = "src"
 .\.venv\Scripts\python.exe scripts\export_openapi.py
 ```
 

@@ -13,15 +13,15 @@ class FrozenModel(BaseModel):
 
 
 class AttestationInput(FrozenModel):
-    notice_version: str = Field(min_length=1)
+    notice_version: str = Field(min_length=1, max_length=64)
     locale: Locale
-    retention_policy_id: str = Field(min_length=1)
+    retention_policy_id: str = Field(min_length=1, max_length=64)
     acknowledged: Literal[True]
 
 
 class MeetingCreate(FrozenModel):
     recording_attestation: AttestationInput
-    project: str | None = None
+    project: str | None = Field(default=None, max_length=64)
 
 
 class AttestationOutput(FrozenModel):
@@ -70,12 +70,13 @@ class TranscriptPage(FrozenModel):
 
 
 class CorrectionInput(FrozenModel):
-    segment_id: str
-    text: str
+    segment_id: str = Field(min_length=1, max_length=128)
+    text: str = Field(max_length=4000)
 
 
 class ReviewInput(FrozenModel):
-    corrections: tuple[CorrectionInput, ...] = Field(min_length=1)
+    corrections: tuple[CorrectionInput, ...] = Field(min_length=1, max_length=500)
+    base_version: int | None = Field(default=None, ge=1)
 
 
 class ReviewOutput(FrozenModel):
@@ -86,17 +87,17 @@ class ReviewOutput(FrozenModel):
 class QueryFiltersInput(FrozenModel):
     time_from: datetime | None = None
     time_to: datetime | None = None
-    project: str | None = None
+    project: str | None = Field(default=None, max_length=64)
 
 
 class QueryInput(FrozenModel):
-    question: str = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=2000)
     ui_locale: Locale
     filters: QueryFiltersInput | None = None
 
 
 class VoiceQueryInput(FrozenModel):
-    transcript_text: str = Field(min_length=1)
+    transcript_text: str = Field(min_length=1, max_length=2000)
     ui_locale: Locale
     filters: QueryFiltersInput | None = None
     tts: bool = False
@@ -134,7 +135,7 @@ class GraphOutput(FrozenModel):
 
 
 class ExportInput(FrozenModel):
-    meeting_id: str | None = None
+    meeting_id: str | None = Field(default=None, max_length=128)
 
 
 class ExportOutput(FrozenModel):

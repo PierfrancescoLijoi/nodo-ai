@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -31,6 +32,8 @@ from nodo_api.errors import NodoError
 from nodo_api.services import EvidenceValidator, MeetingService, QueryService
 
 logger = logging.getLogger("nodo_api")
+
+_REQUEST_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 
 
 @dataclass(slots=True)
@@ -81,7 +84,8 @@ def _container(settings: Settings, key_provider) -> AppContainer:
     graph = MemoryGraphStore()
     llm = MockLlm()
     audit = MemoryAuditLog()
-    seed_memory_adapters(meetings, transcripts, retriever, graph)
+    if settings.seed_demo_data:
+        seed_memory_adapters(meetings, transcripts, retriever, graph)
     meeting_service = MeetingService(
         meetings,
         transcripts,
@@ -91,9 +95,16 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         graph,
         audit,
         settings.attestation_hmac_key,
+        settings.known_notice_versions,
+        settings.known_retention_policies,
     )
     query_service = QueryService(
-        retriever, graph, llm, EvidenceValidator(transcripts), settings.graph_node_limit
+        meetings,
+        retriever,
+        graph,
+        llm,
+        EvidenceValidator(transcripts),
+        settings.graph_node_limit,
     )
     return AppContainer(
         settings,
@@ -124,7 +135,9 @@ def _configure_cors(app: FastAPI, settings: Settings) -> None:
 def _configure_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def correlation_id(request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID") or str(uuid4())
+        supplied = request.headers.get("X-Request-ID", "")
+        # Only well-formed ids are echoed; anything else is replaced to keep logs clean.
+        request_id = supplied if _REQUEST_ID.fullmatch(supplied) else str(uuid4())
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id

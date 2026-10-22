@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hmac
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -7,6 +9,9 @@ from typing import Any
 import jwt
 
 from nodo_api.config import Settings
+
+_USER_ID = re.compile(r"[A-Za-z0-9_.:@|-]{1,128}")
+_WORKSPACE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 class AuthError(ValueError):
@@ -29,10 +34,14 @@ class DevAuthenticator:
         self._tokens[token] = Principal(user_id, workspace_id)
 
     def authenticate(self, token: str) -> Principal:
-        principal = self._tokens.get(token)
-        if principal is None:
+        # Compare against every token in constant time instead of a dict lookup.
+        match: Principal | None = None
+        for known, principal in self._tokens.items():
+            if hmac.compare_digest(known.encode(), token.encode()):
+                match = principal
+        if match is None:
             raise AuthError("Invalid bearer token")
-        return principal
+        return match
 
 
 class OidcAuthenticator:
@@ -50,15 +59,27 @@ class OidcAuthenticator:
                 algorithms=["RS256"],
                 audience=self._settings.oidc_audience,
                 issuer=self._settings.oidc_issuer,
-                options={"require": ["exp", "sub", "workspace_id"]},
+                options={"require": ["exp", "iat", "iss", "aud", "sub", "workspace_id"]},
             )
         except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
             raise AuthError("Invalid OIDC token") from exc
-        return Principal(str(claims["sub"]), str(claims["workspace_id"]))
+        return self._principal(claims)
+
+    def _principal(self, claims: dict[str, Any]) -> Principal:
+        user_id, workspace_id = claims["sub"], claims["workspace_id"]
+        # The tenant claim must be a plain string minted by the identity provider: coercing a list
+        # or accepting an empty value would collapse users into a shared tenant.
+        if not isinstance(user_id, str) or not _USER_ID.fullmatch(user_id):
+            raise AuthError("Invalid subject claim")
+        if not isinstance(workspace_id, str) or not _WORKSPACE_ID.fullmatch(workspace_id):
+            raise AuthError("Invalid workspace claim")
+        if claims["exp"] - claims["iat"] > self._settings.oidc_max_token_age_seconds:
+            raise AuthError("Token lifetime is too long")
+        return Principal(user_id, workspace_id)
 
     def _find_key(self, kid: str) -> Any:
         for jwk in self._key_provider().get("keys", []):
-            if jwk.get("kid") == kid:
+            if jwk.get("kid") == kid and jwk.get("use", "sig") == "sig":
                 return jwt.PyJWK.from_dict(jwk).key
         raise AuthError("Signing key not found")
 
