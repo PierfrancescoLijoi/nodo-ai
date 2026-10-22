@@ -22,3 +22,6 @@ apps/mobile/.claude/
 coverage/
 *.egg-info/
 .coverage
+*.tfvars
+!*.tfvars.example
+backend.hcl
