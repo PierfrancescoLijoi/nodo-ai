@@ -13,6 +13,7 @@ from nodo_api.domain.models import (
     Meeting,
     MeetingState,
     RecordingAttestation,
+    SpokenPhrase,
     TranscriptSegment,
 )
 from nodo_api.errors import NotFoundError
@@ -53,6 +54,12 @@ class MemoryMeetingRepository:
         if meeting is None or meeting.owner_id != user_id:
             raise NotFoundError
         if meeting.tombstoned_at and not include_tombstoned:
+            raise NotFoundError
+        return meeting
+
+    def get_for_processing(self, workspace_id: str, meeting_id: str) -> Meeting:
+        meeting = self._meetings.get((workspace_id, meeting_id))
+        if meeting is None or meeting.tombstoned_at is not None:
             raise NotFoundError
         return meeting
 
@@ -140,6 +147,9 @@ class MemoryBlobStore:
             "upload_url": f"memory://{workspace_id}/{meeting_id}",
             "expires_in_seconds": 900,
         }
+
+    def create_read_url(self, workspace_id: str, meeting_id: str) -> str:
+        return f"memory://{workspace_id}/{meeting_id}/audio"
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         self._erased.add((workspace_id, meeting_id))
@@ -325,3 +335,17 @@ def _seed_attestation(meeting_id: str) -> RecordingAttestation:
         f"audit-{meeting_id}",
         "seed-signature",
     )
+
+
+class MemorySpeech:
+    """Deterministic stand-in for speech to text: two speakers, three phrases."""
+
+    def transcribe(
+        self, audio_url: str, candidate_locales: tuple[str, ...]
+    ) -> tuple[SpokenPhrase, ...]:
+        locale = candidate_locales[0] if candidate_locales else "en-GB"
+        return (
+            SpokenPhrase(1, 0, 2400, "We start with the ingestion queue.", 0.97, locale),
+            SpokenPhrase(2, 2500, 5200, "Sara will benchmark the retries.", 0.95, locale),
+            SpokenPhrase(1, 5300, 7000, "Agreed, deadline is the twenty-eighth.", 0.96, locale),
+        )

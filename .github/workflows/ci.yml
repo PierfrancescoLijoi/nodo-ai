@@ -5,18 +5,22 @@ on:
     paths:
       - "apps/mobile/**"
       - "services/api/**"
+      - "services/api/Dockerfile"
       - "eval/**"
       - "infra/compose/**"
       - "infra/terraform/**"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/deploy.yml"
   pull_request:
     paths:
       - "apps/mobile/**"
       - "services/api/**"
+      - "services/api/Dockerfile"
       - "eval/**"
       - "infra/compose/**"
       - "infra/terraform/**"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 permissions:
@@ -29,6 +33,18 @@ concurrency:
 jobs:
   api:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: services/api
@@ -40,10 +56,27 @@ jobs:
           cache: pip
           cache-dependency-path: services/api/pyproject.toml
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install -e ".[dev,azure]"
       - run: ruff check .
       - run: ruff format --check .
-      - run: pytest --cov=. --cov-fail-under=80
+      - run: pytest --cov=nodo_api --cov-fail-under=80
+        env:
+          NODO_TEST_POSTGRES_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Build API image
+        run: docker buildx build --load --tag nodo-api:ci services/api
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: nodo-api:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
   mobile:
     runs-on: ubuntu-latest

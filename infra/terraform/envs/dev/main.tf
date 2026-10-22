@@ -43,6 +43,12 @@ variable "oidc_audience" {
   default = ""
 }
 
+variable "api_target_port" {
+  description = "API ingress and probe port. Use 80 for the placeholder and 8000 for the NODO image."
+  type        = number
+  default     = 8000
+}
+
 variable "budget_contact_emails" {
   type    = list(string)
   default = []
@@ -64,6 +70,7 @@ module "nodo" {
   environment           = "dev"
   oidc_issuer           = var.oidc_issuer
   oidc_audience         = var.oidc_audience
+  api_target_port       = var.api_target_port
   budget_contact_emails = var.budget_contact_emails
   openai_deployments    = var.openai_deployments
   search_sku            = "free"
@@ -80,4 +87,24 @@ output "identity_client_ids" {
 
 output "container_registry" {
   value = module.nodo.container_registry
+}
+
+output "resource_group_name" {
+  value = module.nodo.resource_group_name
+}
+
+output "acr_name" {
+  value = module.nodo.acr_name
+}
+
+output "api_app_name" {
+  value = module.nodo.api_app_name
+}
+
+output "worker_job_name" {
+  value = module.nodo.worker_job_name
+}
+
+output "migrate_job_name" {
+  value = module.nodo.migrate_job_name
 }

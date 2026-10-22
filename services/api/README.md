@@ -38,3 +38,23 @@ Generate the checked-in API contract with:
 
 To replace an adapter, implement the matching protocol in `ports/protocols.py` and inject it when building the application container. Keep `workspace_id` explicit on every operation and preserve the pre-retrieval ACL boundary.
 
+
+## Azure backend
+
+`NODO_BACKEND=azure` swaps the in-memory adapters for the Azure ones (see `docs/AZURE-ARCHITECTURE.md` section 12). The same image runs three ways:
+
+| Role | Command | Settings |
+|---|---|---|
+| API | `uvicorn nodo_api.main:create_app --factory` (image default) | OIDC issuer and audience required |
+| Worker (Container Apps job) | `python -m nodo_api.worker` | no OIDC settings needed |
+| Bootstrap (job) | `python -m nodo_api.admin bootstrap` | runs as the PostgreSQL Entra administrator |
+
+Install with `pip install -e ".[dev,azure]"`. Build the image from this folder: `docker build -t nodo-api .`.
+
+Integration tests against PostgreSQL run when `NODO_TEST_POSTGRES_DSN` is set to a superuser DSN of a throwaway database (CI starts a service container):
+
+```powershell
+docker run -d --name nodo-pg-test -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:0.8.0-pg16
+$env:NODO_TEST_POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:55432/postgres"
+.\.venv\Scripts\python.exe -m pytest
+```

@@ -14,19 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from nodo_api.adapters.memory import (
-    MemoryAuditLog,
-    MemoryBlobStore,
-    MemoryGraphStore,
-    MemoryJobQueue,
-    MemoryMeetingRepository,
-    MemoryTranscriptRepository,
-    MockLlm,
-    MockRetriever,
-    seed_memory_adapters,
-)
 from nodo_api.api.v1 import router
 from nodo_api.auth import AuthManager
+from nodo_api.bootstrap import build_adapters
 from nodo_api.config import Settings
 from nodo_api.errors import NodoError
 from nodo_api.services import EvidenceValidator, MeetingService, QueryService
@@ -40,14 +30,14 @@ _REQUEST_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 class AppContainer:
     settings: Settings
     auth: AuthManager
-    meetings: MemoryMeetingRepository
-    transcripts: MemoryTranscriptRepository
-    blobs: MemoryBlobStore
-    jobs: MemoryJobQueue
-    retriever: MockRetriever
-    graph: MemoryGraphStore
-    llm: MockLlm
-    audit: MemoryAuditLog
+    meetings: Any
+    transcripts: Any
+    blobs: Any
+    jobs: Any
+    retriever: Any
+    graph: Any
+    llm: Any
+    audit: Any
     meeting_service: MeetingService
     query_service: QueryService
 
@@ -76,47 +66,38 @@ def create_app(
 
 
 def _container(settings: Settings, key_provider) -> AppContainer:
-    meetings = MemoryMeetingRepository()
-    transcripts = MemoryTranscriptRepository()
-    blobs = MemoryBlobStore()
-    jobs = MemoryJobQueue()
-    retriever = MockRetriever()
-    graph = MemoryGraphStore()
-    llm = MockLlm()
-    audit = MemoryAuditLog()
-    if settings.seed_demo_data:
-        seed_memory_adapters(meetings, transcripts, retriever, graph)
+    a = build_adapters(settings)
     meeting_service = MeetingService(
-        meetings,
-        transcripts,
-        blobs,
-        jobs,
-        retriever,
-        graph,
-        audit,
+        a.meetings,
+        a.transcripts,
+        a.blobs,
+        a.jobs,
+        a.retriever,
+        a.graph,
+        a.audit,
         settings.attestation_hmac_key,
         settings.known_notice_versions,
         settings.known_retention_policies,
     )
     query_service = QueryService(
-        meetings,
-        retriever,
-        graph,
-        llm,
-        EvidenceValidator(transcripts),
+        a.meetings,
+        a.retriever,
+        a.graph,
+        a.llm,
+        EvidenceValidator(a.transcripts),
         settings.graph_node_limit,
     )
     return AppContainer(
         settings,
         AuthManager(settings, key_provider),
-        meetings,
-        transcripts,
-        blobs,
-        jobs,
-        retriever,
-        graph,
-        llm,
-        audit,
+        a.meetings,
+        a.transcripts,
+        a.blobs,
+        a.jobs,
+        a.retriever,
+        a.graph,
+        a.llm,
+        a.audit,
         meeting_service,
         query_service,
     )

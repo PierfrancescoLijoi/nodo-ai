@@ -1,0 +1,47 @@
+"""Service Bus publisher. A job is recorded in Postgres first (outbox), then sent; the message id is
+the job identity so Service Bus duplicate detection also absorbs a retried send."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from typing import Any
+
+from azure.servicebus import ServiceBusMessage
+
+from nodo_api.adapters.azure.postgres import PgJobOutbox
+
+
+class ServiceBusJobQueue:
+    def __init__(
+        self,
+        outbox: PgJobOutbox,
+        sender_factory: Callable[[], AbstractContextManager[Any]],
+    ) -> None:
+        self._outbox = outbox
+        self._sender_factory = sender_factory
+
+    def publish_once(
+        self, workspace_id: str, job_key: str, job_type: str, payload: dict[str, Any]
+    ) -> str:
+        job_id, published = self._outbox.record(workspace_id, job_key, job_type, payload)
+        if not published:
+            body = {
+                "job_id": job_id,
+                "workspace_id": workspace_id,
+                "job_key": job_key,
+                "job_type": job_type,
+                **payload,
+            }
+            message = ServiceBusMessage(
+                json.dumps(body),
+                content_type="application/json",
+                message_id=f"{workspace_id}:{job_key}:{job_type}",
+                subject=job_type,
+                application_properties={"workspace_id": workspace_id},
+            )
+            with self._sender_factory() as sender:
+                sender.send_messages(message)
+            self._outbox.mark_published(workspace_id, job_key, job_type)
+        return job_id

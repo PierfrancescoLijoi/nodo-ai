@@ -1,0 +1,141 @@
+name: Deploy API
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/api/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Azure environment to deploy
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve deployment names
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          API_APP_NAME: ${{ vars.API_APP_NAME }}
+          WORKER_JOB_NAME: ${{ vars.WORKER_JOB_NAME }}
+          MIGRATE_JOB_NAME: ${{ vars.MIGRATE_JOB_NAME }}
+        run: |
+          set -euo pipefail
+          for name in RESOURCE_GROUP ACR_NAME API_APP_NAME WORKER_JOB_NAME MIGRATE_JOB_NAME; do
+            if [ -z "${!name}" ]; then
+              echo "Missing repository or environment variable: ${name}" >&2
+              exit 1
+            fi
+            printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
+          done
+          printf 'IMAGE=%s.azurecr.io/nodo-api:%s\n' "$ACR_NAME" "$GITHUB_SHA" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build API image
+        run: docker buildx build --load --tag "$IMAGE" services/api
+
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Push API image
+        run: |
+          set -euo pipefail
+          az acr login --name "$ACR_NAME"
+          docker push "$IMAGE"
+
+      - name: Run database and search bootstrap
+        run: |
+          set -euo pipefail
+          az containerapp job update \
+            --name "$MIGRATE_JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$IMAGE"
+
+          execution_name="$(az containerapp job start \
+            --name "$MIGRATE_JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query name \
+            --output tsv)"
+
+          deadline=$((SECONDS + 600))
+          while (( SECONDS < deadline )); do
+            status="$(az containerapp job execution show \
+              --name "$MIGRATE_JOB_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --job-execution-name "$execution_name" \
+              --query properties.status \
+              --output tsv)"
+            echo "Migration execution ${execution_name}: ${status}"
+            case "$status" in
+              Succeeded)
+                exit 0
+                ;;
+              Failed)
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          echo "Migration execution timed out after 10 minutes" >&2
+          exit 1
+
+      - name: Deploy worker and API
+        run: |
+          set -euo pipefail
+          az containerapp job update \
+            --name "$WORKER_JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$IMAGE"
+          az containerapp update \
+            --name "$API_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$IMAGE"
+
+      - name: Smoke test API
+        run: |
+          set -euo pipefail
+          fqdn="$(az containerapp show \
+            --name "$API_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)"
+          curl --fail --show-error --silent \
+            --retry 12 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            --max-time 20 \
+            "https://${fqdn}/healthz"

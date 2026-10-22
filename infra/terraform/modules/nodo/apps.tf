@@ -11,6 +11,10 @@ locals {
   # runs with NODO_ENVIRONMENT=prod so dev tokens, demo data and weak keys stay refused.
   common_env = {
     NODO_ENVIRONMENT                      = "prod"
+    NODO_BACKEND                          = "azure"
+    NODO_AUTH_MODE                        = "oidc"
+    NODO_OIDC_ISSUER                      = var.oidc_issuer
+    NODO_OIDC_AUDIENCE                    = var.oidc_audience
     AZURE_CLIENT_ID                       = "" # set per app below, used by DefaultAzureCredential
     NODO_AZURE_STORAGE_ACCOUNT            = azurerm_storage_account.main.name
     NODO_AZURE_SERVICEBUS_FQDN            = "${azurerm_servicebus_namespace.main.name}.servicebus.windows.net"
@@ -20,6 +24,10 @@ locals {
     NODO_AZURE_SEARCH_ENDPOINT            = "https://${azurerm_search_service.main.name}.search.windows.net"
     NODO_AZURE_OPENAI_ENDPOINT            = azurerm_cognitive_account.openai.endpoint
     NODO_AZURE_SPEECH_ENDPOINT            = azurerm_cognitive_account.speech.endpoint
+    NODO_AZURE_DB_ROLES                   = join(",", [azurerm_user_assigned_identity.api.name, azurerm_user_assigned_identity.worker.name])
+    NODO_OPENAI_CHAT_DEPLOYMENT           = var.openai_chat_deployment
+    NODO_OPENAI_EMBEDDING_DEPLOYMENT      = var.openai_embedding_deployment
+    NODO_OPENAI_EMBEDDING_DIMENSIONS      = tostring(var.embedding_dimensions)
     APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.main.connection_string
   }
 }
@@ -75,10 +83,8 @@ resource "azurerm_container_app" "api" {
 
       dynamic "env" {
         for_each = merge(local.common_env, {
-          AZURE_CLIENT_ID    = azurerm_user_assigned_identity.api.client_id
-          NODO_AUTH_MODE     = "oidc"
-          NODO_OIDC_ISSUER   = var.oidc_issuer
-          NODO_OIDC_AUDIENCE = var.oidc_audience
+          AZURE_CLIENT_ID          = azurerm_user_assigned_identity.api.client_id
+          NODO_AZURE_POSTGRES_USER = azurerm_user_assigned_identity.api.name
         })
         content {
           name  = env.key
@@ -133,6 +139,12 @@ resource "azurerm_container_app_job" "worker" {
     identity = azurerm_user_assigned_identity.worker.id
   }
 
+  secret {
+    name                = "attestation-hmac-key"
+    key_vault_secret_id = azurerm_key_vault_secret.attestation_key.versionless_id
+    identity            = azurerm_user_assigned_identity.worker.id
+  }
+
   event_trigger_config {
     parallelism              = 1
     replica_completion_count = 1
@@ -157,24 +169,97 @@ resource "azurerm_container_app_job" "worker" {
 
   template {
     container {
-      name   = "worker"
-      image  = var.worker_image
-      cpu    = 1
-      memory = "2Gi"
+      name    = "worker"
+      image   = var.api_image
+      command = ["python", "-m", "nodo_api.worker"]
+      cpu     = 1
+      memory  = "2Gi"
 
       dynamic "env" {
         for_each = merge(local.common_env, {
-          AZURE_CLIENT_ID = azurerm_user_assigned_identity.worker.client_id
+          AZURE_CLIENT_ID          = azurerm_user_assigned_identity.worker.client_id
+          NODO_AZURE_POSTGRES_USER = azurerm_user_assigned_identity.worker.name
         })
         content {
           name  = env.key
           value = env.value
         }
       }
+
+      env {
+        name        = "NODO_ATTESTATION_HMAC_KEY"
+        secret_name = "attestation-hmac-key"
+      }
     }
   }
 
   depends_on = [azurerm_role_assignment.identity]
+
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+}
+
+# Database and search bootstrap: started explicitly by the deploy pipeline before rollout.
+resource "azurerm_container_app_job" "migrate" {
+  name                         = "caj-${local.name}-migrate"
+  location                     = azurerm_resource_group.main.location
+  resource_group_name          = azurerm_resource_group.main.name
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  replica_timeout_in_seconds   = 600
+  replica_retry_limit          = 0
+  tags                         = local.tags
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.migrate.id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.migrate.id
+  }
+
+  secret {
+    name                = "attestation-hmac-key"
+    key_vault_secret_id = azurerm_key_vault_secret.attestation_key.versionless_id
+    identity            = azurerm_user_assigned_identity.migrate.id
+  }
+
+  manual_trigger_config {
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  template {
+    container {
+      name    = "migrate"
+      image   = var.api_image
+      command = ["python", "-m", "nodo_api.admin", "bootstrap"]
+      cpu     = 1
+      memory  = "2Gi"
+
+      dynamic "env" {
+        for_each = merge(local.common_env, {
+          AZURE_CLIENT_ID          = azurerm_user_assigned_identity.migrate.client_id
+          NODO_AZURE_POSTGRES_USER = azurerm_user_assigned_identity.migrate.name
+        })
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+      env {
+        name        = "NODO_ATTESTATION_HMAC_KEY"
+        secret_name = "attestation-hmac-key"
+      }
+    }
+  }
+
+  depends_on = [
+    azurerm_postgresql_flexible_server_active_directory_administrator.migrate,
+    azurerm_role_assignment.identity,
+  ]
 
   lifecycle {
     ignore_changes = [template[0].container[0].image]

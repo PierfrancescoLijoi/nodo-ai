@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from nodo_api.domain.models import GraphNode, Locale, Meeting, TranscriptSegment
+from nodo_api.domain.models import GraphNode, Locale, Meeting, SpokenPhrase, TranscriptSegment
 
 # Every method takes workspace_id (and, where data belongs to a person, the user or the set of
 # meeting ids that person may see) so that access control happens inside the store query,
@@ -27,6 +27,10 @@ class MeetingRepository(Protocol):
         ...
 
     def owned_ids(self, workspace_id: str, user_id: str) -> frozenset[str]: ...
+
+    def get_for_processing(self, workspace_id: str, meeting_id: str) -> Meeting:
+        """System access for the ingestion worker, which acts for the owner and has no user."""
+        ...
 
     def save(self, workspace_id: str, meeting: Meeting) -> Meeting: ...
 
@@ -53,6 +57,10 @@ class TranscriptRepository(Protocol):
 
 class BlobStore(Protocol):
     def create_upload_session(self, workspace_id: str, meeting_id: str) -> dict[str, Any]: ...
+
+    def create_read_url(self, workspace_id: str, meeting_id: str) -> str:
+        """Short-lived read-only URL of the finished audio, for the speech service."""
+        ...
 
     def erase(self, workspace_id: str, meeting_id: str) -> None: ...
 
@@ -104,3 +112,13 @@ class LlmClient(Protocol):
 
 class AuditLog(Protocol):
     def append(self, workspace_id: str, event_type: str, metadata: dict[str, str]) -> str: ...
+
+
+class SpeechToText(Protocol):
+    def transcribe(
+        self, audio_url: str, candidate_locales: tuple[str, ...]
+    ) -> tuple[SpokenPhrase, ...]: ...
+
+
+class Embedder(Protocol):
+    def embed(self, texts: list[str]) -> list[list[float]]: ...

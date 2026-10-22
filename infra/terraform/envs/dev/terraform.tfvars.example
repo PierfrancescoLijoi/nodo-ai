@@ -1,6 +1,7 @@
 subscription_id       = "00000000-0000-0000-0000-000000000000"
 oidc_issuer           = "" # https://<tenant>.ciamlogin.com/<tenant-id>/v2.0 once Entra External ID exists
 oidc_audience         = ""
+api_target_port       = 80 # placeholder only; change to 8000 with the first real NODO image
 budget_contact_emails = ["you@example.com"]
 
 # Fill after checking model availability in the chosen region:

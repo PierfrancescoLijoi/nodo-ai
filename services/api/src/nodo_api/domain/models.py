@@ -100,3 +100,15 @@ class GraphNode:
     label: str
     meeting_id: str
     segment_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class SpokenPhrase:
+    """One recognised phrase from speech to text, before it becomes a transcript segment."""
+
+    speaker: int
+    start_ms: int
+    end_ms: int
+    text: str
+    confidence: float
+    locale: str

@@ -28,15 +28,15 @@ variable "tags" {
 # --- application ------------------------------------------------------------------------------
 
 variable "api_image" {
-  description = "Container image for the API. The default is a placeholder that lets the platform deploy before the first real image exists."
+  description = "Container image for the API and migration job. The default placeholder listens on port 80, so api_target_port must be set to 80 until the first real image is deployed."
   type        = string
   default     = "mcr.microsoft.com/k8se/quickstart:latest"
 }
 
 variable "api_target_port" {
-  description = "Port the API container listens on (80 for the placeholder, 8000 for the real image)."
+  description = "Port the API container listens on. Keep this at 80 for the placeholder image and use the 8000 default once the first real image is deployed."
   type        = number
-  default     = 80
+  default     = 8000
 }
 
 variable "api_min_replicas" {
@@ -47,12 +47,6 @@ variable "api_min_replicas" {
 variable "api_max_replicas" {
   type    = number
   default = 5
-}
-
-variable "worker_image" {
-  description = "Container image for the ingestion worker job."
-  type        = string
-  default     = "mcr.microsoft.com/k8se/quickstart:latest"
 }
 
 variable "worker_max_executions" {
@@ -126,6 +120,24 @@ variable "openai_deployments" {
     capacity      = number
   }))
   default = {}
+}
+
+variable "openai_chat_deployment" {
+  description = "Azure OpenAI chat deployment name. This should match a key in openai_deployments."
+  type        = string
+  default     = "chat"
+}
+
+variable "openai_embedding_deployment" {
+  description = "Azure OpenAI embedding deployment name. This should match a key in openai_deployments."
+  type        = string
+  default     = "embedding"
+}
+
+variable "embedding_dimensions" {
+  description = "Vector dimensions produced by the configured embedding deployment."
+  type        = number
+  default     = 1536
 }
 
 # --- cost -------------------------------------------------------------------------------------

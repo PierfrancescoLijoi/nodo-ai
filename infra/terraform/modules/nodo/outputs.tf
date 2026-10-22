@@ -2,6 +2,22 @@ output "resource_group_name" {
   value = azurerm_resource_group.main.name
 }
 
+output "api_app_name" {
+  value = azurerm_container_app.api.name
+}
+
+output "worker_job_name" {
+  value = azurerm_container_app_job.worker.name
+}
+
+output "migrate_job_name" {
+  value = azurerm_container_app_job.migrate.name
+}
+
+output "acr_name" {
+  value = azurerm_container_registry.main.name
+}
+
 output "api_url" {
   description = "Base URL the mobile app calls (EXPO_PUBLIC_API_BASE_URL)."
   value       = "https://${azurerm_container_app.api.ingress[0].fqdn}"
@@ -34,7 +50,8 @@ output "speech_endpoint" {
 output "identity_client_ids" {
   description = "Client ids of the managed identities, needed to create their database roles."
   value = {
-    api    = azurerm_user_assigned_identity.api.client_id
-    worker = azurerm_user_assigned_identity.worker.client_id
+    api     = azurerm_user_assigned_identity.api.client_id
+    worker  = azurerm_user_assigned_identity.worker.client_id
+    migrate = azurerm_user_assigned_identity.migrate.client_id
   }
 }

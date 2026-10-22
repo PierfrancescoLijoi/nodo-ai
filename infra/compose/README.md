@@ -20,3 +20,5 @@ docker compose -f docker-compose.yml --env-file .env.example config -q
 
 To remove the local data as well, run `docker compose down --volumes`. This permanently deletes the named development volumes.
 
+
+The Postgres container loads the application schema from `services/api/src/nodo_api/migrations` on first start (the same SQL the bootstrap job applies in Azure).

@@ -58,6 +58,13 @@ resource "azurerm_user_assigned_identity" "worker" {
   tags                = local.tags
 }
 
+resource "azurerm_user_assigned_identity" "migrate" {
+  name                = "id-${local.name}-migrate"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  tags                = local.tags
+}
+
 # --- registry ---------------------------------------------------------------------------------
 
 resource "azurerm_container_registry" "main" {
@@ -240,7 +247,16 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "azure_services" {
   end_ip_address   = "0.0.0.0"
 }
 
-resource "azurerm_postgresql_flexible_server_active_directory_administrator" "admin" {
+resource "azurerm_postgresql_flexible_server_active_directory_administrator" "migrate" {
+  server_name         = azurerm_postgresql_flexible_server.main.name
+  resource_group_name = azurerm_resource_group.main.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  object_id           = azurerm_user_assigned_identity.migrate.principal_id
+  principal_name      = azurerm_user_assigned_identity.migrate.name
+  principal_type      = "ServicePrincipal"
+}
+
+resource "azurerm_postgresql_flexible_server_active_directory_administrator" "human" {
   count               = var.postgres_entra_admin == null ? 0 : 1
   server_name         = azurerm_postgresql_flexible_server.main.name
   resource_group_name = azurerm_resource_group.main.name

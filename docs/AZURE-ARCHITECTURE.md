@@ -138,3 +138,26 @@ Fixed monthly drivers in a beta: Search Basic, Service Bus Standard, Postgres B1
 3. Entra External ID tenant creation and the custom claims provider that adds `workspace_id`.
 4. Quotas: Container Apps cores, OpenAI tokens-per-minute, Speech concurrent batch jobs.
 5. Name uniqueness: Storage, Key Vault, ACR, Search and Postgres names are global or regional.
+
+## 12. Implementation status (22 October 2026)
+
+| Port | Azure adapter | Verified how |
+|---|---|---|
+| MeetingRepository, TranscriptRepository, AuditLog, GraphStore, job outbox | `adapters/azure/postgres.py` plus `migrations/0001_init.sql` | 12 integration tests on a real PostgreSQL 16: ownership, per-user idempotency under concurrency, row level security as a non-superuser, append-only audit, an HTTP flow end to end |
+| BlobStore | `adapters/azure/blob.py` (user-delegation SAS, one blob per meeting, write-only upload, read-only link) | SAS generated offline with a constructed delegation key and its query string inspected |
+| JobQueue | `adapters/azure/servicebus.py` (outbox row first, then send, message id = job identity) | fakes: single send, retry after a failed send |
+| Retriever | `adapters/azure/search.py` (index with four analyzer fields and a vector field, hybrid query, access filter inside the query) | fakes: filter text, document shape, paging erase; the index definition builds with the real SDK models |
+| LlmClient, Embedder | `adapters/azure/openai_llm.py` (the model points at numbered evidence, citations are built from the retrieved segments) | fakes: fabricated references dropped, malformed output is unanswerable, injection tags neutralised |
+| SpeechToText | `adapters/azure/speech.py` (batch transcription, diarization, language identification) | `httpx.MockTransport` against the documented request and response shapes |
+| Worker | `worker.py` and `services/ingestion.py` (transcribe, index, move to review; retries, dead letter at the last delivery, marks the meeting failed) | in-memory adapters |
+| Bootstrap job | `admin.py` (`bootstrap` = migrate + roles + index) | migrations and role grants run on real PostgreSQL; `pgaadauth_create_principal` is Azure-only |
+
+Not yet verified against a live Azure account, and therefore the first things to check after the first deployment:
+
+1. `pgaadauth_create_principal` accepts the identity name as the role name, and the Entra token works as the password.
+2. The Speech batch request and result shapes (`languageIdentification.mode`, `recognizedPhrases` fields) match the API version in use.
+3. Search index creation (vector profile, analyzer names) and the `search.in` filter on a real service.
+4. The embedding deployment size equals `NODO_OPENAI_EMBEDDING_DIMENSIONS`.
+5. A Container Apps job starts from the Service Bus rule with the worker identity and finishes within its replica timeout.
+
+Not built yet: claim and decision extraction (the worker stops at `review` after saving the transcript), graph relations, the review flow, the list endpoint for meetings, spoken-language selection per meeting, and the export job runner.
