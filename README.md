@@ -2,7 +2,7 @@
 
 Privacy-first mobile assistant that turns authorised meetings into a temporal, source-backed memory (transcript plus knowledge graph) you can query by text or voice.
 
-Status: early scaffold. The app runs on sample data (no microphone, no AI calls). Product blueprint (Italian, v0.1): [docs/product](docs/product). Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Design system: [docs/DESIGN.md](docs/DESIGN.md).
+Status: early scaffold. The app runs on sample data (no microphone, no AI calls). Product blueprint (Italian, v0.1): [docs/product](docs/product). Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Design system: [docs/DESIGN.md](docs/DESIGN.md). Cloud: [docs/AZURE-ARCHITECTURE.md](docs/AZURE-ARCHITECTURE.md).
 
 UI languages: English, Polish, Italian, Danish.
 

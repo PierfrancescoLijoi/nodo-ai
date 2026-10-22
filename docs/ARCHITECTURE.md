@@ -173,7 +173,7 @@ Decisions:
 
 ## 12. Azure mapping
 
-Container Apps (API, workers, gateway), Service Bus, Blob, PostgreSQL Flexible Server, AI Search, AI Speech, Azure-hosted LLM deployment, Key Vault, Application Insights, Entra External ID, Container Registry. The Terraform and the Azure-specific adapters are not written yet; they are the next milestone and benefit from dedicated Azure tooling.
+Azure is the cloud target. The full service map, identity model, networking stages, search design for four languages and the pre-deployment checklist are in [AZURE-ARCHITECTURE.md](AZURE-ARCHITECTURE.md) (ADR-010, ADR-011). One change from the diagram in section 3: in the Azure beta the graph is served from PostgreSQL behind the `GraphStore` port, and Neo4j is added only if needed.
 
 ## 13. Risks and open questions
 
