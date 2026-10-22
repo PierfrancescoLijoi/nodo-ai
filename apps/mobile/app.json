@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "NODO",
+    "slug": "nodo",
+    "scheme": "nodo",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "android": {
+      "package": "ai.nodo.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0F14",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": { "bundler": "metro", "output": "single", "favicon": "./assets/favicon.png" },
+    "plugins": ["expo-router", "expo-localization", "expo-font", "expo-splash-screen"]
+  }
+}
