@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import threading
+import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -14,17 +15,16 @@ psycopg = pytest.importorskip("psycopg")
 
 from psycopg.conninfo import conninfo_to_dict, make_conninfo  # noqa: E402
 
+from nodo_api.adapters.azure.graph_pg import PgGraphStore  # noqa: E402
 from nodo_api.adapters.azure.migrate import apply_migrations, grant_roles, migration_files  # noqa: E402
 from nodo_api.adapters.azure.postgres import (  # noqa: E402
     PgAuditLog,
-    PgGraphStore,
     PgJobOutbox,
     PgMeetingRepository,
     PgTranscriptRepository,
     PostgresDatabase,
 )
 from nodo_api.domain.models import (  # noqa: E402
-    GraphNode,
     Locale,
     Meeting,
     MeetingState,
@@ -190,18 +190,6 @@ def test_transcript_versions_are_immutable_and_latest_wins(db) -> None:
         transcripts.latest(A, "m-tr")
 
 
-def test_graph_lookup_escapes_wildcards_and_honours_access(db) -> None:
-    graph = PgGraphStore(db)
-    graph.add(A, GraphNode("n1", "100% async_queue", "m-g1", "s1"))
-    graph.add(A, GraphNode("n2", "100 percent other", "m-g2", "s1"))
-    found = graph.lookup(A, "100%", 2, 10, frozenset({"m-g1", "m-g2"}))
-    assert [n.id for n in found] == ["n1"]
-    assert graph.lookup(A, "async_queue", 2, 10, frozenset({"m-g2"})) == ()
-    assert graph.lookup(A, "async", 2, 10, frozenset()) == ()
-    graph.erase(A, "m-g1")
-    assert graph.lookup(A, "async", 2, 10, frozenset({"m-g1"})) == ()
-
-
 def test_audit_trail_is_append_only_for_the_application(db) -> None:
     audit = PgAuditLog(db)
     event_id = audit.append(A, "recording_attested", {"user_id": "alice"})
@@ -260,6 +248,7 @@ def test_the_http_api_works_end_to_end_on_postgres(db, monkeypatch) -> None:
         llm=memory.llm,
         audit=PgAuditLog(db),
         speech=memory.speech,
+        extractor=memory.extractor,
     )
     monkeypatch.setattr(bootstrap, "build_adapters", lambda settings: pg)
     monkeypatch.setattr("nodo_api.main.build_adapters", lambda settings: pg)
@@ -316,3 +305,18 @@ def test_the_http_api_works_end_to_end_on_postgres(db, monkeypatch) -> None:
         assert client.delete(f"/v1/meetings/{meeting_id}", headers=headers).status_code == 204
         assert client.get(f"/v1/meetings/{meeting_id}", headers=headers).status_code == 404
         assert client.delete(f"/v1/meetings/{meeting_id}", headers=headers).status_code == 204
+
+
+from tests.graph_contract import GraphContract  # noqa: E402
+
+
+class TestPgGraph(GraphContract):
+    """The same behaviour tests the in-memory graph passes, on real PostgreSQL."""
+
+    @pytest.fixture
+    def store(self, db):
+        return PgGraphStore(db)
+
+    @pytest.fixture
+    def ws(self):
+        return f"ws-{uuid.uuid4().hex[:8]}"

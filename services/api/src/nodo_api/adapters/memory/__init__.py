@@ -1,7 +1,6 @@
 from nodo_api.adapters.memory.adapters import (
     MemoryAuditLog,
     MemoryBlobStore,
-    MemoryGraphStore,
     MemoryJobQueue,
     MemoryMeetingRepository,
     MemorySpeech,
@@ -10,6 +9,7 @@ from nodo_api.adapters.memory.adapters import (
     MockRetriever,
     seed_memory_adapters,
 )
+from nodo_api.adapters.memory.graph import MemoryGraphStore
 
 __all__ = [
     "MemoryAuditLog",

@@ -1,0 +1,77 @@
+{
+  "meetingListItem": {
+    "id": "m1",
+    "title": "Planning",
+    "state": "ready",
+    "created_at": "2026-10-21T10:30:00Z",
+    "project": null,
+    "duration_ms": 60001,
+    "summary": null,
+    "people": ["Ada"],
+    "topics": ["Platform"],
+    "decision_count": 2,
+    "action_count": 1
+  },
+  "meeting": {
+    "id": "m1",
+    "workspace_id": "w1",
+    "owner_id": "u1",
+    "title": "Planning",
+    "state": "ready",
+    "created_at": "2026-10-21T10:30:00Z",
+    "project": null,
+    "duration_ms": 60001,
+    "summary": "Summary",
+    "recording_attestation": {},
+    "insights": {
+      "people": [{ "id": "p1", "label": "Ada" }],
+      "topics": [{ "id": "t1", "label": "Platform" }],
+      "decisions": [{ "id": "d1", "label": "Ship it", "status": "approved", "effective_at": null }],
+      "actions": [{ "id": "a1", "label": "Test", "owner_label": null, "due_at": null, "status": "proposed" }]
+    }
+  },
+  "segment": {
+    "id": "s1",
+    "meeting_id": "m1",
+    "speaker_id": "S1",
+    "start_ms": 1000,
+    "end_ms": 2000,
+    "text": "Hello",
+    "confidence": 0.9,
+    "version": 1,
+    "locale": "en"
+  },
+  "query": {
+    "answer": "Yes",
+    "answerability": "supported",
+    "citations": [
+      { "meeting_id": "m1", "segment_id": "s1", "speaker_id": "S1", "start_ms": 1000, "end_ms": 2000, "quote": "Hello" }
+    ],
+    "related_entities": [],
+    "query_trace_id": "q1",
+    "model_version": "v1",
+    "retrieval_version": "v1"
+  },
+  "subgraph": {
+    "nodes": [
+      { "id": "d1", "type": "decision", "label": "Ship it", "status": "approved", "meeting_id": "m1" },
+      { "id": "a1", "type": "action", "label": "Test", "status": null, "meeting_id": "m1" }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "a1",
+        "target": "d1",
+        "kind": "DEPENDS_ON",
+        "status": "proposed",
+        "valid_from": null,
+        "valid_to": null,
+        "confidence": 0.8,
+        "evidence": [{ "meeting_id": "m1", "segment_id": "s1" }]
+      }
+    ],
+    "depth": 1,
+    "truncated": true
+  },
+  "change": { "id": "c1", "new_label": "New", "old_label": "Old", "meeting_id": "m1", "at": "2026-10-22T00:00:00Z" }
+}

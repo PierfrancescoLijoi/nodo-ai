@@ -25,6 +25,7 @@ class Adapters:
     llm: Any
     audit: Any
     speech: Any
+    extractor: Any
 
 
 @dataclass(slots=True)
@@ -46,6 +47,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         MockRetriever,
         seed_memory_adapters,
     )
+    from nodo_api.adapters.memory.extractor import KeywordExtractor
 
     meetings = MemoryMeetingRepository()
     transcripts = MemoryTranscriptRepository()
@@ -63,6 +65,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         MockLlm(),
         MemoryAuditLog(),
         MemorySpeech(),
+        KeywordExtractor(),
     )
 
 
@@ -115,10 +118,11 @@ def postgres_database(settings: Settings, credential: Any = None):
 
 def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) -> Adapters:
     from nodo_api.adapters.azure.blob import AzureBlobStore
+    from nodo_api.adapters.azure.graph_pg import PgGraphStore
+    from nodo_api.adapters.azure.openai_extractor import AzureOpenAiExtractor
     from nodo_api.adapters.azure.openai_llm import AzureOpenAiEmbedder, AzureOpenAiLlm
     from nodo_api.adapters.azure.postgres import (
         PgAuditLog,
-        PgGraphStore,
         PgJobOutbox,
         PgMeetingRepository,
         PgTranscriptRepository,
@@ -149,6 +153,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
         llm=AzureOpenAiLlm(c["openai"], settings.openai_chat_deployment),
         audit=PgAuditLog(db),
         speech=AzureSpeechToText(settings.azure_speech_endpoint, c["speech_token"]),
+        extractor=AzureOpenAiExtractor(c["openai"], settings.openai_chat_deployment),
     )
 
 
@@ -166,6 +171,8 @@ def build_worker_runtime(settings: Settings) -> WorkerRuntime:
         adapters.retriever,
         adapters.speech,
         settings.speech_candidate_locales,
+        adapters.extractor,
+        adapters.graph,
     )
     return WorkerRuntime(
         ingestion,

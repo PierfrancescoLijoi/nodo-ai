@@ -19,7 +19,7 @@ from nodo_api.auth import AuthManager
 from nodo_api.bootstrap import build_adapters
 from nodo_api.config import Settings
 from nodo_api.errors import NodoError
-from nodo_api.services import EvidenceValidator, MeetingService, QueryService
+from nodo_api.services import EvidenceValidator, GraphService, MeetingService, QueryService
 
 logger = logging.getLogger("nodo_api")
 
@@ -40,6 +40,7 @@ class AppContainer:
     audit: Any
     meeting_service: MeetingService
     query_service: QueryService
+    graph_service: GraphService
 
 
 def create_app(
@@ -100,6 +101,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.audit,
         meeting_service,
         query_service,
+        GraphService(a.graph),
     )
 
 

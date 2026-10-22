@@ -1,16 +1,22 @@
-"""Ingestion: turn a finished upload into a versioned transcript and a search index.
+"""Ingestion: turn a finished upload into a transcript, a search index and a knowledge graph.
 
-Idempotent by construction: a repeated message for a meeting that already moved past
-`transcribing` is a no-op, and a retry after a crash reuses the transcript that was already
-saved (ARCHITECTURE.md section 5.1). Claim extraction and the human review step follow later."""
+Idempotent by construction and safe to retry at every step. A message for a meeting past the
+extraction stage is a no-op, a retry reuses a transcript that was already saved, and re-running the
+extraction replaces the meeting's graph contribution while keeping decisions a person already
+reviewed (ARCHITECTURE.md section 5.1, ADR-012)."""
 
 from __future__ import annotations
 
-from nodo_api.domain.models import Locale, MeetingState, SpokenPhrase, TranscriptSegment
+from dataclasses import replace
+
+from nodo_api.domain.graph import EntityType, MeetingRef, validate_extraction
+from nodo_api.domain.models import Locale, Meeting, MeetingState, SpokenPhrase, TranscriptSegment
 from nodo_api.domain.rules import InvalidStateTransition, transition_meeting
 from nodo_api.errors import NotFoundError
 from nodo_api.ports import (
     BlobStore,
+    Extractor,
+    GraphStore,
     MeetingRepository,
     Retriever,
     SpeechToText,
@@ -18,6 +24,8 @@ from nodo_api.ports import (
 )
 
 FIRST_VERSION = 1
+KNOWN_DECISIONS = 20
+PROCESSABLE = (MeetingState.TRANSCRIBING, MeetingState.EXTRACTING)
 
 
 def locale_of(bcp47: str, fallback: Locale) -> Locale:
@@ -48,6 +56,10 @@ def build_segments(
     )
 
 
+def default_title(meeting: Meeting) -> str:
+    return meeting.title or f"Meeting {meeting.created_at:%Y-%m-%d %H:%M}"
+
+
 class IngestionService:
     def __init__(
         self,
@@ -57,6 +69,8 @@ class IngestionService:
         retriever: Retriever,
         speech: SpeechToText,
         candidate_locales: tuple[str, ...],
+        extractor: Extractor,
+        graph: GraphStore,
     ) -> None:
         self._meetings = meetings
         self._transcripts = transcripts
@@ -64,6 +78,8 @@ class IngestionService:
         self._retriever = retriever
         self._speech = speech
         self._locales = candidate_locales
+        self._extractor = extractor
+        self._graph = graph
 
     def process(self, workspace_id: str, meeting_id: str) -> bool:
         """True when work was done; False for a stale message or a meeting that is gone."""
@@ -71,15 +87,36 @@ class IngestionService:
             meeting = self._meetings.get_for_processing(workspace_id, meeting_id)
         except NotFoundError:
             return False  # deleted while queued: nothing to do, and nothing must be recreated
-        if meeting.state is not MeetingState.TRANSCRIBING:
+        if meeting.state not in PROCESSABLE:
             return False
         segments = self._existing_or_new_transcript(workspace_id, meeting_id, meeting)
         for segment in segments:
             self._retriever.index(workspace_id, segment)
-        extracting = transition_meeting(meeting, MeetingState.EXTRACTING)
-        self._meetings.save(workspace_id, extracting)
-        self._meetings.save(workspace_id, transition_meeting(extracting, MeetingState.REVIEW))
+        if meeting.state is MeetingState.TRANSCRIBING:
+            meeting = self._meetings.save(
+                workspace_id, transition_meeting(meeting, MeetingState.EXTRACTING)
+            )
+        self._extract(workspace_id, meeting, segments)
         return True
+
+    def _extract(self, workspace_id: str, meeting: Meeting, segments) -> None:
+        known = self._graph.recent_decisions(workspace_id, meeting.owner_id, KNOWN_DECISIONS)
+        raw = self._extractor.extract(segments, meeting.attestation.locale, known)
+        clean = validate_extraction(
+            raw,
+            frozenset(s.id for s in segments),
+            {d.id: EntityType.DECISION for d in known},
+        )
+        title = default_title(meeting)
+        ref = MeetingRef(meeting.id, title, meeting.created_at)
+        self._graph.upsert_extraction(workspace_id, meeting.owner_id, ref, clean)
+        done = replace(
+            transition_meeting(meeting, MeetingState.REVIEW),
+            title=title,
+            summary=clean.summary or None,
+            duration_ms=max(s.end_ms for s in segments),
+        )
+        self._meetings.save(workspace_id, done)
 
     def _existing_or_new_transcript(self, workspace_id, meeting_id, meeting):
         try:

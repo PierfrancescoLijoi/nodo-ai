@@ -15,6 +15,13 @@ const en = {
     loading: 'Loading',
     sampleData: 'Sample data. This build does not record audio.',
   },
+  login: {
+    title: 'Sign in to NODO',
+    body: 'Sign in with your organization account to open your meeting memory.',
+    signIn: 'Sign in',
+    signingIn: 'Signing in',
+    error: 'Sign-in failed. Please try again.',
+  },
   home: {
     title: 'Your meeting memory',
     record: {
@@ -30,7 +37,7 @@ const en = {
       links_one: 'link',
       links_other: 'links',
     },
-    changes: { title: 'What changed' },
+    changes: { title: 'What changed', replaces: '{{newLabel}} replaces {{oldLabel}}' },
     recent: { title: 'Recent meetings' },
   },
   meetings: {
@@ -53,6 +60,13 @@ const en = {
     due: 'Due {{date}}',
     citedSegment: 'Cited in an answer',
     openGraph: 'Open in the graph',
+    state: {
+      uploading: 'Uploading',
+      transcribing: 'Transcribing',
+      extracting: 'Extracting',
+      review: 'Review',
+      failed: 'Failed',
+    },
   },
   ask: {
     title: 'Ask your meetings',
@@ -69,6 +83,7 @@ const en = {
     thinking: 'Looking through your meetings',
     sources: 'Sources',
     unanswerableTitle: 'Not enough evidence',
+    unanswerableBody: 'I cannot find enough evidence in your meetings to answer this reliably.',
     footnote: 'Answers in this build come from three sample meetings only.',
   },
   graph: {
@@ -82,12 +97,15 @@ const en = {
     relations_other: '{{count}} relations',
     noRelations: 'No relations yet.',
     openSource: 'Open source meeting',
+    truncated: 'The map shows part of this graph. Use the list to browse all loaded entities.',
     types: {
       topic: 'Topic',
       meeting: 'Meeting',
       decision: 'Decision',
       person: 'Person',
       action: 'Action',
+      project: 'Project',
+      system: 'System',
     },
     relation: {
       mentionedIn: '{{from}} is mentioned in {{to}}',
@@ -96,7 +114,10 @@ const en = {
       proposedBy: '{{from}} was proposed by {{to}}',
       supersedes: '{{from}} replaces {{to}}',
       assignedTo: '{{from}} is assigned to {{to}}',
+      dependsOn: '{{from}} depends on {{to}}',
+      contradicts: '{{from}} contradicts {{to}}',
     },
+    status: { proposed: 'Proposed', approved: 'Approved' },
   },
   capture: {
     title: 'New recording',
@@ -133,6 +154,12 @@ const en = {
     title: 'Privacy and control',
     intro: 'Your memory stays under your control: language, retention, export and deletion.',
     language: 'Language',
+    account: 'Account',
+    dataSource: 'Data source',
+    dataSourceMock: 'Sample data',
+    dataSourceCloud: 'Cloud API',
+    signedIn: 'Signed in',
+    signOut: 'Sign out',
     theme: 'Appearance',
     themeOptions: { system: 'System', light: 'Light', dark: 'Dark' },
     retention: 'Audio retention',

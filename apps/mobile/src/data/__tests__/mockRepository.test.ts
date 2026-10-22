@@ -9,15 +9,13 @@ describe.each(codes)('mock repository (%s)', (locale) => {
   const repository = createMockRepository(locale);
 
   test('every supported answer cites a segment that exists in a meeting', async () => {
-    const meetings = await repository.listMeetings();
     for (const questionId of ['ingestionChange', 'saraTasks', 'ragChoice'] as const) {
       const answer = await repository.ask({ questionId, text: '' });
       expect(answer.answerability).toBe('supported');
       expect(answer.citations.length).toBeGreaterThan(0);
       for (const citation of answer.citations) {
-        const segment = meetings
-          .find((m) => m.id === citation.meetingId)
-          ?.segments.find((s) => s.id === citation.segmentId);
+        const meeting = await repository.getMeeting(citation.meetingId);
+        const segment = meeting?.segments.find((s) => s.id === citation.segmentId);
         expect(segment?.text).toBe(citation.quote);
       }
     }

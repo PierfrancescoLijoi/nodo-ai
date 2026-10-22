@@ -1,4 +1,4 @@
-import { Calendar, CheckSquare, Hash, SealCheck, User, type Icon } from 'phosphor-react-native';
+import { Calendar, CheckSquare, DesktopTower, Folder, Hash, SealCheck, User, type Icon } from 'phosphor-react-native';
 
 import type { EntityType } from '@/data/types';
 
@@ -9,4 +9,6 @@ export const TYPE_ICONS: Record<EntityType, Icon> = {
   decision: SealCheck,
   person: User,
   action: CheckSquare,
+  project: Folder,
+  system: DesktopTower,
 };

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from nodo_api.adapters.memory import MemorySpeech
+from nodo_api.adapters.memory.extractor import KeywordExtractor
 from nodo_api.domain.models import Locale, MeetingState, SpokenPhrase
 from nodo_api.errors import NotFoundError
 from nodo_api.main import AppContainer
@@ -37,6 +38,8 @@ def _setup(app, attestation):
         container.retriever,
         speech,
         LOCALES,
+        KeywordExtractor(),
+        container.graph,
     )
     return container, meeting, ingestion, speech
 
@@ -70,6 +73,10 @@ def test_processing_saves_a_transcript_indexes_it_and_reaches_review(app, attest
     allowed = frozenset({meeting.id})
     found = container.retriever.search(WORKSPACE, "ingestion queue", None, allowed, 10)
     assert any(s.meeting_id == meeting.id for s in found)
+    done = container.meetings.get_owned(WORKSPACE, USER, meeting.id)
+    assert done.title and done.summary and done.duration_ms
+    digest = container.graph.meeting_digests(WORKSPACE, USER, [meeting.id])[meeting.id]
+    assert digest.people or digest.topics or digest.decisions
 
 
 def test_a_repeated_message_does_nothing(app, attestation) -> None:
@@ -111,9 +118,42 @@ def test_a_silent_recording_is_an_error_not_an_empty_transcript(app, attestation
         container.retriever,
         Silent(),
         LOCALES,
+        KeywordExtractor(),
+        container.graph,
     )
     with pytest.raises(ValueError, match="no speech"):
         ingestion.process(WORKSPACE, meeting.id)
+
+
+def test_extraction_is_retried_without_transcribing_again(app, attestation) -> None:
+    container, meeting, _, speech = _setup(app, attestation)
+
+    class Flaky:
+        calls = 0
+
+        def extract(self, segments, locale, known_decisions):
+            Flaky.calls += 1
+            if Flaky.calls == 1:
+                raise RuntimeError("model unavailable")
+            return KeywordExtractor().extract(segments, locale, known_decisions)
+
+    flaky = IngestionService(
+        container.meetings,
+        container.transcripts,
+        container.blobs,
+        container.retriever,
+        speech,
+        LOCALES,
+        Flaky(),
+        container.graph,
+    )
+    with pytest.raises(RuntimeError):
+        flaky.process(WORKSPACE, meeting.id)
+    stuck = container.meetings.get_owned(WORKSPACE, USER, meeting.id)
+    assert stuck.state is MeetingState.EXTRACTING
+    assert flaky.process(WORKSPACE, meeting.id) is True
+    assert speech.calls == 1
+    assert container.meetings.get_owned(WORKSPACE, USER, meeting.id).state is MeetingState.REVIEW
 
 
 def test_mark_failed_moves_a_transcribing_meeting_to_failed(app, attestation) -> None:

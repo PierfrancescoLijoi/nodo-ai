@@ -13,6 +13,13 @@ const pl = {
     loading: 'Ładowanie',
     sampleData: 'Dane przykładowe. Ta wersja nie nagrywa dźwięku.',
   },
+  login: {
+    title: 'Zaloguj się do NODO',
+    body: 'Zaloguj się kontem organizacji, aby otworzyć pamięć spotkań.',
+    signIn: 'Zaloguj się',
+    signingIn: 'Logowanie',
+    error: 'Logowanie nie powiodło się. Spróbuj ponownie.',
+  },
   home: {
     title: 'Pamięć Twoich spotkań',
     record: {
@@ -34,7 +41,7 @@ const pl = {
       links_many: 'powiązań',
       links_other: 'powiązania',
     },
-    changes: { title: 'Co się zmieniło' },
+    changes: { title: 'Co się zmieniło', replaces: '{{newLabel}} zastępuje {{oldLabel}}' },
     recent: { title: 'Ostatnie spotkania' },
   },
   meetings: {
@@ -61,6 +68,13 @@ const pl = {
     due: 'Termin: {{date}}',
     citedSegment: 'Cytowane w odpowiedzi',
     openGraph: 'Otwórz w grafie',
+    state: {
+      uploading: 'Przesyłanie',
+      transcribing: 'Transkrypcja',
+      extracting: 'Analiza',
+      review: 'Do sprawdzenia',
+      failed: 'Niepowodzenie',
+    },
   },
   ask: {
     title: 'Zapytaj swoje spotkania',
@@ -77,6 +91,7 @@ const pl = {
     thinking: 'Przeszukuję Twoje spotkania',
     sources: 'Źródła',
     unanswerableTitle: 'Za mało dowodów',
+    unanswerableBody: 'Nie znajduję w Twoich spotkaniach wystarczających dowodów, by odpowiedzieć rzetelnie.',
     footnote: 'Odpowiedzi w tej wersji pochodzą wyłącznie z trzech przykładowych spotkań.',
   },
   graph: {
@@ -92,12 +107,15 @@ const pl = {
     relations_other: '{{count}} relacji',
     noRelations: 'Brak relacji.',
     openSource: 'Otwórz spotkanie źródłowe',
+    truncated: 'Mapa pokazuje część grafu. Pełna lista wczytanych elementów znajduje się w widoku listy.',
     types: {
       topic: 'Temat',
       meeting: 'Spotkanie',
       decision: 'Decyzja',
       person: 'Osoba',
       action: 'Zadanie',
+      project: 'Projekt',
+      system: 'System',
     },
     relation: {
       mentionedIn: '{{from}}: wspomniano w {{to}}',
@@ -106,7 +124,10 @@ const pl = {
       proposedBy: '{{from}}: propozycja od {{to}}',
       supersedes: '{{from}} zastępuje {{to}}',
       assignedTo: '{{from}}: przypisano do {{to}}',
+      dependsOn: '{{from}} zależy od {{to}}',
+      contradicts: '{{from}} jest sprzeczne z {{to}}',
     },
+    status: { proposed: 'Proponowane', approved: 'Zatwierdzone' },
   },
   capture: {
     title: 'Nowe nagranie',
@@ -144,6 +165,12 @@ const pl = {
     title: 'Prywatność i kontrola',
     intro: 'Pamięć pozostaje pod Twoją kontrolą: język, przechowywanie, eksport i usuwanie.',
     language: 'Język',
+    account: 'Konto',
+    dataSource: 'Źródło danych',
+    dataSourceMock: 'Dane przykładowe',
+    dataSourceCloud: 'API w chmurze',
+    signedIn: 'Zalogowano',
+    signOut: 'Wyloguj się',
     theme: 'Wygląd',
     themeOptions: { system: 'Systemowy', light: 'Jasny', dark: 'Ciemny' },
     retention: 'Przechowywanie dźwięku',

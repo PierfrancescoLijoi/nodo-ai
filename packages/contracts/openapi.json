@@ -80,6 +80,70 @@
         "title": "AttestationOutput",
         "type": "object"
       },
+      "ChangeOutput": {
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "meeting_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meeting Id"
+          },
+          "new_label": {
+            "title": "New Label",
+            "type": "string"
+          },
+          "old_label": {
+            "title": "Old Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "new_label",
+          "old_label",
+          "meeting_id",
+          "at"
+        ],
+        "title": "ChangeOutput",
+        "type": "object"
+      },
+      "ChangesOutput": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ChangesOutput",
+        "type": "object"
+      },
       "CitationOutput": {
         "properties": {
           "end_ms": {
@@ -96,6 +160,11 @@
           },
           "segment_id": {
             "title": "Segment Id",
+            "type": "string"
+          },
+          "speaker_id": {
+            "default": "",
+            "title": "Speaker Id",
             "type": "string"
           },
           "start_ms": {
@@ -132,6 +201,24 @@
           "text"
         ],
         "title": "CorrectionInput",
+        "type": "object"
+      },
+      "EvidenceOutput": {
+        "properties": {
+          "meeting_id": {
+            "title": "Meeting Id",
+            "type": "string"
+          },
+          "segment_id": {
+            "title": "Segment Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "meeting_id",
+          "segment_id"
+        ],
+        "title": "EvidenceOutput",
         "type": "object"
       },
       "ExportInput": {
@@ -171,6 +258,93 @@
         "title": "ExportOutput",
         "type": "object"
       },
+      "GraphEdgeOutput": {
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOutput"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "MENTIONED_IN",
+              "ABOUT",
+              "DECIDED_IN",
+              "PROPOSED_BY",
+              "ASSIGNED_TO",
+              "DEPENDS_ON",
+              "SUPERSEDES",
+              "CONTRADICTS"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "proposed",
+              "approved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target",
+          "kind",
+          "status",
+          "valid_from",
+          "valid_to",
+          "confidence",
+          "evidence"
+        ],
+        "title": "GraphEdgeOutput",
+        "type": "object"
+      },
       "GraphNodeOutput": {
         "properties": {
           "id": {
@@ -182,53 +356,49 @@
             "type": "string"
           },
           "meeting_id": {
-            "title": "Meeting Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meeting Id"
           },
-          "segment_id": {
-            "title": "Segment Id",
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "type": {
+            "enum": [
+              "person",
+              "project",
+              "system",
+              "topic",
+              "decision",
+              "action",
+              "meeting"
+            ],
+            "title": "Type",
             "type": "string"
           }
         },
         "required": [
           "id",
+          "type",
           "label",
-          "meeting_id",
-          "segment_id"
+          "status",
+          "meeting_id"
         ],
         "title": "GraphNodeOutput",
-        "type": "object"
-      },
-      "GraphOutput": {
-        "properties": {
-          "depth": {
-            "title": "Depth",
-            "type": "integer"
-          },
-          "edges": {
-            "default": [],
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Edges",
-            "type": "array"
-          },
-          "nodes": {
-            "items": {
-              "$ref": "#/components/schemas/GraphNodeOutput"
-            },
-            "title": "Nodes",
-            "type": "array"
-          }
-        },
-        "required": [
-          "nodes",
-          "depth"
-        ],
-        "title": "GraphOutput",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -242,6 +412,155 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InsightAction": {
+        "properties": {
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "owner_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Label"
+          },
+          "status": {
+            "enum": [
+              "proposed",
+              "approved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "owner_label",
+          "due_at",
+          "status"
+        ],
+        "title": "InsightAction",
+        "type": "object"
+      },
+      "InsightDecision": {
+        "properties": {
+          "effective_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "proposed",
+              "approved",
+              "superseded"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "status",
+          "effective_at"
+        ],
+        "title": "InsightDecision",
+        "type": "object"
+      },
+      "InsightNode": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "InsightNode",
+        "type": "object"
+      },
+      "Insights": {
+        "properties": {
+          "actions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InsightAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "decisions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InsightDecision"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "people": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InsightNode"
+            },
+            "title": "People",
+            "type": "array"
+          },
+          "topics": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InsightNode"
+            },
+            "title": "Topics",
+            "type": "array"
+          }
+        },
+        "title": "Insights",
         "type": "object"
       },
       "Locale": {
@@ -270,12 +589,143 @@
           },
           "recording_attestation": {
             "$ref": "#/components/schemas/AttestationInput"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
           }
         },
         "required": [
           "recording_attestation"
         ],
         "title": "MeetingCreate",
+        "type": "object"
+      },
+      "MeetingList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MeetingListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "MeetingList",
+        "type": "object"
+      },
+      "MeetingListItem": {
+        "properties": {
+          "action_count": {
+            "title": "Action Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision_count": {
+            "title": "Decision Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "people": {
+            "items": {
+              "type": "string"
+            },
+            "title": "People",
+            "type": "array"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MeetingState"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Topics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "state",
+          "created_at",
+          "project",
+          "duration_ms",
+          "summary",
+          "people",
+          "topics",
+          "decision_count",
+          "action_count"
+        ],
+        "title": "MeetingListItem",
         "type": "object"
       },
       "MeetingOutput": {
@@ -285,9 +735,29 @@
             "title": "Created At",
             "type": "string"
           },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "insights": {
+            "$ref": "#/components/schemas/Insights",
+            "default": {
+              "actions": [],
+              "decisions": [],
+              "people": [],
+              "topics": []
+            }
           },
           "owner_id": {
             "title": "Owner Id",
@@ -310,6 +780,21 @@
           "state": {
             "$ref": "#/components/schemas/MeetingState"
           },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
           "workspace_id": {
             "title": "Workspace Id",
             "type": "string"
@@ -319,9 +804,12 @@
           "id",
           "workspace_id",
           "owner_id",
+          "title",
           "state",
           "created_at",
           "project",
+          "duration_ms",
+          "summary",
           "recording_attestation"
         ],
         "title": "MeetingOutput",
@@ -509,6 +997,23 @@
         "title": "ReviewOutput",
         "type": "object"
       },
+      "ReviewRelationInput": {
+        "properties": {
+          "status": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ReviewRelationInput",
+        "type": "object"
+      },
       "SegmentOutput": {
         "properties": {
           "confidence": {
@@ -559,6 +1064,40 @@
           "locale"
         ],
         "title": "SegmentOutput",
+        "type": "object"
+      },
+      "SubgraphOutput": {
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdgeOutput"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeOutput"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "depth",
+          "truncated"
+        ],
+        "title": "SubgraphOutput",
         "type": "object"
       },
       "TranscriptPage": {
@@ -740,19 +1279,134 @@
         "summary": "Export Data"
       }
     },
+    "/v1/graph/changes": {
+      "get": {
+        "operationId": "graph_changes_v1_graph_changes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangesOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Graph Changes"
+      }
+    },
+    "/v1/graph/relations/{relation_id}": {
+      "patch": {
+        "operationId": "review_relation_v1_graph_relations__relation_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "relation_id",
+            "required": true,
+            "schema": {
+              "title": "Relation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRelationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphEdgeOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Relation"
+      }
+    },
     "/v1/graph/subgraph": {
       "get": {
         "operationId": "graph_subgraph_v1_graph_subgraph_get",
         "parameters": [
           {
             "in": "query",
-            "name": "entity",
-            "required": true,
+            "name": "seed_id",
+            "required": false,
             "schema": {
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "Entity",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Seed Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entity"
             }
           },
           {
@@ -766,6 +1420,45 @@
               "title": "Depth",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_proposed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Proposed",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As Of"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 60,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -773,7 +1466,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GraphOutput"
+                  "$ref": "#/components/schemas/SubgraphOutput"
                 }
               }
             },
@@ -794,6 +1487,63 @@
       }
     },
     "/v1/meetings": {
+      "get": {
+        "operationId": "list_meetings_v1_meetings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Meetings"
+      },
       "post": {
         "operationId": "create_meeting_v1_meetings_post",
         "parameters": [

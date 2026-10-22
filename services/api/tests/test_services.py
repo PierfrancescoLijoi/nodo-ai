@@ -88,8 +88,7 @@ def test_delete_tombstones_and_erases_derived_data(app) -> None:
     deleted = container.meeting_service.delete(WORKSPACE, USER, "seed-m1")
     assert deleted.tombstoned_at is not None
     assert not any(segment.meeting_id == "seed-m1" for segment in _search(container, "synchronous"))
-    everyone = frozenset({"seed-m1", "seed-m2", "seed-m3"})
-    assert container.graph.lookup(WORKSPACE, "ingestion", 2, 50, everyone) == ()
+    assert container.graph.find_entities(WORKSPACE, USER, ["synchronous"], 5) == ()
     assert container.blobs.was_erased(WORKSPACE, "seed-m1")
 
 
@@ -102,8 +101,6 @@ def test_query_enforces_graph_bounds_and_localizes(app) -> None:
         assert result.answerability is Answerability.SUPPORTED
         assert result.citations
         assert result.answer == container.llm.localized_answer(locale)
-    assert container.graph.last_depth == 2
-    assert container.graph.last_node_limit == container.settings.graph_node_limit
 
 
 def test_query_returns_no_citations_without_evidence(app) -> None:

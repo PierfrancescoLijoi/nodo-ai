@@ -13,6 +13,13 @@ const da = {
     loading: 'Indlæser',
     sampleData: 'Eksempeldata. Denne version optager ikke lyd.',
   },
+  login: {
+    title: 'Log ind på NODO',
+    body: 'Log ind med din organisationskonto for at åbne din mødehukommelse.',
+    signIn: 'Log ind',
+    signingIn: 'Logger ind',
+    error: 'Login mislykkedes. Prøv igen.',
+  },
   home: {
     title: 'Din mødehukommelse',
     record: {
@@ -28,7 +35,7 @@ const da = {
       links_one: 'forbindelse',
       links_other: 'forbindelser',
     },
-    changes: { title: 'Hvad er ændret' },
+    changes: { title: 'Hvad er ændret', replaces: '{{newLabel}} erstatter {{oldLabel}}' },
     recent: { title: 'Seneste møder' },
   },
   meetings: {
@@ -51,6 +58,13 @@ const da = {
     due: 'Frist {{date}}',
     citedSegment: 'Citeret i et svar',
     openGraph: 'Åbn i grafen',
+    state: {
+      uploading: 'Uploader',
+      transcribing: 'Transskriberer',
+      extracting: 'Udleder indhold',
+      review: 'Til gennemgang',
+      failed: 'Mislykket',
+    },
   },
   ask: {
     title: 'Spørg dine møder',
@@ -67,6 +81,7 @@ const da = {
     thinking: 'Jeg gennemsøger dine møder',
     sources: 'Kilder',
     unanswerableTitle: 'Ikke nok belæg',
+    unanswerableBody: 'Jeg kan ikke finde tilstrækkeligt belæg i dine møder til at svare pålideligt.',
     footnote: 'Svarene i denne version kommer kun fra tre eksempelmøder.',
   },
   graph: {
@@ -80,12 +95,15 @@ const da = {
     relations_other: '{{count}} relationer',
     noRelations: 'Ingen relationer endnu.',
     openSource: 'Åbn kildemødet',
+    truncated: 'Kortet viser en del af grafen. Brug listen til at se alle indlæste elementer.',
     types: {
       topic: 'Emne',
       meeting: 'Møde',
       decision: 'Beslutning',
       person: 'Person',
       action: 'Opgave',
+      project: 'Projekt',
+      system: 'System',
     },
     relation: {
       mentionedIn: '{{from}} er nævnt i {{to}}',
@@ -94,7 +112,10 @@ const da = {
       proposedBy: '{{from}} blev foreslået af {{to}}',
       supersedes: '{{from}} erstatter {{to}}',
       assignedTo: '{{from}} er tildelt {{to}}',
+      dependsOn: '{{from}} afhænger af {{to}}',
+      contradicts: '{{from}} modsiger {{to}}',
     },
+    status: { proposed: 'Foreslået', approved: 'Godkendt' },
   },
   capture: {
     title: 'Ny optagelse',
@@ -130,6 +151,12 @@ const da = {
     title: 'Privatliv og kontrol',
     intro: 'Din hukommelse forbliver under din kontrol: sprog, opbevaring, eksport og sletning.',
     language: 'Sprog',
+    account: 'Konto',
+    dataSource: 'Datakilde',
+    dataSourceMock: 'Eksempeldata',
+    dataSourceCloud: 'Cloud-API',
+    signedIn: 'Logget ind',
+    signOut: 'Log ud',
     theme: 'Udseende',
     themeOptions: { system: 'System', light: 'Lys', dark: 'Mørk' },
     retention: 'Opbevaring af lyd',

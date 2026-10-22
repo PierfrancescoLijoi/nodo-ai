@@ -5,10 +5,10 @@ from datetime import UTC, datetime
 from typing import Any, ClassVar
 from uuid import uuid4
 
+from nodo_api.domain.graph import EntityType, Subgraph
 from nodo_api.domain.models import (
     Answerability,
     Citation,
-    GraphNode,
     Locale,
     Meeting,
     MeetingState,
@@ -77,6 +77,21 @@ class MemoryMeetingRepository:
             raise NotFoundError
         self._meetings[(workspace_id, meeting.id)] = meeting
         return meeting
+
+    def list_owned(
+        self, workspace_id: str, user_id: str, limit: int, cursor: tuple[datetime, str] | None
+    ) -> tuple[Meeting, ...]:
+        owned = [
+            meeting
+            for (stored_workspace, _), meeting in self._meetings.items()
+            if stored_workspace == workspace_id
+            and meeting.owner_id == user_id
+            and meeting.tombstoned_at is None
+        ]
+        owned.sort(key=lambda m: (m.created_at, m.id), reverse=True)
+        if cursor is not None:
+            owned = [m for m in owned if (m.created_at, m.id) < cursor]
+        return tuple(owned[:limit])
 
     def all_for_workspace(self, workspace_id: str) -> tuple[Meeting, ...]:
         return tuple(
@@ -207,39 +222,6 @@ class MockRetriever:
                 del self._segments[key]
 
 
-class MemoryGraphStore:
-    def __init__(self) -> None:
-        self._nodes: dict[tuple[str, str], GraphNode] = {}
-        self.last_depth = 0
-        self.last_node_limit = 0
-
-    def add(self, workspace_id: str, node: GraphNode) -> None:
-        self._nodes[(workspace_id, node.id)] = node
-
-    def lookup(
-        self,
-        workspace_id: str,
-        entity: str,
-        depth: int,
-        node_limit: int,
-        allowed_meeting_ids: frozenset[str],
-    ) -> tuple[GraphNode, ...]:
-        self.last_depth = min(depth, 2)
-        self.last_node_limit = node_limit
-        return tuple(
-            node
-            for (stored_workspace, _), node in self._nodes.items()
-            if stored_workspace == workspace_id
-            and node.meeting_id in allowed_meeting_ids
-            and entity.lower() in node.label.lower()
-        )[:node_limit]
-
-    def erase(self, workspace_id: str, meeting_id: str) -> None:
-        for key, node in list(self._nodes.items()):
-            if key[0] == workspace_id and node.meeting_id == meeting_id:
-                del self._nodes[key]
-
-
 class MemoryAuditLog:
     def __init__(self) -> None:
         self._events: dict[tuple[str, str], tuple[str, dict[str, str]]] = {}
@@ -267,17 +249,21 @@ class MockLlm:
         question: str,
         locale: Locale,
         evidence: tuple[TranscriptSegment, ...],
-        graph: tuple[GraphNode, ...],
+        graph: Subgraph,
     ):
         from nodo_api.services.query import GeneratedAnswer
 
         if not evidence:
             return GeneratedAnswer("", Answerability.UNANSWERABLE, (), ())
         citations = tuple(
-            Citation(item.meeting_id, item.id, item.start_ms, item.end_ms, item.text)
+            Citation(
+                item.meeting_id, item.id, item.start_ms, item.end_ms, item.text, item.speaker_id
+            )
             for item in evidence[:3]
         )
-        entities = tuple(dict.fromkeys(node.label for node in graph))
+        entities = tuple(
+            dict.fromkeys(n.label for n in graph.nodes if n.type is not EntityType.MEETING)
+        )
         return GeneratedAnswer(
             self.localized_answer(locale), Answerability.SUPPORTED, citations, entities
         )
@@ -287,29 +273,99 @@ def seed_memory_adapters(
     meetings: MemoryMeetingRepository,
     transcripts: MemoryTranscriptRepository,
     retriever: MockRetriever,
-    graph: MemoryGraphStore,
+    graph: Any,
 ) -> None:
+    from nodo_api.domain.graph import (
+        ExtractedEntity,
+        ExtractedRelation,
+        Extraction,
+        MeetingRef,
+        RelationKind,
+        ReviewStatus,
+        entity_id,
+        normalize_label,
+    )
+
+    owner, workspace = "user-a", "workspace-a"
     texts = (
         ("seed-m1", "seg-001", "Marco proposed keeping the ingestion pipeline synchronous."),
         ("seed-m2", "seg-002", "Sara benchmarked an async queue for the ingestion pipeline."),
         ("seed-m3", "seg-003", "Giulia confirmed the async queue absorbs ingestion traffic peaks."),
     )
+    old_decision = entity_id(
+        workspace,
+        owner,
+        EntityType.DECISION,
+        normalize_label("Keep the ingestion pipeline synchronous"),
+    )
+    extractions = {
+        "seed-m1": (
+            ("Marco", "Keep the ingestion pipeline synchronous"),
+            lambda: (
+                ExtractedEntity("p", EntityType.PERSON, "Marco", ("seg-001",)),
+                ExtractedEntity("t", EntityType.TOPIC, "Ingestion", ("seg-001",)),
+                ExtractedEntity(
+                    "d",
+                    EntityType.DECISION,
+                    "Keep the ingestion pipeline synchronous",
+                    ("seg-001",),
+                ),
+            ),
+            (
+                ExtractedRelation("d", "p", RelationKind.PROPOSED_BY, 0.9, ("seg-001",)),
+                ExtractedRelation("d", "t", RelationKind.ABOUT, 0.9, ("seg-001",)),
+            ),
+        ),
+        "seed-m2": (
+            ("Sara", "Benchmark the async queue"),
+            lambda: (
+                ExtractedEntity("p", EntityType.PERSON, "Sara", ("seg-002",)),
+                ExtractedEntity("t", EntityType.TOPIC, "Async queue", ("seg-002",)),
+                ExtractedEntity("a", EntityType.ACTION, "Benchmark the async queue", ("seg-002",)),
+            ),
+            (
+                ExtractedRelation("a", "p", RelationKind.ASSIGNED_TO, 0.9, ("seg-002",)),
+                ExtractedRelation("a", "t", RelationKind.ABOUT, 0.8, ("seg-002",)),
+            ),
+        ),
+        "seed-m3": (
+            ("Giulia", "Use an async queue for ingestion"),
+            lambda: (
+                ExtractedEntity("p", EntityType.PERSON, "Giulia", ("seg-003",)),
+                ExtractedEntity("t", EntityType.TOPIC, "Ingestion", ("seg-003",)),
+                ExtractedEntity(
+                    "d", EntityType.DECISION, "Use an async queue for ingestion", ("seg-003",)
+                ),
+            ),
+            (
+                ExtractedRelation("d", "p", RelationKind.PROPOSED_BY, 0.9, ("seg-003",)),
+                ExtractedRelation("d", "t", RelationKind.ABOUT, 0.9, ("seg-003",)),
+                ExtractedRelation(
+                    "d", f"existing:{old_decision}", RelationKind.SUPERSEDES, 0.85, ("seg-003",)
+                ),
+            ),
+        ),
+    }
     for index, (meeting_id, segment_id, text) in enumerate(texts, start=1):
-        attestation = _seed_attestation(meeting_id)
+        created = datetime(2026, 10, index, tzinfo=UTC)
         meeting = Meeting(
             meeting_id,
-            "workspace-a",
-            "user-a",
-            datetime(2026, 10, index, tzinfo=UTC),
+            workspace,
+            owner,
+            created,
             MeetingState.READY,
-            attestation,
+            _seed_attestation(meeting_id),
             "NODO",
+            None,
+            f"Seed meeting {index}",
+            text,
+            2000,
         )
-        meetings.add("workspace-a", meeting, f"seed-{index}", "seed")
+        meetings.add(workspace, meeting, f"seed-{index}", "seed")
         segment = TranscriptSegment(
             segment_id,
             meeting_id,
-            f"speaker-{index}",
+            f"S{index}",
             index * 1000,
             index * 1000 + 800,
             text,
@@ -318,10 +374,27 @@ def seed_memory_adapters(
             Locale.EN,
             "NODO",
         )
-        transcripts.add_version("workspace-a", meeting_id, (segment,))
-        retriever.index("workspace-a", segment)
-    graph.add("workspace-a", GraphNode("node-1", "ingestion", "seed-m1", "seg-001"))
-    graph.add("workspace-a", GraphNode("node-2", "async-queue", "seed-m1", "seg-001"))
+        transcripts.add_version(workspace, meeting_id, (segment,))
+        retriever.index(workspace, segment)
+        _, build, relations = extractions[meeting_id]
+        graph.upsert_extraction(
+            workspace,
+            owner,
+            MeetingRef(meeting_id, meeting.title, created),
+            Extraction(text, build(), relations),
+        )
+    snapshot = graph.neighborhood(
+        workspace,
+        owner,
+        [e.id for e in graph.overview(workspace, owner, 100)],
+        depth=1,
+        node_limit=500,
+        fanout=500,
+        include_proposed=True,
+        as_of=None,
+    )
+    for edge in snapshot.edges:
+        graph.review_relation(workspace, owner, edge.id, ReviewStatus.APPROVED)
 
 
 def _seed_attestation(meeting_id: str) -> RecordingAttestation:

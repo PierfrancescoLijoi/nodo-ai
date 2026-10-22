@@ -5,7 +5,16 @@ from __future__ import annotations
 import pytest
 
 from nodo_api.config import DEV_ATTESTATION_KEY, Settings
-from nodo_api.domain.models import Answerability, Citation, GraphNode
+from nodo_api.domain.graph import (
+    Entity,
+    EntityType,
+    Evidence,
+    Relation,
+    RelationKind,
+    ReviewStatus,
+    Subgraph,
+)
+from nodo_api.domain.models import Answerability, Citation
 from nodo_api.main import AppContainer, create_app
 from nodo_api.services.query import EvidenceValidator, GeneratedAnswer
 
@@ -169,7 +178,7 @@ def test_delete_can_be_retried_after_a_partial_failure(app) -> None:
         container.meeting_service.delete(WORKSPACE, "user-a", "seed-m1")
     container.meeting_service.delete(WORKSPACE, "user-a", "seed-m1")  # the retry finishes the job
     assert container.blobs.was_erased(WORKSPACE, "seed-m1")
-    assert container.graph.lookup(WORKSPACE, "ingestion", 2, 50, frozenset({"seed-m1"})) == ()
+    assert container.graph.find_entities(WORKSPACE, "user-a", ["synchronous"], 5) == ()
     with pytest.raises(Exception, match=""):
         container.transcripts.latest(WORKSPACE, "seed-m1")
 
@@ -183,8 +192,28 @@ def test_related_entities_must_be_backed_by_cited_segments(app) -> None:
     citation = Citation(
         segment.meeting_id, segment.id, segment.start_ms, segment.end_ms, segment.text
     )
-    backed = GraphNode("n-1", "ingestion", segment.meeting_id, segment.id)
-    unrelated = GraphNode("n-2", "payroll", "seed-m2", "seg-002")
+    topic = Entity("n-1", EntityType.TOPIC, "ingestion")
+    payroll = Entity("n-2", EntityType.TOPIC, "payroll")
+    meeting = Entity("m-1", EntityType.MEETING, "Meeting", meeting_id=segment.meeting_id)
+    backed = Relation(
+        "r-1",
+        "n-1",
+        "m-1",
+        RelationKind.MENTIONED_IN,
+        ReviewStatus.APPROVED,
+        1.0,
+        evidence=(Evidence(segment.meeting_id, segment.id),),
+    )
+    unrelated = Relation(
+        "r-2",
+        "n-2",
+        "m-1",
+        RelationKind.MENTIONED_IN,
+        ReviewStatus.APPROVED,
+        1.0,
+        evidence=(Evidence("seed-m2", "seg-002"),),
+    )
+    graph = Subgraph((topic, payroll, meeting), (backed, unrelated))
     generated = GeneratedAnswer(
         "Grounded",
         Answerability.SUPPORTED,
@@ -192,7 +221,7 @@ def test_related_entities_must_be_backed_by_cited_segments(app) -> None:
         ("ingestion", "payroll", "<script>alert(1)</script>", "x" * 200),
     )
     validated = EvidenceValidator(container.transcripts).validate(
-        WORKSPACE, generated, (segment,), (backed, unrelated), frozenset({segment.meeting_id})
+        WORKSPACE, generated, (segment,), graph, frozenset({segment.meeting_id})
     )
     assert validated.related_entities == ("ingestion",)
 
@@ -205,7 +234,7 @@ def test_citation_to_a_meeting_the_caller_does_not_own_is_dropped(app) -> None:
     )
     generated = GeneratedAnswer("Grounded", Answerability.SUPPORTED, (citation,), ())
     validated = EvidenceValidator(container.transcripts).validate(
-        WORKSPACE, generated, (segment,), (), frozenset({"seed-m2"})
+        WORKSPACE, generated, (segment,), None, frozenset({"seed-m2"})
     )
     assert validated.answerability is Answerability.UNANSWERABLE
 

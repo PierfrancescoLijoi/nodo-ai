@@ -1,7 +1,17 @@
 import type { Locale } from '@/i18n';
 import { formatDate } from '@/i18n/format';
 
-import type { Answer, Citation, Graph, GraphEdge, GraphNode, Meeting, MeetingsRepository, QuestionId } from '../types';
+import type {
+  Answer,
+  Citation,
+  Graph,
+  GraphEdge,
+  GraphNode,
+  Meeting,
+  MeetingSummary,
+  MeetingsRepository,
+  QuestionId,
+} from '../types';
 import { CHANGE_FACTS, CONTENT, FACTS, SECOND_SEGMENT, type LocaleContent } from './content';
 
 const LATENCY_MS = 450;
@@ -117,7 +127,18 @@ export function createMockRepository(locale: Locale): MeetingsRepository {
   return {
     async listMeetings() {
       await pause(120);
-      return meetings;
+      return meetings.map((meeting): MeetingSummary => ({
+        id: meeting.id,
+        title: meeting.title,
+        startedAt: meeting.startedAt,
+        durationMin: meeting.durationMin,
+        participants: meeting.participants,
+        tags: meeting.tags,
+        summary: meeting.summary,
+        decisionCount: meeting.decisions.length,
+        actionCount: meeting.actions.length,
+        state: 'ready',
+      }));
     },
     async getMeeting(id) {
       await pause(120);

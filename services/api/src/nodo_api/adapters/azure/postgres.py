@@ -19,7 +19,6 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from nodo_api.domain.models import (
-    GraphNode,
     Locale,
     Meeting,
     MeetingState,
@@ -100,11 +99,15 @@ def _meeting(row: dict[str, Any], attestation: dict[str, Any]) -> Meeting:
         ),
         project=row["project"],
         tombstoned_at=row["tombstoned_at"],
+        title=row["title"],
+        summary=row["summary"],
+        duration_ms=row["duration_ms"],
     )
 
 
 _MEETING_SELECT = """
     SELECT m.workspace_id, m.id, m.owner_id, m.state, m.project, m.created_at, m.tombstoned_at,
+           m.title, m.summary, m.duration_ms,
            a.user_id, a.meeting_id, a.notice_version, a.locale, a.retention_policy_id,
            a.acknowledged_at, a.audit_event_id, a.signature
     FROM meetings m
@@ -130,8 +133,8 @@ class PgMeetingRepository:
             if existing is not None:
                 return existing[0]
             conn.execute(
-                "INSERT INTO meetings (workspace_id, id, owner_id, state, project, created_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s)",
+                "INSERT INTO meetings (workspace_id, id, owner_id, state, project, created_at,"
+                " title, summary, duration_ms) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     workspace_id,
                     meeting.id,
@@ -139,6 +142,9 @@ class PgMeetingRepository:
                     meeting.state.value,
                     meeting.project,
                     meeting.created_at,
+                    meeting.title,
+                    meeting.summary,
+                    meeting.duration_ms,
                 ),
             )
             a = meeting.attestation
@@ -229,12 +235,15 @@ class PgMeetingRepository:
     def save(self, workspace_id: str, meeting: Meeting) -> Meeting:
         with self._db.workspace(workspace_id) as conn:
             cursor = conn.execute(
-                "UPDATE meetings SET state = %s, project = %s, tombstoned_at = %s"
-                " WHERE workspace_id = %s AND id = %s",
+                "UPDATE meetings SET state = %s, project = %s, tombstoned_at = %s, title = %s,"
+                " summary = %s, duration_ms = %s WHERE workspace_id = %s AND id = %s",
                 (
                     meeting.state.value,
                     meeting.project,
                     meeting.tombstoned_at,
+                    meeting.title,
+                    meeting.summary,
+                    meeting.duration_ms,
                     workspace_id,
                     meeting.id,
                 ),
@@ -242,6 +251,22 @@ class PgMeetingRepository:
             if cursor.rowcount == 0:
                 raise NotFoundError
         return meeting
+
+    def list_owned(
+        self, workspace_id: str, user_id: str, limit: int, cursor: tuple[datetime, str] | None
+    ) -> tuple[Meeting, ...]:
+        """Keyset pagination on (created_at, id) so deep pages cost the same as the first."""
+        after = "" if cursor is None else " AND (m.created_at, m.id) < (%s, %s)"
+        params: tuple = (workspace_id, user_id, *(cursor or ()), limit)
+        with self._db.workspace(workspace_id) as conn:
+            rows = conn.execute(
+                _MEETING_SELECT
+                + " WHERE m.workspace_id = %s AND m.owner_id = %s AND m.tombstoned_at IS NULL"
+                + after
+                + " ORDER BY m.created_at DESC, m.id DESC LIMIT %s",
+                params,
+            ).fetchall()
+        return tuple(_meeting(row, row) for row in rows)
 
     def all_for_workspace(self, workspace_id: str) -> tuple[Meeting, ...]:
         with self._db.workspace(workspace_id) as conn:
@@ -368,54 +393,6 @@ class PgAuditLog:
                 (workspace_id, event_id, event_type, json.dumps(metadata)),
             )
         return event_id
-
-
-def _like_pattern(text: str) -> str:
-    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
-
-
-class PgGraphStore:
-    """Nodes only for now; relations arrive with the extraction stage (ADR-011)."""
-
-    def __init__(self, db: PostgresDatabase) -> None:
-        self._db = db
-
-    def add(self, workspace_id: str, node: GraphNode) -> None:
-        with self._db.workspace(workspace_id) as conn:
-            conn.execute(
-                "INSERT INTO graph_nodes (workspace_id, id, label, meeting_id, segment_id)"
-                " VALUES (%s, %s, %s, %s, %s)"
-                " ON CONFLICT (workspace_id, id) DO UPDATE SET label = EXCLUDED.label,"
-                " meeting_id = EXCLUDED.meeting_id, segment_id = EXCLUDED.segment_id",
-                (workspace_id, node.id, node.label, node.meeting_id, node.segment_id),
-            )
-
-    def lookup(
-        self,
-        workspace_id: str,
-        entity: str,
-        depth: int,
-        node_limit: int,
-        allowed_meeting_ids: frozenset[str],
-    ) -> tuple[GraphNode, ...]:
-        if not allowed_meeting_ids:
-            return ()
-        with self._db.workspace(workspace_id) as conn:
-            rows = conn.execute(
-                "SELECT id, label, meeting_id, segment_id FROM graph_nodes"
-                " WHERE workspace_id = %s AND meeting_id = ANY(%s) AND label ILIKE %s"
-                " ORDER BY label LIMIT %s",
-                (workspace_id, list(allowed_meeting_ids), _like_pattern(entity), node_limit),
-            ).fetchall()
-        return tuple(GraphNode(r["id"], r["label"], r["meeting_id"], r["segment_id"]) for r in rows)
-
-    def erase(self, workspace_id: str, meeting_id: str) -> None:
-        with self._db.workspace(workspace_id) as conn:
-            conn.execute(
-                "DELETE FROM graph_nodes WHERE workspace_id = %s AND meeting_id = %s",
-                (workspace_id, meeting_id),
-            )
 
 
 class PgJobOutbox:

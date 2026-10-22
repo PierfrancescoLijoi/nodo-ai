@@ -1,25 +1,40 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
+from nodo_api.api.v1.mapping import (
+    decode_cursor,
+    edge_output,
+    encode_cursor,
+    list_item,
+    meeting_output,
+    subgraph_output,
+)
 from nodo_api.api.v1.schemas import (
+    ChangeOutput,
+    ChangesOutput,
     ExportInput,
     ExportOutput,
-    GraphOutput,
+    GraphEdgeOutput,
     MeetingCreate,
+    MeetingList,
     MeetingOutput,
     QueryFiltersInput,
     QueryInput,
     QueryOutput,
     ReviewInput,
     ReviewOutput,
+    ReviewRelationInput,
+    SubgraphOutput,
     TranscriptPage,
     UploadSessionOutput,
     VoiceQueryInput,
 )
 from nodo_api.auth import AuthError, Principal
+from nodo_api.domain.graph import ReviewStatus
 from nodo_api.errors import AuthenticationError
 from nodo_api.services.query import QueryFilters, QueryRequest
 
@@ -55,8 +70,9 @@ def create_meeting(
         idempotency_key,
         payload.recording_attestation.model_dump(mode="json"),
         payload.project,
+        payload.title,
     )
-    return _meeting_output(meeting)
+    return meeting_output(meeting)
 
 
 @router.post(
@@ -75,15 +91,36 @@ def complete_meeting(meeting_id: str, actor: PrincipalDep, request: Request):
     meeting = request.app.state.container.meeting_service.complete(
         actor.workspace_id, actor.user_id, meeting_id
     )
-    return _meeting_output(meeting)
+    return meeting_output(meeting)
+
+
+@router.get("/meetings", response_model=MeetingList)
+def list_meetings(
+    actor: PrincipalDep,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+):
+    container = request.app.state.container
+    page = container.meetings.list_owned(
+        actor.workspace_id, actor.user_id, limit + 1, decode_cursor(cursor)
+    )
+    items, has_more = page[:limit], len(page) > limit
+    digests = container.graph_service.digests(
+        actor.workspace_id, actor.user_id, [m.id for m in items]
+    )
+    return MeetingList(
+        items=tuple(list_item(m, digests.get(m.id)) for m in items),
+        next_cursor=encode_cursor(items[-1]) if has_more and items else None,
+    )
 
 
 @router.get("/meetings/{meeting_id}", response_model=MeetingOutput)
 def get_meeting(meeting_id: str, actor: PrincipalDep, request: Request):
-    meeting = request.app.state.container.meeting_service.get(
-        actor.workspace_id, actor.user_id, meeting_id
-    )
-    return _meeting_output(meeting)
+    container = request.app.state.container
+    meeting = container.meeting_service.get(actor.workspace_id, actor.user_id, meeting_id)
+    digest = container.graph_service.digests(actor.workspace_id, actor.user_id, [meeting_id])
+    return meeting_output(meeting, digest.get(meeting_id))
 
 
 @router.get("/meetings/{meeting_id}/transcript", response_model=TranscriptPage)
@@ -138,20 +175,61 @@ def voice_query(payload: VoiceQueryInput, actor: PrincipalDep, request: Request)
     return result
 
 
-@router.get("/graph/subgraph", response_model=GraphOutput)
+@router.get("/graph/subgraph", response_model=SubgraphOutput)
 def graph_subgraph(
     actor: PrincipalDep,
     request: Request,
-    entity: Annotated[str, Query(min_length=1, max_length=128)],
+    seed_id: Annotated[str | None, Query(max_length=64)] = None,
+    entity: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
     depth: Annotated[int, Query(ge=1, le=2)] = 2,
+    include_proposed: bool = False,
+    as_of: datetime | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 60,
 ):
-    container = request.app.state.container
-    allowed = container.meetings.owned_ids(actor.workspace_id, actor.user_id)
-    limit = container.settings.graph_node_limit
-    nodes = container.graph.lookup(actor.workspace_id, entity, min(depth, 2), limit, allowed)[
-        :limit
-    ]
-    return GraphOutput(nodes=nodes, depth=depth)
+    graph = request.app.state.container.graph_service.subgraph(
+        actor.workspace_id,
+        actor.user_id,
+        seed_id=seed_id,
+        entity=entity,
+        depth=depth,
+        include_proposed=include_proposed,
+        as_of=as_of,
+        limit=limit,
+    )
+    return subgraph_output(graph, depth)
+
+
+@router.patch("/graph/relations/{relation_id}", response_model=GraphEdgeOutput)
+def review_relation(
+    relation_id: str, payload: ReviewRelationInput, actor: PrincipalDep, request: Request
+):
+    relation = request.app.state.container.graph_service.review(
+        actor.workspace_id, actor.user_id, relation_id, ReviewStatus(payload.status)
+    )
+    return edge_output(relation)
+
+
+@router.get("/graph/changes", response_model=ChangesOutput)
+def graph_changes(
+    actor: PrincipalDep,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+):
+    changes = request.app.state.container.graph_service.changes(
+        actor.workspace_id, actor.user_id, limit
+    )
+    return ChangesOutput(
+        items=tuple(
+            ChangeOutput(
+                id=c.id,
+                new_label=c.new_label,
+                old_label=c.old_label,
+                meeting_id=c.meeting_id,
+                at=c.at,
+            )
+            for c in changes
+        )
+    )
 
 
 @router.post("/export", response_model=ExportOutput, status_code=status.HTTP_202_ACCEPTED)
@@ -173,23 +251,3 @@ def delete_meeting(meeting_id: str, actor: PrincipalDep, request: Request) -> Re
 def _query_request(question, locale, filters: QueryFiltersInput | None) -> QueryRequest:
     service_filters = QueryFilters(**filters.model_dump()) if filters else None
     return QueryRequest(question, locale, service_filters)
-
-
-def _meeting_output(meeting) -> MeetingOutput:
-    attestation = meeting.attestation
-    return MeetingOutput(
-        id=meeting.id,
-        workspace_id=meeting.workspace_id,
-        owner_id=meeting.owner_id,
-        state=meeting.state,
-        created_at=meeting.created_at,
-        project=meeting.project,
-        recording_attestation={
-            "notice_version": attestation.notice_version,
-            "locale": attestation.locale,
-            "retention_policy_id": attestation.retention_policy_id,
-            "acknowledged_at": attestation.acknowledged_at,
-            "audit_event_id": attestation.audit_event_id,
-            "signature": attestation.signature,
-        },
-    )

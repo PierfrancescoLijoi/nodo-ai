@@ -58,6 +58,9 @@ class Meeting:
     attestation: RecordingAttestation
     project: str | None = None
     tombstoned_at: datetime | None = None
+    title: str | None = None
+    summary: str | None = None
+    duration_ms: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,14 +95,7 @@ class Citation:
     start_ms: int
     end_ms: int
     quote: str
-
-
-@dataclass(frozen=True, slots=True)
-class GraphNode:
-    id: str
-    label: str
-    meeting_id: str
-    segment_id: str
+    speaker_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

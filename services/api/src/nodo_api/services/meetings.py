@@ -67,8 +67,9 @@ class MeetingService:
         idempotency_key: str,
         attestation_payload: dict[str, Any],
         project: str | None = None,
+        title: str | None = None,
     ) -> Meeting:
-        request_hash = _request_hash(attestation_payload, project)
+        request_hash = _request_hash(attestation_payload, project, title)
         existing = self._meetings.get_by_idempotency_key(workspace_id, user_id, idempotency_key)
         if existing is not None:
             meeting, stored_hash = existing
@@ -86,6 +87,7 @@ class MeetingService:
             state=MeetingState.UPLOADING,
             attestation=attestation,
             project=project,
+            title=title,
         )
         return self._meetings.add(workspace_id, meeting, idempotency_key, request_hash)
 
@@ -197,8 +199,12 @@ class MeetingService:
         return self._jobs.publish_once(workspace_id, f"{user_id}:{uuid4()}", "export", payload)
 
 
-def _request_hash(attestation_payload: dict[str, Any], project: str | None) -> str:
+def _request_hash(
+    attestation_payload: dict[str, Any], project: str | None, title: str | None
+) -> str:
     canonical = json.dumps(
-        {"attestation": attestation_payload, "project": project}, sort_keys=True, default=str
+        {"attestation": attestation_payload, "project": project, "title": title},
+        sort_keys=True,
+        default=str,
     )
     return hashlib.sha256(canonical.encode()).hexdigest()

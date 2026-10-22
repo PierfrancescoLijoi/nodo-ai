@@ -60,7 +60,7 @@ function AnswerCard({ turn, titles, onRetry }: { turn: Turn; titles: Record<stri
               </Text>
             </View>
           ) : null}
-          <Text>{answer.text}</Text>
+          <Text>{answer.answerability === 'unanswerable' ? t('ask.unanswerableBody') : answer.text}</Text>
           {answer.citations.length > 0 ? (
             <View style={{ gap: space[2] }}>
               <Text variant="label" tone="muted">

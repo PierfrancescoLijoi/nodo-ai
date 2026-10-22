@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, View } from 'react-native';
 
 import { useAsync } from '@/data/RepositoryProvider';
+import { config } from '@/config';
 import type { EntityType, Graph } from '@/data/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space, touch } from '@/theme/tokens';
@@ -18,9 +19,10 @@ import { Tag } from '@/ui/Tag';
 import { Text } from '@/ui/Text';
 
 import { GraphMap } from './GraphMap';
+import { radialLayout } from './layout';
 import { TYPE_ICONS } from './typeIcons';
 
-const TYPE_ORDER: EntityType[] = ['decision', 'topic', 'meeting', 'person', 'action'];
+const TYPE_ORDER: EntityType[] = ['decision', 'topic', 'project', 'system', 'meeting', 'person', 'action'];
 
 function NodeDetail({ graph, nodeId }: { graph: Graph; nodeId: string }) {
   const { t } = useTranslation();
@@ -38,17 +40,21 @@ function NodeDetail({ graph, nodeId }: { graph: Graph; nodeId: string }) {
         </Text>
         <Tag label={t(`graph.types.${node.type}`)} tone="accent" />
       </View>
-      <Text tone="muted">{node.description}</Text>
+      {node.description ? <Text tone="muted">{node.description}</Text> : null}
       <View style={{ gap: space[2] }}>
         <Text variant="label" tone="muted">
           {t('graph.relations', { count: relations.length })}
         </Text>
         {relations.length === 0 ? <Text variant="small">{t('graph.noRelations')}</Text> : null}
-        {relations.map((edge) => (
-          <Text key={`${edge.from}-${edge.kind}-${edge.to}`} variant="small">
-            {t(`graph.relation.${edge.kind}`, { from: labelOf(edge.from), to: labelOf(edge.to) })}
-          </Text>
-        ))}
+        {relations.map((edge) => {
+          const relation = t(`graph.relation.${edge.kind}`, { from: labelOf(edge.from), to: labelOf(edge.to) });
+          const status = edge.status ? t(`graph.status.${edge.status}`) : undefined;
+          return (
+            <Text key={`${edge.from}-${edge.kind}-${edge.to}`} variant="small">
+              {[relation, status].filter(Boolean).join(' - ')}
+            </Text>
+          );
+        })}
       </View>
       {node.meetingId ? (
         <Button
@@ -111,9 +117,20 @@ function EntityList({ graph, selected, onSelect }: { graph: Graph; selected: str
 
 export default function GraphScreen() {
   const { t } = useTranslation();
-  const graph = useAsync((r) => r.getGraph());
+  const [seedId, setSeedId] = useState<string>();
+  const graph = useAsync((r) => r.getGraph(seedId ? { seedId } : undefined), [seedId]);
   const [view, setView] = useState<'list' | 'map'>('list');
   const [selected, setSelected] = useState('queue');
+  const effectiveSelected =
+    graph.status === 'ready' && graph.data.nodes.some((node) => node.id === selected)
+      ? selected
+      : graph.status === 'ready'
+        ? (graph.data.nodes[0]?.id ?? '')
+        : selected;
+  const select = (id: string) => {
+    setSelected(id);
+    if (config.dataSource === 'cloud') setSeedId(id);
+  };
 
   return (
     <Screen title={t('graph.title')} intro={t('graph.intro')} right={<SettingsButton />}>
@@ -131,11 +148,18 @@ export default function GraphScreen() {
       ) : graph.status !== 'ready' ? (
         <Skeleton height={240} />
       ) : view === 'list' ? (
-        <EntityList graph={graph.data} selected={selected} onSelect={setSelected} />
+        <>
+          {graph.data.truncated ? <Text tone="muted">{t('graph.truncated')}</Text> : null}
+          <EntityList graph={graph.data} selected={effectiveSelected} onSelect={select} />
+        </>
       ) : (
         <>
-          <GraphMap graph={graph.data} selected={selected} onSelect={setSelected} />
-          <NodeDetail graph={graph.data} nodeId={selected} />
+          {graph.data.truncated ||
+          radialLayout(graph.data, effectiveSelected, { width: 340, height: 300, maxNodes: 12 }).leftOut.length > 0 ? (
+            <Text tone="muted">{t('graph.truncated')}</Text>
+          ) : null}
+          <GraphMap graph={graph.data} selected={effectiveSelected} onSelect={select} />
+          <NodeDetail graph={graph.data} nodeId={effectiveSelected} />
         </>
       )}
     </Screen>

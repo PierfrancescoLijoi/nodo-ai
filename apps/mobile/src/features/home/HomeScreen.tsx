@@ -40,7 +40,7 @@ export default function HomeScreen() {
   const graph = useAsync((r) => r.getGraph());
 
   const failed = [meetings, changes, graph].find((state) => state.status === 'error');
-  const decisionCount = meetings.status === 'ready' ? meetings.data.reduce((n, m) => n + m.decisions.length, 0) : 0;
+  const decisionCount = meetings.status === 'ready' ? meetings.data.reduce((n, m) => n + m.decisionCount, 0) : 0;
 
   return (
     <Screen wordmark title={t('home.title')} right={<SettingsButton />}>
@@ -71,7 +71,9 @@ export default function HomeScreen() {
               onPress={() => router.push({ pathname: '/meeting/[id]', params: { id: change.meetingId } })}
               style={{ gap: space[1], paddingVertical: space[2] }}
             >
-              <Text>{change.text}</Text>
+              <Text>
+                {change.text ?? t('home.changes.replaces', { newLabel: change.newLabel, oldLabel: change.oldLabel })}
+              </Text>
               <Text variant="mono" tone="muted">
                 {formatDate(change.date, locale, 'long')}
               </Text>

@@ -3,7 +3,7 @@ import { CaretRight } from 'phosphor-react-native';
 import { useTranslation } from 'react-i18next';
 import { Pressable, View } from 'react-native';
 
-import type { Meeting } from '@/data/types';
+import type { MeetingSummary } from '@/data/types';
 import type { Locale } from '@/i18n';
 import { formatDate } from '@/i18n/format';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -12,7 +12,7 @@ import { radius, space } from '@/theme/tokens';
 import { Tag } from './Tag';
 import { Text } from './Text';
 
-export function MeetingRow({ meeting, locale }: { meeting: Meeting; locale: Locale }) {
+export function MeetingRow({ meeting, locale }: { meeting: MeetingSummary; locale: Locale }) {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const router = useRouter();
@@ -36,6 +36,7 @@ export function MeetingRow({ meeting, locale }: { meeting: Meeting; locale: Loca
     >
       <View style={{ flex: 1, gap: space[2] }}>
         <Text variant="heading">{meeting.title}</Text>
+        {meeting.state !== 'ready' ? <Tag label={t(`meeting.state.${meeting.state}`)} tone="accent" /> : null}
         <Text variant="small" tone="muted">
           {when}
         </Text>

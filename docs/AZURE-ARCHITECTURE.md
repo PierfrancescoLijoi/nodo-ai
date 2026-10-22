@@ -143,7 +143,9 @@ Fixed monthly drivers in a beta: Search Basic, Service Bus Standard, Postgres B1
 
 | Port | Azure adapter | Verified how |
 |---|---|---|
-| MeetingRepository, TranscriptRepository, AuditLog, GraphStore, job outbox | `adapters/azure/postgres.py` plus `migrations/0001_init.sql` | 12 integration tests on a real PostgreSQL 16: ownership, per-user idempotency under concurrency, row level security as a non-superuser, append-only audit, an HTTP flow end to end |
+| MeetingRepository (with keyset list), TranscriptRepository, AuditLog, job outbox | `adapters/azure/postgres.py` plus `migrations/0001_init.sql` | 12 integration tests on a real PostgreSQL 16: ownership, per-user idempotency under concurrency, row level security as a non-superuser, append-only audit, an HTTP flow end to end |
+| GraphStore | `adapters/azure/graph_pg.py` plus `migrations/0002_graph.sql` (ADR-012) | one contract suite (60 tests) run on the memory store and on real PostgreSQL; benchmark on 1M relations in ADR-012 |
+| Extractor | `adapters/azure/openai_extractor.py` (strict JSON schema, numbered evidence, validated afterwards) | fakes: parsing, bad output, tag neutralisation |
 | BlobStore | `adapters/azure/blob.py` (user-delegation SAS, one blob per meeting, write-only upload, read-only link) | SAS generated offline with a constructed delegation key and its query string inspected |
 | JobQueue | `adapters/azure/servicebus.py` (outbox row first, then send, message id = job identity) | fakes: single send, retry after a failed send |
 | Retriever | `adapters/azure/search.py` (index with four analyzer fields and a vector field, hybrid query, access filter inside the query) | fakes: filter text, document shape, paging erase; the index definition builds with the real SDK models |
@@ -160,4 +162,4 @@ Not yet verified against a live Azure account, and therefore the first things to
 4. The embedding deployment size equals `NODO_OPENAI_EMBEDDING_DIMENSIONS`.
 5. A Container Apps job starts from the Service Bus rule with the worker identity and finishes within its replica timeout.
 
-Not built yet: claim and decision extraction (the worker stops at `review` after saving the transcript), graph relations, the review flow, the list endpoint for meetings, spoken-language selection per meeting, and the export job runner.
+Not built yet: spoken-language selection per meeting and the export job runner. Extraction, the graph, the review flow and the meetings list endpoint are built (see `docs/API-V1.md`).

@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, View } from 'react-native';
 
 import { LOCALES } from '@/i18n';
+import { useAuth } from '@/auth/AuthProvider';
+import { config } from '@/config';
 import { usePrefs, type RetentionDays, type ThemePreference } from '@/prefs/PrefsProvider';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space, touch } from '@/theme/tokens';
@@ -67,10 +69,25 @@ function DataRow({ title, body }: { title: string; body: string }) {
 
 export default function SettingsScreen() {
   const { t } = useTranslation();
+  const { status, signOut } = useAuth();
   const { themePreference, setThemePreference, retentionDays, setRetentionDays } = usePrefs();
 
   return (
     <Screen back title={t('settings.title')} intro={t('settings.intro')} bottomInset>
+      <View style={{ gap: space[3] }}>
+        <SectionHeader title={t('settings.account')} />
+        <Surface>
+          <Text variant="heading">{t('settings.dataSource')}</Text>
+          <Text tone="muted">
+            {t(config.dataSource === 'cloud' ? 'settings.dataSourceCloud' : 'settings.dataSourceMock')}
+          </Text>
+          <Text tone="muted">{t('settings.signedIn')}</Text>
+          {config.dataSource === 'cloud' && status === 'signedIn' ? (
+            <Button variant="secondary" label={t('settings.signOut')} onPress={() => void signOut()} />
+          ) : null}
+        </Surface>
+      </View>
+
       <View style={{ gap: space[3] }}>
         <SectionHeader title={t('settings.language')} />
         <LanguagePicker />

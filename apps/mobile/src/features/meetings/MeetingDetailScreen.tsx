@@ -58,12 +58,16 @@ function Body({ meeting, highlight }: { meeting: Meeting; highlight?: string }) 
         {meeting.actions.map((action) => (
           <Surface key={action.id}>
             <Text variant="heading">{action.text}</Text>
-            <Text variant="small" tone="muted">
-              {t('meeting.owner', { name: action.owner })}
-            </Text>
-            <Text variant="small" tone="muted">
-              {t('meeting.due', { date: formatDate(action.dueDate, locale, 'long') })}
-            </Text>
+            {action.owner ? (
+              <Text variant="small" tone="muted">
+                {t('meeting.owner', { name: action.owner })}
+              </Text>
+            ) : null}
+            {action.dueDate ? (
+              <Text variant="small" tone="muted">
+                {t('meeting.due', { date: formatDate(action.dueDate, locale, 'long') })}
+              </Text>
+            ) : null}
           </Surface>
         ))}
       </View>

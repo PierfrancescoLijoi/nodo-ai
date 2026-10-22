@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from nodo_api.domain.models import Answerability, Citation, GraphNode, Locale, TranscriptSegment
+from nodo_api.domain.graph import EntityType, Subgraph
+from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
 from nodo_api.ports import GraphStore, LlmClient, MeetingRepository, Retriever, TranscriptRepository
 
 MAX_GRAPH_DEPTH = 2
+GRAPH_FANOUT = 15
 MAX_EVIDENCE = 20
 MAX_ENTITIES = 10
 MAX_ENTITY_LENGTH = 64
-MAX_ENTITY_QUERY = 128
+SEED_ENTITIES = 5
+MAX_TERMS = 8
+_WORD = re.compile(r"\w+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +60,19 @@ class QueryResult(GeneratedAnswer):
     retrieval_version: str = "hybrid-graph-v1"
 
 
+def entity_support(graph: Subgraph) -> dict[str, frozenset[tuple[str, str]]]:
+    """For each entity label, the transcript segments that back the edges touching it."""
+    nodes = {n.id: n for n in graph.nodes}
+    support: dict[str, set[tuple[str, str]]] = {}
+    for edge in graph.edges:
+        evidence = {(e.meeting_id, e.segment_id) for e in edge.evidence}
+        for node_id in (edge.source_id, edge.target_id):
+            node = nodes.get(node_id)
+            if node is not None and node.type is not EntityType.MEETING:
+                support.setdefault(node.label, set()).update(evidence)
+    return {label: frozenset(keys) for label, keys in support.items()}
+
+
 class EvidenceValidator:
     """Nothing the model says is trusted: citations and entities must be backed by evidence."""
 
@@ -66,7 +84,7 @@ class EvidenceValidator:
         workspace_id: str,
         generated: GeneratedAnswer,
         retrieved: tuple[TranscriptSegment, ...],
-        graph: tuple[GraphNode, ...] = (),
+        graph: Subgraph | None = None,
         allowed_meeting_ids: frozenset[str] | None = None,
     ) -> GeneratedAnswer:
         retrieved_keys = {(segment.meeting_id, segment.id) for segment in retrieved}
@@ -82,7 +100,8 @@ class EvidenceValidator:
         answerability = generated.answerability
         if len(valid) < len(generated.citations):
             answerability = Answerability.PARTIAL
-        entities = self._entities(generated, graph, {(c.meeting_id, c.segment_id) for c in valid})
+        cited = {(c.meeting_id, c.segment_id) for c in valid}
+        entities = self._entities(generated, entity_support(graph or Subgraph()), cited)
         return replace(
             generated, answerability=answerability, citations=valid, related_entities=entities
         )
@@ -100,12 +119,12 @@ class EvidenceValidator:
     @staticmethod
     def _entities(
         generated: GeneratedAnswer,
-        graph: tuple[GraphNode, ...],
+        support: dict[str, frozenset[tuple[str, str]]],
         cited: set[tuple[str, str]],
     ) -> tuple[str, ...]:
-        backed = {node.label for node in graph if (node.meeting_id, node.segment_id) in cited}
         claimed = (e for e in generated.related_entities if len(e) <= MAX_ENTITY_LENGTH)
-        return tuple(dict.fromkeys(e for e in claimed if e in backed))[:MAX_ENTITIES]
+        backed = (e for e in claimed if support.get(e, frozenset()) & cited)
+        return tuple(dict.fromkeys(backed))[:MAX_ENTITIES]
 
 
 class QueryService:
@@ -131,14 +150,7 @@ class QueryService:
         evidence = self._retriever.search(
             workspace_id, request.question, filters, allowed, MAX_EVIDENCE
         )[:MAX_EVIDENCE]
-        entity = "ingestion" if "ingestion" in request.question.lower() else request.question
-        graph = self._graph.lookup(
-            workspace_id,
-            entity[:MAX_ENTITY_QUERY],
-            MAX_GRAPH_DEPTH,
-            self._graph_node_limit,
-            allowed,
-        )[: self._graph_node_limit]
+        graph = self._context_graph(workspace_id, user_id, request.question)
         generated = self._llm.answer(
             workspace_id, request.question, request.ui_locale, evidence, graph
         )
@@ -149,4 +161,21 @@ class QueryService:
             citations=validated.citations,
             related_entities=validated.related_entities,
             query_trace_id=str(uuid4()),
+        )
+
+    def _context_graph(self, workspace_id: str, user_id: str, question: str) -> Subgraph:
+        """Entities the question names, plus their reviewed neighbourhood, within hard bounds."""
+        terms = tuple(dict.fromkeys(w for w in _WORD.findall(question.lower()) if len(w) >= 3))[
+            :MAX_TERMS
+        ]
+        seeds = self._graph.find_entities(workspace_id, user_id, terms, SEED_ENTITIES)
+        return self._graph.neighborhood(
+            workspace_id,
+            user_id,
+            [e.id for e in seeds],
+            depth=MAX_GRAPH_DEPTH,
+            node_limit=self._graph_node_limit,
+            fanout=GRAPH_FANOUT,
+            include_proposed=False,
+            as_of=None,
         )

@@ -8,7 +8,8 @@ import json
 import re
 from typing import Any
 
-from nodo_api.domain.models import Answerability, Citation, GraphNode, Locale, TranscriptSegment
+from nodo_api.domain.graph import Subgraph
+from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
 
 LANGUAGE_NAMES = {
     Locale.EN: "English",
@@ -70,7 +71,7 @@ class AzureOpenAiLlm:
         question: str,
         locale: Locale,
         evidence: tuple[TranscriptSegment, ...],
-        graph: tuple[GraphNode, ...],
+        graph: Subgraph,
     ) -> Any:
         if not evidence:
             return _unanswerable()
@@ -102,7 +103,7 @@ class AzureOpenAiLlm:
         except (ValueError, KeyError, TypeError):
             return _unanswerable()
         citations = tuple(
-            Citation(s.meeting_id, s.id, s.start_ms, s.end_ms, s.text)
+            Citation(s.meeting_id, s.id, s.start_ms, s.end_ms, s.text, s.speaker_id)
             for ref in dict.fromkeys(refs)
             if 1 <= ref <= len(evidence)
             for s in (evidence[ref - 1],)

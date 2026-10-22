@@ -13,6 +13,13 @@ const it = {
     loading: 'Caricamento',
     sampleData: 'Dati di esempio. Questa versione non registra audio.',
   },
+  login: {
+    title: 'Accedi a NODO',
+    body: 'Accedi con il tuo account aziendale per consultare la memoria dei meeting.',
+    signIn: 'Accedi',
+    signingIn: 'Accesso in corso',
+    error: 'Accesso non riuscito. Riprova.',
+  },
   home: {
     title: 'La memoria dei tuoi meeting',
     record: {
@@ -28,7 +35,7 @@ const it = {
       links_one: 'collegamento',
       links_other: 'collegamenti',
     },
-    changes: { title: 'Cosa è cambiato' },
+    changes: { title: 'Cosa è cambiato', replaces: '{{newLabel}} sostituisce {{oldLabel}}' },
     recent: { title: 'Meeting recenti' },
   },
   meetings: {
@@ -51,6 +58,13 @@ const it = {
     due: 'Scadenza {{date}}',
     citedSegment: 'Citato in una risposta',
     openGraph: 'Apri nel grafo',
+    state: {
+      uploading: 'Caricamento',
+      transcribing: 'Trascrizione',
+      extracting: 'Elaborazione',
+      review: 'Da rivedere',
+      failed: 'Non riuscito',
+    },
   },
   ask: {
     title: 'Chiedi ai tuoi meeting',
@@ -67,6 +81,7 @@ const it = {
     thinking: 'Sto cercando nei tuoi meeting',
     sources: 'Fonti',
     unanswerableTitle: 'Prove insufficienti',
+    unanswerableBody: 'Non trovo prove sufficienti nei tuoi meeting per rispondere in modo affidabile.',
     footnote: 'In questa versione le risposte vengono solo da tre meeting di esempio.',
   },
   graph: {
@@ -80,12 +95,15 @@ const it = {
     relations_other: '{{count}} relazioni',
     noRelations: 'Ancora nessuna relazione.',
     openSource: 'Apri il meeting di origine',
+    truncated: 'La mappa mostra solo una parte del grafo. Usa l’elenco per vedere tutte le entità caricate.',
     types: {
       topic: 'Argomento',
       meeting: 'Meeting',
       decision: 'Decisione',
       person: 'Persona',
       action: 'Azione',
+      project: 'Progetto',
+      system: 'Sistema',
     },
     relation: {
       mentionedIn: '{{from}}: menzione in {{to}}',
@@ -94,7 +112,10 @@ const it = {
       proposedBy: '{{from}}: proposta di {{to}}',
       supersedes: '{{from}} sostituisce {{to}}',
       assignedTo: '{{from}}: assegnazione a {{to}}',
+      dependsOn: '{{from}} dipende da {{to}}',
+      contradicts: '{{from}} è in contrasto con {{to}}',
     },
+    status: { proposed: 'Proposta', approved: 'Approvata' },
   },
   capture: {
     title: 'Nuova registrazione',
@@ -131,6 +152,12 @@ const it = {
     title: 'Privacy e controllo',
     intro: 'La memoria resta sotto il tuo controllo: lingua, conservazione, esportazione ed eliminazione.',
     language: 'Lingua',
+    account: 'Account',
+    dataSource: 'Origine dati',
+    dataSourceMock: 'Dati di esempio',
+    dataSourceCloud: 'API cloud',
+    signedIn: 'Accesso effettuato',
+    signOut: 'Esci',
     theme: 'Aspetto',
     themeOptions: { system: 'Sistema', light: 'Chiaro', dark: 'Scuro' },
     retention: 'Conservazione dell’audio',

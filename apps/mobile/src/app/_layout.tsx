@@ -7,7 +7,9 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import '@/i18n';
+import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { RepositoryProvider } from '@/data/RepositoryProvider';
+import LoginScreen from '@/features/auth/LoginScreen';
 import { PrefsProvider } from '@/prefs/PrefsProvider';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 
@@ -22,6 +24,17 @@ function ThemedStack() {
         <Stack.Screen name="capture" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       </Stack>
     </>
+  );
+}
+
+function AuthenticatedApp() {
+  const { status } = useAuth();
+  if (status === 'loading') return null;
+  if (status === 'signedOut') return <LoginScreen />;
+  return (
+    <RepositoryProvider>
+      <ThemedStack />
+    </RepositoryProvider>
   );
 }
 
@@ -43,9 +56,9 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <PrefsProvider>
         <ThemeProvider>
-          <RepositoryProvider>
-            <ThemedStack />
-          </RepositoryProvider>
+          <AuthProvider>
+            <AuthenticatedApp />
+          </AuthProvider>
         </ThemeProvider>
       </PrefsProvider>
     </SafeAreaProvider>

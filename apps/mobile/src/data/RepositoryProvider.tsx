@@ -1,7 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useState, type DependencyList, type ReactNode } from 'react';
 
 import { usePrefs } from '@/prefs/PrefsProvider';
+import { useAuth } from '@/auth/AuthProvider';
+import { config } from '@/config';
 
+import { createApiClient } from './http/client';
+import { createHttpRepository } from './http/httpRepository';
 import { createMockRepository } from './mock/mockRepository';
 import type { MeetingsRepository } from './types';
 
@@ -10,7 +14,16 @@ const RepositoryContext = createContext<MeetingsRepository | null>(null);
 // Swap createMockRepository for an HTTP adapter generated from packages/contracts once the API is deployed.
 export function RepositoryProvider({ children }: { children: ReactNode }) {
   const { locale } = usePrefs();
-  const repository = useMemo(() => createMockRepository(locale), [locale]);
+  const auth = useAuth();
+  const repository = useMemo(() => {
+    if (config.dataSource === 'mock') return createMockRepository(locale);
+    const client = createApiClient({
+      baseUrl: config.apiBaseUrl,
+      getAccessToken: auth.getAccessToken,
+      onUnauthorized: auth.signOut,
+    });
+    return createHttpRepository(client, locale);
+  }, [auth.getAccessToken, auth.signOut, locale]);
   return <RepositoryContext.Provider value={repository}>{children}</RepositoryContext.Provider>;
 }
 
