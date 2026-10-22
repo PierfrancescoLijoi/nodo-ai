@@ -40,7 +40,14 @@ class PostgresDatabase:
 
     @classmethod
     def from_entra(
-        cls, host: str, database: str, user: str, credential: Any, max_size: int = 10
+        cls,
+        host: str,
+        database: str,
+        user: str,
+        credential: Any,
+        max_size: int = 10,
+        pool_timeout: float = 5.0,
+        statement_timeout_ms: int = 15_000,
     ) -> PostgresDatabase:
         class EntraConnection(psycopg.Connection):
             @classmethod
@@ -48,12 +55,19 @@ class PostgresDatabase:
                 kwargs["password"] = credential.get_token(POSTGRES_TOKEN_SCOPE).token
                 return super().connect(conninfo, **kwargs)
 
-        conninfo = f"host={host} dbname={database} user={user} sslmode=require"
+        # connect_timeout and statement_timeout turn a stuck database into a fast error; the pool
+        # timeout does the same for a saturated pool (a request waits 5 s for a connection, not 30).
+        conninfo = (
+            f"host={host} dbname={database} user={user} sslmode=require connect_timeout=5"
+            f" options='-c statement_timeout={statement_timeout_ms}'"
+        )
         pool = ConnectionPool(
             conninfo,
             connection_class=EntraConnection,
             max_size=max_size,
+            timeout=pool_timeout,
             max_lifetime=TOKEN_LIFETIME_SAFETY_SECONDS,
+            max_idle=300,
             kwargs={"row_factory": dict_row},
             open=True,
         )
@@ -76,6 +90,11 @@ class PostgresDatabase:
         """Schema work (migrations, role grants) that is not tied to a workspace."""
         with self._pool.connection() as conn:
             yield conn
+
+    def ping(self) -> None:
+        """A readiness probe: can a connection be had and used within the pool timeout?"""
+        with self._pool.connection() as conn:
+            conn.execute("SELECT 1")
 
     def close(self) -> None:
         self._pool.close()

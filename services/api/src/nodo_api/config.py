@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     oidc_issuer: str | None = None
     oidc_audience: str | None = None
     oidc_jwks_url: str | None = None
+    oidc_allowed_client_ids: Annotated[tuple[str, ...], NoDecode] = ()
     oidc_max_token_age_seconds: int = Field(default=3600, ge=60, le=86400)
     attestation_hmac_key: str = Field(default=DEV_ATTESTATION_KEY, min_length=16, repr=False)
     known_notice_versions: tuple[str, ...] = ("2026-10-v1",)
@@ -60,6 +61,7 @@ class Settings(BaseSettings):
     azure_postgres_user: str | None = None
     azure_postgres_password: SecretStr | None = Field(default=None, repr=False)
     azure_db_roles: Annotated[tuple[str, ...], NoDecode] = ()
+    azure_retention_roles: Annotated[tuple[str, ...], NoDecode] = ()
     azure_search_endpoint: str | None = None
     search_index_name: str = "segments"
     azure_openai_endpoint: str | None = None
@@ -76,7 +78,31 @@ class Settings(BaseSettings):
     )
     upload_session_seconds: int = Field(default=900, ge=60, le=3600)
 
-    @field_validator("azure_db_roles", "speech_candidate_locales", mode="before")
+    # Failure containment (ADR-017). Timeouts are per call; the bulkheads are concurrent calls per
+    # replica, sized from the capacity model (docs/CAPACITY-MODEL.md).
+    openai_timeout_seconds: float = Field(default=30.0, ge=1, le=600)
+    openai_extraction_timeout_seconds: float = Field(default=240.0, ge=10, le=900)
+    bulkhead_llm: int = Field(default=16, ge=1, le=256)
+    bulkhead_extraction: int = Field(default=4, ge=1, le=64)
+    bulkhead_embedding: int = Field(default=16, ge=1, le=256)
+    bulkhead_search: int = Field(default=32, ge=1, le=256)
+    bulkhead_speech: int = Field(default=8, ge=1, le=64)
+    bulkhead_servicebus: int = Field(default=16, ge=1, le=256)
+    bulkhead_storage: int = Field(default=32, ge=1, le=256)
+    azure_postgres_pool_max: int = Field(default=10, ge=1, le=100)
+    azure_postgres_pool_timeout_seconds: float = Field(default=5.0, ge=0.5, le=60)
+    azure_postgres_statement_timeout_ms: int = Field(default=15_000, ge=1000, le=600_000)
+    telemetry_sampling_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
+    max_in_flight_requests: int = Field(default=200, ge=10, le=5000)
+    max_concurrent_queries: int = Field(default=16, ge=1, le=256)
+
+    @field_validator(
+        "azure_db_roles",
+        "azure_retention_roles",
+        "speech_candidate_locales",
+        "oidc_allowed_client_ids",
+        mode="before",
+    )
     @classmethod
     def split_comma_separated(cls, value: object) -> object:
         if isinstance(value, str):

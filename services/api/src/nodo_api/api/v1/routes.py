@@ -15,6 +15,7 @@ from fastapi import (
     status,
 )
 from fastapi.concurrency import run_in_threadpool
+from opentelemetry import trace
 
 from nodo_api.api.v1.mapping import (
     decode_cursor,
@@ -50,6 +51,7 @@ from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
 from nodo_api.errors import AuthenticationError, ValidationFailed
 from nodo_api.services.query import QueryFilters, QueryRequest
+from nodo_api.telemetry import pseudonym
 
 router = APIRouter(prefix="/v1")
 
@@ -59,9 +61,14 @@ def principal(request: Request) -> Principal:
     if not header.startswith("Bearer "):
         raise AuthenticationError
     try:
-        return request.app.state.container.auth.authenticate(header[7:])
+        actor = request.app.state.container.auth.authenticate(header[7:])
     except AuthError as exc:
         raise AuthenticationError from exc
+    # Operators can follow one user through the traces; the ids themselves never leave the process.
+    current = trace.get_current_span()
+    current.set_attribute("enduser.pseudo_id", pseudonym(actor.user_id))
+    current.set_attribute("nodo.workspace", pseudonym(actor.workspace_id))
+    return actor
 
 
 PrincipalDep = Annotated[Principal, Depends(principal)]
@@ -190,22 +197,22 @@ def review_meeting(meeting_id: str, payload: ReviewInput, actor: PrincipalDep, r
 
 @router.post("/query", response_model=QueryOutput)
 def query(payload: QueryInput, actor: PrincipalDep, request: Request):
-    result = request.app.state.container.query_service.query(
-        actor.workspace_id,
-        actor.user_id,
-        _query_request(payload.question, payload.ui_locale, payload.filters),
-    )
-    return result
+    return _ask(request, actor, payload.question, payload.ui_locale, payload.filters)
+
+
+def _ask(request: Request, actor: Principal, text: str, locale, filters):
+    """Questions are the expensive request (a model call each). A replica answers a limited number
+    at once and tells the rest to come back, so a burst of questions can not starve reads."""
+    container = request.app.state.container
+    with container.query_gate:
+        return container.query_service.query(
+            actor.workspace_id, actor.user_id, _query_request(text, locale, filters)
+        )
 
 
 @router.post("/voice-query", response_model=QueryOutput)
 def voice_query(payload: VoiceQueryInput, actor: PrincipalDep, request: Request):
-    result = request.app.state.container.query_service.query(
-        actor.workspace_id,
-        actor.user_id,
-        _query_request(payload.transcript_text, payload.ui_locale, payload.filters),
-    )
-    return result
+    return _ask(request, actor, payload.transcript_text, payload.ui_locale, payload.filters)
 
 
 @router.get("/graph/subgraph", response_model=SubgraphOutput)
@@ -267,10 +274,41 @@ def graph_changes(
 
 @router.post("/export", response_model=ExportOutput, status_code=status.HTTP_202_ACCEPTED)
 def export_data(payload: ExportInput, actor: PrincipalDep, request: Request):
-    job_id = request.app.state.container.meeting_service.export(
+    export = request.app.state.container.export_service.request(
         actor.workspace_id, actor.user_id, payload.meeting_id
     )
-    return ExportOutput(job_id=job_id)
+    return _export_output(export)
+
+
+def _export_output(export) -> ExportOutput:
+    ready = export.state.value == "ready"
+    return ExportOutput(
+        job_id=export.id,
+        status=export.state.value,
+        expires_at=export.expires_at,
+        download_path=f"/v1/export/{export.id}/download" if ready else None,
+    )
+
+
+@router.get("/export/{export_id}", response_model=ExportOutput)
+def export_status(export_id: str, actor: PrincipalDep, request: Request):
+    return _export_output(
+        request.app.state.container.export_service.status(
+            actor.workspace_id, actor.user_id, export_id
+        )
+    )
+
+
+@router.get("/export/{export_id}/download")
+def export_download(export_id: str, actor: PrincipalDep, request: Request) -> Response:
+    data = request.app.state.container.export_service.download(
+        actor.workspace_id, actor.user_id, export_id
+    )
+    return Response(
+        content=data,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="nodo-export.json"'},
+    )
 
 
 @router.delete("/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)

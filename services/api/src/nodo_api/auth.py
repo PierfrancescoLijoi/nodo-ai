@@ -9,6 +9,7 @@ from typing import Any
 import jwt
 
 from nodo_api.config import Settings
+from nodo_api.jwks import JwksUnavailable
 
 _USER_ID = re.compile(r"[A-Za-z0-9_.:@|-]{1,128}")
 _WORKSPACE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -73,7 +74,14 @@ class OidcAuthenticator:
             )
         except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
             raise AuthError("Invalid OIDC token") from exc
+        self._check_client(claims)
         return self._principal(claims)
+
+    def _check_client(self, claims: dict[str, Any]) -> None:
+        """Only tokens issued to the expected app registrations (v2 claim azp, v1 claim appid)."""
+        allowed = self._settings.oidc_allowed_client_ids
+        if allowed and (claims.get("azp") or claims.get("appid")) not in allowed:
+            raise AuthError("Token was issued to another application")
 
     def _principal(self, claims: dict[str, Any]) -> Principal:
         user_id, workspace_id = claims["sub"], claims["workspace_id"]
@@ -88,8 +96,14 @@ class OidcAuthenticator:
         return Principal(user_id, workspace_id)
 
     def _find_key(self, kid: str) -> Any:
-        for jwk in self._key_provider().get("keys", []):
-            if jwk.get("kid") == kid and jwk.get("use", "sig") == "sig":
+        provider = self._key_provider
+        try:
+            key_set = provider.keys(kid) if hasattr(provider, "keys") else provider()
+        except JwksUnavailable as exc:
+            raise AuthError("Signing keys unavailable") from exc
+        for jwk in key_set.get("keys", []):
+            usable = jwk.get("kty") == "RSA" and jwk.get("alg", "RS256") == "RS256"
+            if jwk.get("kid") == kid and jwk.get("use", "sig") == "sig" and usable:
                 return jwt.PyJWK.from_dict(jwk).key
         raise AuthError("Signing key not found")
 

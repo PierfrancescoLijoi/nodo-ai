@@ -183,6 +183,7 @@ class QueryOutput(FrozenModel):
     query_trace_id: str
     model_version: str
     retrieval_version: str
+    degraded: bool = False
 
 
 class EvidenceOutput(FrozenModel):
@@ -248,4 +249,6 @@ class ExportInput(FrozenModel):
 
 class ExportOutput(FrozenModel):
     job_id: str
-    status: Literal["queued"] = "queued"
+    status: Literal["queued", "running", "ready", "failed"] = "queued"
+    expires_at: datetime | None = None
+    download_path: str | None = None

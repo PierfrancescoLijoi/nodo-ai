@@ -298,13 +298,6 @@ class MeetingService:
             self._audit.append(workspace_id, "meeting_deleted", {"meeting_id": meeting_id})
         return meeting
 
-    def export(self, workspace_id: str, user_id: str, meeting_id: str | None = None) -> str:
-        if meeting_id is not None:
-            self.get(workspace_id, user_id, meeting_id)
-        payload = {"meeting_id": meeting_id or "", "user_id": user_id}
-        # Each request is its own job: a later export must not return an earlier export.
-        return self._jobs.publish_once(workspace_id, f"{user_id}:{uuid4()}", "export", payload)
-
 
 def _request_hash(
     attestation_payload: dict[str, Any], project: str | None, title: str | None

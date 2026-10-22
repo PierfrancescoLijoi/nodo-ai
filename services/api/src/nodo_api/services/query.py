@@ -11,10 +11,13 @@ from nodo_api.domain.graph import EntityType, Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
 from nodo_api.errors import NotFoundError
 from nodo_api.ports import GraphStore, LlmClient, MeetingRepository, Retriever, TranscriptRepository
+from nodo_api.resilience import DependencyUnavailable, Overloaded
+from nodo_api.telemetry import instruments, span, timed
 
 MAX_GRAPH_DEPTH = 2
 GRAPH_FANOUT = 15
 MAX_EVIDENCE = 20
+MAX_DEGRADED_SOURCES = 5
 MAX_ENTITIES = 10
 MAX_ENTITY_LENGTH = 64
 SEED_ENTITIES = 5
@@ -58,6 +61,7 @@ class GeneratedAnswer:
 @dataclass(frozen=True, slots=True)
 class QueryResult(GeneratedAnswer):
     query_trace_id: str = ""
+    degraded: bool = False  # the language model was unavailable: sources only, no written answer
     model_version: str = "mock-llm-v1"
     retrieval_version: str = "hybrid-graph-v1"
 
@@ -163,23 +167,49 @@ class QueryService:
 
     def query(self, workspace_id: str, user_id: str, request: QueryRequest) -> QueryResult:
         filters = request.filters.as_dict() if request.filters else None
-        evidence = self._retriever.search(
-            workspace_id, user_id, request.question, filters, MAX_EVIDENCE
-        )[:MAX_EVIDENCE]
-        graph = self._context_graph(workspace_id, user_id, request.question)
-        generated = self._llm.answer(
-            workspace_id, request.question, request.ui_locale, evidence, graph
-        )
-        validated = self._validator.validate(
-            workspace_id, generated, evidence, graph, self._owner_check(workspace_id, user_id)
-        )
+        with timed("query_seconds", locale=request.ui_locale.value) as outcome, span("query"):
+            with span("query.retrieve") as retrieval:
+                evidence = self._retriever.search(
+                    workspace_id, user_id, request.question, filters, MAX_EVIDENCE
+                )[:MAX_EVIDENCE]
+                retrieval.set_attribute("nodo.evidence", len(evidence))
+            with span("query.graph"):
+                graph = self._context_graph(workspace_id, user_id, request.question)
+            degraded = False
+            try:
+                with span("query.model"):
+                    generated = self._llm.answer(
+                        workspace_id, request.question, request.ui_locale, evidence, graph
+                    )
+            except (DependencyUnavailable, Overloaded):
+                # Search worked and the model did not: the sentences found are still useful.
+                degraded, generated = True, self._sources_only(evidence)
+                instruments.query_degraded.add(1)
+            with span("query.validate"):
+                validated = self._validator.validate(
+                    workspace_id,
+                    generated,
+                    evidence,
+                    graph,
+                    self._owner_check(workspace_id, user_id),
+                )
+            outcome["degraded"] = degraded
         return QueryResult(
             answer=validated.answer,
             answerability=validated.answerability,
             citations=validated.citations,
             related_entities=validated.related_entities,
             query_trace_id=str(uuid4()),
+            degraded=degraded,
         )
+
+    @staticmethod
+    def _sources_only(evidence: tuple[TranscriptSegment, ...]) -> GeneratedAnswer:
+        citations = tuple(
+            Citation(s.meeting_id, s.id, s.start_ms, s.end_ms, s.text, s.speaker_id)
+            for s in evidence[:MAX_DEGRADED_SOURCES]
+        )
+        return GeneratedAnswer("", Answerability.PARTIAL, citations, ())
 
     def _context_graph(self, workspace_id: str, user_id: str, question: str) -> Subgraph:
         """Entities the question names, plus their reviewed neighbourhood, within hard bounds."""

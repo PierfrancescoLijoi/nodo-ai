@@ -54,6 +54,7 @@ def test_query_contract_and_voice_query(client, auth_headers) -> None:
         "query_trace_id",
         "model_version",
         "retrieval_version",
+        "degraded",
     }
     assert body["answerability"] == "supported"
     voice = client.post(

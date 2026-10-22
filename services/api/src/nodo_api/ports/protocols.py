@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Protocol
 
+from nodo_api.domain.exports import Export, ExportState
 from nodo_api.domain.graph import (
     Change,
     Entity,
@@ -17,6 +18,7 @@ from nodo_api.domain.graph import (
     Subgraph,
 )
 from nodo_api.domain.models import Locale, Meeting, SpokenPhrase, TranscriptSegment
+from nodo_api.domain.retention import AudioDue
 
 # Every method takes workspace_id (and, where data belongs to a person, the user or the set of
 # meeting ids that person may see) so that access control happens inside the store query,
@@ -83,6 +85,12 @@ class BlobStore(Protocol):
         ...
 
     def erase(self, workspace_id: str, meeting_id: str) -> None: ...
+
+    def put_export(self, workspace_id: str, name: str, data: bytes) -> str:
+        """Store a finished export and return its blob name."""
+        ...
+
+    def get_export(self, workspace_id: str, name: str) -> bytes: ...
 
 
 class JobQueue(Protocol):
@@ -191,6 +199,37 @@ class LlmClient(Protocol):
         evidence: tuple[TranscriptSegment, ...],
         graph: Subgraph,
     ) -> Any: ...
+
+
+class ExportStore(Protocol):
+    def create(
+        self, workspace_id: str, owner_id: str, meeting_id: str | None, now: datetime
+    ) -> Export: ...
+
+    def get(self, workspace_id: str, owner_id: str, export_id: str) -> Export:
+        """Only the owner's export, otherwise NotFoundError."""
+        ...
+
+    def get_for_processing(self, workspace_id: str, export_id: str) -> Export: ...
+
+    def set_state(
+        self,
+        workspace_id: str,
+        export_id: str,
+        state: ExportState,
+        blob_name: str | None = None,
+        size_bytes: int | None = None,
+    ) -> None: ...
+
+
+class RetentionStore(Protocol):
+    """The one place that looks across workspaces, for the one job that must (ADR-019)."""
+
+    def audio_due(self, now: datetime, limit: int) -> tuple[AudioDue, ...]:
+        """Meetings whose audio has outlived its retention period and was not yet erased."""
+        ...
+
+    def mark_audio_erased(self, workspace_id: str, meeting_id: str, when: datetime) -> None: ...
 
 
 class AuditLog(Protocol):

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from nodo_api.adapters.local.blob import LocalBlobStore
 from nodo_api.adapters.local.db import LocalDatabase
 from nodo_api.adapters.local.embedder import LocalEmbedder
+from nodo_api.adapters.local.exports import SqliteExportStore
 from nodo_api.adapters.local.graph import SqliteGraphStore
 from nodo_api.adapters.local.llm import LocalExtractor, LocalLlm
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer, LocalModelPaths, data_dir
@@ -20,6 +21,7 @@ from nodo_api.adapters.local.repos import (
     SqliteMeetingRepository,
     SqliteTranscriptRepository,
 )
+from nodo_api.adapters.local.retention import SqliteRetentionStore
 from nodo_api.adapters.local.search import SqliteRetriever
 from nodo_api.adapters.local.speech import LocalSpeechToText
 from nodo_api.adapters.local.sync import LocalSyncService
@@ -27,11 +29,14 @@ from nodo_api.api.v1.sync_schemas import SyncSource
 from nodo_api.auth import LOCAL_USER, LOCAL_WORKSPACE
 from nodo_api.config import Settings
 from nodo_api.errors import ModelUnavailable
+from nodo_api.services.exports import ExportService
 from nodo_api.services.extraction import ChunkedExtractor
 from nodo_api.services.ingestion import IngestionService
+from nodo_api.services.retention import RetentionService
 from nodo_api.worker import Worker
 
 logger = logging.getLogger("nodo_local")
+RETENTION_INTERVAL_SECONDS = 3600
 
 
 class Unavailable:
@@ -63,10 +68,13 @@ class LocalRuntime:
     server: LlamaServer | None
     sync: LocalSyncService
     embedder: LocalEmbedder
+    retention: RetentionService
     warm_up: bool = False
+    _stop: threading.Event = field(default_factory=threading.Event)
 
     def start(self) -> None:
         self.loop.start()
+        threading.Thread(target=self._retention_loop, name="nodo-retention", daemon=True).start()
         if self.warm_up:
             threading.Thread(target=self._warm, name="nodo-warm-up", daemon=True).start()
 
@@ -77,7 +85,18 @@ class LocalRuntime:
         except Exception as error:  # a missing model is reported when it is needed, not here
             logger.warning("warm_up_skipped type=%s", type(error).__name__)
 
+    def _retention_loop(self) -> None:
+        """Erase audio whose retention period has ended: at start, then every hour."""
+        while True:
+            try:
+                self.retention.sweep_all()
+            except Exception as error:
+                logger.error("retention_sweep_failed type=%s", type(error).__name__)
+            if self._stop.wait(RETENTION_INTERVAL_SECONDS):
+                return
+
     def stop(self) -> None:
+        self._stop.set()
         self.loop.stop()
         if self.server is not None:
             self.server.stop()
@@ -121,6 +140,8 @@ def local_adapters(settings: Settings):
 
     meetings = SqliteMeetingRepository(db)
     transcripts = SqliteTranscriptRepository(db)
+    audit = SqliteAuditLog(db)
+    exports = SqliteExportStore(db)
     ingestion = IngestionService(
         meetings,
         transcripts,
@@ -141,11 +162,18 @@ def local_adapters(settings: Settings):
         db,
         blobs,
         queue,
-        LocalWorkerLoop(queue, Worker(ingestion)),
+        LocalWorkerLoop(
+            queue,
+            Worker(
+                ingestion,
+                exports=ExportService(exports, meetings, transcripts, graph, blobs, queue, audit),
+            ),
+        ),
         models,
         server,
         sync,
         embedder,
+        RetentionService(SqliteRetentionStore(db), blobs, SqliteAuditLog(db)),
         settings.local_warm_up,
     )
     return Adapters(
@@ -160,4 +188,6 @@ def local_adapters(settings: Settings):
         speech,
         extractor,
         runtime,
+        retention=SqliteRetentionStore(db),
+        exports=exports,
     )

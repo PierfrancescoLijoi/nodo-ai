@@ -37,6 +37,7 @@ COPY --from=builder /opt/venv /opt/venv
 
 USER 10001:10001
 
+ENV WEB_CONCURRENCY=2
 EXPOSE 8000
 
-CMD ["uvicorn", "nodo_api.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "nodo_api.serve"]

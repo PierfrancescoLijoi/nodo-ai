@@ -69,3 +69,19 @@ def grant_roles(conn: Any, roles: tuple[str, ...], database: str) -> None:
                 sql.Identifier(AUDIT_TABLE), ident
             )
         )
+
+
+def grant_retention_roles(conn: Any, roles: tuple[str, ...], database: str) -> None:
+    """The retention job's identity gets the cross-workspace role of migration 0004 and the right to
+    append audit events, and no other table rights (it never touches transcripts or the graph)."""
+    for role in roles:
+        exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
+        if not exists:
+            conn.execute("SELECT * FROM pgaadauth_create_principal(%s, false, false)", (role,))
+        ident = sql.Identifier(role)
+        conn.execute(
+            sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(database), ident)
+        )
+        conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(ident))
+        conn.execute(sql.SQL("GRANT nodo_retention TO {}").format(ident))
+        conn.execute(sql.SQL("GRANT INSERT ON {} TO {}").format(sql.Identifier(AUDIT_TABLE), ident))

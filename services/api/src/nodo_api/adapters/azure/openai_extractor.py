@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from nodo_api.adapters.azure.openai_llm import record_tokens
 from nodo_api.domain.graph import (
     EXISTING_PREFIX,
     Entity,
@@ -183,6 +184,7 @@ class AzureOpenAiExtractor:
             },
             **self._options,
         )
+        record_tokens(response, "extract")
         choice = response.choices[0]
         if getattr(choice, "finish_reason", None) == "length":
             raise ExtractionError("The model ran out of room before finishing")

@@ -15,6 +15,7 @@ from nodo_api.adapters.azure.search import AzureSearchRetriever
 from nodo_api.adapters.azure.servicebus import ServiceBusJobQueue
 from nodo_api.adapters.azure.speech import AzureSpeechToText
 from nodo_api.config import Settings
+from nodo_api.resilience import Guarded
 
 SETTINGS = Settings(
     oidc_issuer="https://issuer.example/",
@@ -42,11 +43,20 @@ def test_every_port_gets_an_azure_adapter(monkeypatch) -> None:
     monkeypatch.setattr(bootstrap, "postgres_database", lambda settings, credential=None: object())
     adapters = bootstrap.build_adapters(SETTINGS)
     assert isinstance(adapters.meetings, PgMeetingRepository)
-    assert isinstance(adapters.blobs, AzureBlobStore)
-    assert isinstance(adapters.jobs, ServiceBusJobQueue)
-    assert isinstance(adapters.retriever, AzureSearchRetriever)
-    assert isinstance(adapters.llm, AzureOpenAiLlm)
-    assert isinstance(adapters.speech, AzureSpeechToText)
+    # every call to another service goes through a guard (timeout, bulkhead, breaker, retry)
+    for guarded in (
+        adapters.blobs,
+        adapters.jobs,
+        adapters.retriever,
+        adapters.llm,
+        adapters.speech,
+    ):
+        assert isinstance(guarded, Guarded)
+    assert isinstance(adapters.blobs.target, AzureBlobStore)
+    assert isinstance(adapters.jobs.target, ServiceBusJobQueue)
+    assert isinstance(adapters.retriever.target, AzureSearchRetriever)
+    assert isinstance(adapters.llm.target, AzureOpenAiLlm)
+    assert isinstance(adapters.speech.target, AzureSpeechToText)
 
 
 def test_the_worker_runtime_opens_a_receiver_on_the_ingest_queue(monkeypatch) -> None:

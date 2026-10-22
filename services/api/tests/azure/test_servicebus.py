@@ -53,7 +53,7 @@ def test_a_job_is_sent_once_with_its_identity_as_message_id() -> None:
     assert body["workspace_id"] == "ws-a"
     assert body["job_type"] == "transcribe"
     assert body["meeting_id"] == "m1"
-    assert set(body) == {"job_id", "workspace_id", "job_key", "job_type", "meeting_id"}
+    assert set(body) == {"job_id", "workspace_id", "job_key", "job_type", "meeting_id", "trace"}
 
 
 def test_a_failed_send_is_retried_on_the_next_call() -> None:

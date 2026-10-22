@@ -10,6 +10,7 @@ from typing import Any
 
 from nodo_api.domain.graph import Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
+from nodo_api.telemetry import instruments
 
 LANGUAGE_NAMES = {
     Locale.EN: "English",
@@ -60,6 +61,17 @@ def _unanswerable() -> Any:
     return GeneratedAnswer("", Answerability.UNANSWERABLE, (), ())
 
 
+def record_tokens(response: Any, purpose: str) -> None:
+    """Token counts only (they are the cost); never the text they were made from."""
+    usage = getattr(response, "usage", None)
+    for kind, count in (
+        ("input", getattr(usage, "prompt_tokens", 0)),
+        ("output", getattr(usage, "completion_tokens", 0)),
+    ):
+        if isinstance(count, int) and count > 0:
+            instruments.llm_tokens.add(count, {"kind": kind, "purpose": purpose})
+
+
 class AzureOpenAiLlm:
     """Works against any server that speaks the OpenAI chat API (Azure OpenAI, llama.cpp);
     `options` are extra request fields such as temperature or a chat template switch."""
@@ -94,6 +106,7 @@ class AzureOpenAiLlm:
             },
             **self._options,
         )
+        record_tokens(response, "answer")
         return self._parse(response.choices[0].message.content, evidence)
 
     @staticmethod

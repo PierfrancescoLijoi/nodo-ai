@@ -136,5 +136,23 @@ class LocalBlobStore:
                 (workspace_id, meeting_id),
             )
 
+    def put_export(self, workspace_id: str, name: str, data: bytes) -> str:
+        path = self._export_path(workspace_id, name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return name
+
+    def get_export(self, workspace_id: str, name: str) -> bytes:
+        path = self._export_path(workspace_id, name)
+        if not path.is_file():
+            raise NotFoundError
+        return path.read_bytes()
+
+    def _export_path(self, workspace_id: str, name: str) -> Path:
+        folder = self._folder(workspace_id, "exports")  # same character rules as meeting folders
+        if not name or any(c in name for c in "/\\:\0") or name in {".", ".."}:
+            raise ValueError("Unsafe export name")
+        return folder / name
+
     def was_erased(self, workspace_id: str, meeting_id: str) -> bool:
         return not self._folder(workspace_id, meeting_id).exists()

@@ -12,7 +12,10 @@ from uuid import uuid4
 from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob import BlobSasPermissions, generate_blob_sas
 
+from nodo_api.errors import NotFoundError
+
 AUDIO_CONTAINER = "audio"
+EXPORT_CONTAINER = "exports"
 READ_LINK_SECONDS = 3600
 DELEGATION_KEY_SECONDS = 3600
 
@@ -75,6 +78,19 @@ class AzureBlobStore:
             BlobSasPermissions(read=True),
             READ_LINK_SECONDS,
         )
+
+    def put_export(self, workspace_id: str, name: str, data: bytes) -> str:
+        """Exports live in their own container, which the storage lifecycle empties after a week."""
+        blob = self._service.get_blob_client(EXPORT_CONTAINER, f"{workspace_id}/{name}")
+        blob.upload_blob(data, overwrite=True, content_type="application/json")
+        return name
+
+    def get_export(self, workspace_id: str, name: str) -> bytes:
+        blob = self._service.get_blob_client(EXPORT_CONTAINER, f"{workspace_id}/{name}")
+        try:
+            return blob.download_blob().readall()
+        except ResourceNotFoundError:
+            raise NotFoundError from None
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         container = self._service.get_container_client(AUDIO_CONTAINER)

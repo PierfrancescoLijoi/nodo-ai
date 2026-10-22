@@ -11,6 +11,7 @@ from typing import Any
 from azure.servicebus import ServiceBusMessage
 
 from nodo_api.adapters.azure.postgres import PgJobOutbox
+from nodo_api.telemetry import inject_context
 
 
 class ServiceBusJobQueue:
@@ -32,6 +33,7 @@ class ServiceBusJobQueue:
                 "workspace_id": workspace_id,
                 "job_key": job_key,
                 "job_type": job_type,
+                "trace": inject_context(),  # W3C trace context: the worker's spans join this trace
                 **payload,
             }
             message = ServiceBusMessage(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,10 +22,19 @@ from nodo_api.auth import AuthManager
 from nodo_api.bootstrap import build_adapters
 from nodo_api.config import Settings
 from nodo_api.errors import NodoError
+from nodo_api.jwks import JwksCache
+from nodo_api.middleware import EdgeProtection
+from nodo_api.resilience import Bulkhead, DependencyUnavailable, is_transient
 from nodo_api.services import EvidenceValidator, GraphService, MeetingService, QueryService
+from nodo_api.services.exports import ExportService
 from nodo_api.services.sync_import import SyncImportService
+from nodo_api.telemetry import configure, configure_logging, instrument_app, request_id_var
 
 logger = logging.getLogger("nodo_api")
+
+API_VERSION = "0.1.0"
+SYNC_BODY_LIMIT = 40 * 1024 * 1024
+LOCAL_UPLOAD_LIMIT = 2 * 1024**3
 
 _REQUEST_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 
@@ -44,7 +55,10 @@ class AppContainer:
     query_service: QueryService
     graph_service: GraphService
     sync_import: SyncImportService
+    export_service: ExportService
     runtime: Any = None
+    readiness: tuple[tuple[str, Callable[[], None]], ...] = ()
+    query_gate: Bulkhead | None = None
 
 
 @asynccontextmanager
@@ -64,19 +78,57 @@ def create_app(
     oidc_key_provider: Callable[[], dict[str, Any]] | None = None,
 ) -> FastAPI:
     effective_settings = settings or Settings()
-    app = FastAPI(title="NODO AI API", version="0.1.0", lifespan=_lifespan)
+    if oidc_key_provider is None and effective_settings.auth_mode == "oidc":
+        oidc_key_provider = JwksCache(
+            effective_settings.oidc_issuer or "", effective_settings.oidc_jwks_url
+        )
+    if effective_settings.backend == "azure":
+        configure_logging()
+        configure(
+            role=effective_settings.service,
+            environment=os.environ.get("NODO_AZURE_ENVIRONMENT", "prod"),
+            version=API_VERSION,
+            connection_string=os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"),
+            sampling_ratio=effective_settings.telemetry_sampling_ratio,
+        )
+    app = FastAPI(title="NODO AI API", version=API_VERSION, lifespan=_lifespan)
+    instrument_app(app)
     app.state.container = _container(effective_settings, oidc_key_provider)
     app.include_router(router)
     _configure_cors(app, effective_settings)
     _configure_middleware(app)
     _configure_errors(app)
+    app.add_middleware(
+        EdgeProtection,
+        max_in_flight=effective_settings.max_in_flight_requests,
+        body_limits=(
+            ("/v1/sync/", SYNC_BODY_LIMIT),
+            ("/v1/local/uploads/", LOCAL_UPLOAD_LIMIT),
+        ),
+        # The local engine also serves the web app, which needs scripts and styles.
+        security_headers=effective_settings.backend != "local",
+    )
 
     @app.get("/healthz", include_in_schema=False)
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/readyz", include_in_schema=False)
-    def readiness() -> dict[str, str]:
+    async def readiness():
+        container = app.state.container
+        failed = []
+        for name, check in container.readiness:
+            try:
+                await run_in_threadpool(check)
+            except Exception as error:
+                logger.warning("not_ready check=%s type=%s", name, type(error).__name__)
+                failed.append(name)
+        if failed:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "failed": failed},
+                headers={"Retry-After": "5"},
+            )
         return {"status": "ready"}
 
     if effective_settings.backend == "local":
@@ -143,7 +195,10 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         query_service,
         GraphService(a.graph),
         SyncImportService(a.meetings, a.transcripts, a.retriever, a.graph, meeting_service),
+        ExportService(a.exports, a.meetings, a.transcripts, a.graph, a.blobs, a.jobs, a.audit),
         a.runtime,
+        a.readiness,
+        Bulkhead("query", settings.max_concurrent_queries, wait_seconds=0.0),
     )
 
 
@@ -164,6 +219,7 @@ def _configure_middleware(app: FastAPI) -> None:
         # Only well-formed ids are echoed; anything else is replaced to keep logs clean.
         request_id = supplied if _REQUEST_ID.fullmatch(supplied) else str(uuid4())
         request.state.request_id = request_id
+        request_id_var.set(request_id)
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         logger.info(
@@ -183,7 +239,11 @@ def _configure_middleware(app: FastAPI) -> None:
 def _configure_errors(app: FastAPI) -> None:
     @app.exception_handler(NodoError)
     async def nodo_error(request: Request, exc: NodoError):
-        return _error_response(request, exc.status_code, exc.code, exc.public_message)
+        response = _error_response(request, exc.status_code, exc.code, exc.public_message)
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after:
+            response.headers["Retry-After"] = str(retry_after)  # clients and the gateway back off
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):
@@ -197,6 +257,13 @@ def _configure_errors(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception):
+        if is_transient(exc):  # a dependency hiccup that was not wrapped: say so, do not blame us
+            logger.warning("transient_dependency_error type=%s", type(exc).__name__)
+            response = _error_response(
+                request, 503, "dependency_unavailable", DependencyUnavailable.public_message
+            )
+            response.headers["Retry-After"] = "5"
+            return response
         logger.error(
             "unhandled_request_error",
             extra={

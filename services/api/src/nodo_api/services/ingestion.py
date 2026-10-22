@@ -29,6 +29,7 @@ from nodo_api.ports import (
     SpeechToText,
     TranscriptRepository,
 )
+from nodo_api.telemetry import instruments, stage
 
 FIRST_VERSION = 1
 KNOWN_DECISIONS = 20
@@ -115,13 +116,18 @@ class IngestionService:
             return False  # deleted while queued: nothing to do, and nothing must be recreated
         if meeting.state not in PROCESSABLE:
             return False
-        segments = self._existing_or_new_transcript(workspace_id, meeting_id, meeting)
-        self._retriever.index(workspace_id, meeting.owner_id, segments)
+        with stage("transcribe", locale=meeting.attestation.locale.value):
+            segments = self._existing_or_new_transcript(workspace_id, meeting_id, meeting)
+        audio_seconds = max(s.end_ms for s in segments) / 1000
+        instruments.audio_seconds.add(audio_seconds)
+        with stage("index", segments=len(segments)):
+            self._retriever.index(workspace_id, meeting.owner_id, segments)
         if meeting.state is MeetingState.TRANSCRIBING:
             meeting = self._meetings.save(
                 workspace_id, transition_meeting(meeting, MeetingState.EXTRACTING)
             )
-        clean = self._analyze(workspace_id, meeting, segments)
+        with stage("analyze", segments=len(segments)):
+            clean = self._analyze(workspace_id, meeting, segments)
         done = replace(
             transition_meeting(meeting, MeetingState.REVIEW),
             title=default_title(meeting),

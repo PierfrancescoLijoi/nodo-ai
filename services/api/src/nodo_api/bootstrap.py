@@ -9,9 +9,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from nodo_api.config import Settings
+from nodo_api.resilience import Guarded, RetryPolicy, make_guard
+from nodo_api.services.exports import ExportService
 from nodo_api.services.ingestion import IngestionService
 
 COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
+# Interactive calls give up quickly (a person is waiting); batch calls can wait out a bad minute.
+INTERACTIVE_RETRY = RetryPolicy(attempts=2, base_seconds=0.2, max_seconds=1.0, deadline_seconds=12)
+BATCH_RETRY = RetryPolicy(attempts=4, base_seconds=2.0, max_seconds=30.0, deadline_seconds=600)
 
 
 @dataclass(slots=True)
@@ -27,21 +32,27 @@ class Adapters:
     speech: Any
     extractor: Any
     runtime: Any = None  # the local backend's moving parts (worker thread, model server)
+    readiness: tuple[tuple[str, Callable[[], None]], ...] = ()  # (name, check) for /readyz
+    retention: Any = None  # the audio-retention store, for the sweep job
+    exports: Any = None  # export requests (ADR-019)
 
 
 @dataclass(slots=True)
 class WorkerRuntime:
     ingestion: IngestionService
     receiver_factory: Callable[[int], AbstractContextManager[Any]]
+    exports: Any = None
 
 
 def memory_adapters(settings: Settings) -> Adapters:
     from nodo_api.adapters.memory import (
         MemoryAuditLog,
         MemoryBlobStore,
+        MemoryExportStore,
         MemoryGraphStore,
         MemoryJobQueue,
         MemoryMeetingRepository,
+        MemoryRetentionStore,
         MemorySpeech,
         MemoryTranscriptRepository,
         MockLlm,
@@ -67,6 +78,8 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemoryAuditLog(),
         MemorySpeech(),
         KeywordExtractor(),
+        retention=MemoryRetentionStore(meetings),
+        exports=MemoryExportStore(),
     )
 
 
@@ -94,6 +107,13 @@ def azure_clients(settings: Settings) -> dict[str, Any]:
             azure_endpoint=settings.azure_openai_endpoint,
             azure_ad_token_provider=get_bearer_token_provider(credential, COGNITIVE_SCOPE),
             api_version=settings.openai_api_version,
+            # One layer retries (Guard); the SDK's own retries would multiply ours.
+            max_retries=0,
+            timeout=(
+                settings.openai_extraction_timeout_seconds
+                if settings.service == "worker"
+                else settings.openai_timeout_seconds
+            ),
         ),
         "speech_token": lambda: credential.get_token(COGNITIVE_SCOPE).token,
     }
@@ -114,11 +134,15 @@ def postgres_database(settings: Settings, credential: Any = None):
         settings.azure_postgres_database,
         settings.azure_postgres_user,
         credential,
+        max_size=settings.azure_postgres_pool_max,
+        pool_timeout=settings.azure_postgres_pool_timeout_seconds,
+        statement_timeout_ms=settings.azure_postgres_statement_timeout_ms,
     )
 
 
 def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) -> Adapters:
     from nodo_api.adapters.azure.blob import AzureBlobStore
+    from nodo_api.adapters.azure.exports_pg import PgExportStore
     from nodo_api.adapters.azure.graph_pg import PgGraphStore
     from nodo_api.adapters.azure.openai_extractor import AzureOpenAiExtractor
     from nodo_api.adapters.azure.openai_llm import AzureOpenAiEmbedder, AzureOpenAiLlm
@@ -128,33 +152,72 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
         PgMeetingRepository,
         PgTranscriptRepository,
     )
+    from nodo_api.adapters.azure.retention_pg import PgRetentionStore
     from nodo_api.adapters.azure.search import AzureSearchRetriever
     from nodo_api.adapters.azure.servicebus import ServiceBusJobQueue
     from nodo_api.adapters.azure.speech import AzureSpeechToText
 
     c = clients or azure_clients(settings)
     db = postgres_database(settings, c["credential"])
-    embedder = AzureOpenAiEmbedder(
-        c["openai"], settings.openai_embedding_deployment, settings.openai_embedding_dimensions
+    embedder = Guarded(
+        AzureOpenAiEmbedder(
+            c["openai"], settings.openai_embedding_deployment, settings.openai_embedding_dimensions
+        ),
+        make_guard("openai-embedding", limit=settings.bulkhead_embedding),
+        ("embed",),
     )
+    chat = make_guard("openai-chat", limit=settings.bulkhead_llm, retry=INTERACTIVE_RETRY)
+    extraction = make_guard(
+        "openai-extraction", limit=settings.bulkhead_extraction, retry=BATCH_RETRY
+    )
+    # Speech is not retried here: a retry would submit a second paid job for the same audio.
+    speech = make_guard("speech", limit=settings.bulkhead_speech, retry=RetryPolicy(attempts=1))
     return Adapters(
         meetings=PgMeetingRepository(db),
         transcripts=PgTranscriptRepository(db),
-        blobs=AzureBlobStore(
-            settings.azure_storage_account,
-            c["blob"],
-            upload_seconds=settings.upload_session_seconds,
+        blobs=Guarded(
+            AzureBlobStore(
+                settings.azure_storage_account,
+                c["blob"],
+                upload_seconds=settings.upload_session_seconds,
+            ),
+            make_guard("storage", limit=settings.bulkhead_storage, retry=INTERACTIVE_RETRY),
+            ("create_upload_session", "create_read_url", "erase"),
         ),
-        jobs=ServiceBusJobQueue(
-            PgJobOutbox(db),
-            lambda: c["servicebus"].get_queue_sender(settings.azure_servicebus_queue),
+        jobs=Guarded(
+            ServiceBusJobQueue(
+                PgJobOutbox(db),
+                lambda: c["servicebus"].get_queue_sender(settings.azure_servicebus_queue),
+            ),
+            make_guard("servicebus", limit=settings.bulkhead_servicebus, retry=INTERACTIVE_RETRY),
+            ("publish_once",),
         ),
-        retriever=AzureSearchRetriever(c["search"], embedder),
+        retriever=Guarded(
+            AzureSearchRetriever(c["search"], embedder),
+            make_guard("search", limit=settings.bulkhead_search, retry=INTERACTIVE_RETRY),
+            ("index", "search", "erase"),
+        ),
         graph=PgGraphStore(db),
-        llm=AzureOpenAiLlm(c["openai"], settings.openai_chat_deployment),
+        llm=Guarded(
+            AzureOpenAiLlm(c["openai"], settings.openai_chat_deployment), chat, ("answer",)
+        ),
         audit=PgAuditLog(db),
-        speech=AzureSpeechToText(settings.azure_speech_endpoint, c["speech_token"]),
-        extractor=AzureOpenAiExtractor(c["openai"], settings.openai_chat_deployment),
+        speech=Guarded(
+            AzureSpeechToText(settings.azure_speech_endpoint, c["speech_token"]),
+            speech,
+            ("transcribe",),
+        ),
+        extractor=Guarded(
+            AzureOpenAiExtractor(c["openai"], settings.openai_chat_deployment),
+            extraction,
+            ("extract",),
+        ),
+        # Only what this replica can not work without. Search, the model and the queue are not here:
+        # their failure degrades single features (the guards report it); taking the replica out of
+        # rotation would turn a partial outage into a total one.
+        readiness=(("database", db.ping),) if hasattr(db, "ping") else (),
+        retention=PgRetentionStore(db),
+        exports=PgExportStore(db),
     )
 
 
@@ -181,9 +244,19 @@ def build_worker_runtime(settings: Settings) -> WorkerRuntime:
         adapters.extractor,
         adapters.graph,
     )
+    exports = ExportService(
+        adapters.exports,
+        adapters.meetings,
+        adapters.transcripts,
+        adapters.graph,
+        adapters.blobs,
+        adapters.jobs,
+        adapters.audit,
+    )
     return WorkerRuntime(
         ingestion,
         lambda idle: clients["servicebus"].get_queue_receiver(
             settings.azure_servicebus_queue, max_wait_time=idle
         ),
+        exports,
     )

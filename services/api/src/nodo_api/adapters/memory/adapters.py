@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 from uuid import uuid4
 
+from nodo_api.domain.exports import EXPORT_TTL_HOURS, Export, ExportState
 from nodo_api.domain.graph import EntityType, Subgraph
 from nodo_api.domain.models import (
     Answerability,
@@ -17,6 +19,7 @@ from nodo_api.domain.models import (
     SpokenPhrase,
     TranscriptSegment,
 )
+from nodo_api.domain.retention import AudioDue, audio_expires_at
 from nodo_api.errors import NotFoundError
 
 
@@ -156,6 +159,7 @@ class MemoryTranscriptRepository:
 class MemoryBlobStore:
     def __init__(self) -> None:
         self._erased: set[tuple[str, str]] = set()
+        self._exports: dict[tuple[str, str], bytes] = {}
 
     def create_upload_session(self, workspace_id: str, meeting_id: str) -> dict[str, Any]:
         return {
@@ -172,6 +176,16 @@ class MemoryBlobStore:
 
     def was_erased(self, workspace_id: str, meeting_id: str) -> bool:
         return (workspace_id, meeting_id) in self._erased
+
+    def put_export(self, workspace_id: str, name: str, data: bytes) -> str:
+        self._exports[(workspace_id, name)] = data
+        return name
+
+    def get_export(self, workspace_id: str, name: str) -> bytes:
+        try:
+            return self._exports[(workspace_id, name)]
+        except KeyError:
+            raise NotFoundError from None
 
 
 class MemoryJobQueue:
@@ -230,6 +244,75 @@ class MockRetriever:
         for key in list(self._segments):
             if key[:2] == (workspace_id, meeting_id):
                 del self._segments[key]
+
+
+class MemoryExportStore:
+    def __init__(self) -> None:
+        self._items: dict[tuple[str, str], Export] = {}
+
+    def create(
+        self, workspace_id: str, owner_id: str, meeting_id: str | None, now: datetime
+    ) -> Export:
+        item = Export(
+            str(uuid4()),
+            workspace_id,
+            owner_id,
+            meeting_id,
+            ExportState.QUEUED,
+            now,
+            now + timedelta(hours=EXPORT_TTL_HOURS),
+        )
+        self._items[(workspace_id, item.id)] = item
+        return item
+
+    def get(self, workspace_id: str, owner_id: str, export_id: str) -> Export:
+        item = self._items.get((workspace_id, export_id))
+        if item is None or item.owner_id != owner_id:
+            raise NotFoundError
+        return item
+
+    def get_for_processing(self, workspace_id: str, export_id: str) -> Export:
+        item = self._items.get((workspace_id, export_id))
+        if item is None:
+            raise NotFoundError
+        return item
+
+    def set_state(
+        self,
+        workspace_id: str,
+        export_id: str,
+        state: ExportState,
+        blob_name: str | None = None,
+        size_bytes: int | None = None,
+    ) -> None:
+        item = self._items[(workspace_id, export_id)]
+        self._items[(workspace_id, export_id)] = replace(
+            item,
+            state=state,
+            blob_name=blob_name or item.blob_name,
+            size_bytes=size_bytes if size_bytes is not None else item.size_bytes,
+        )
+
+
+class MemoryRetentionStore:
+    """Retention over the in-memory meetings, for tests and the demo."""
+
+    def __init__(self, meetings: MemoryMeetingRepository) -> None:
+        self._meetings = meetings
+        self._erased: set[tuple[str, str]] = set()
+
+    def audio_due(self, now: datetime, limit: int) -> tuple[AudioDue, ...]:
+        due = [
+            AudioDue(w, m.id, m.owner_id, m.created_at, m.attestation.retention_policy_id)
+            for (w, _), m in self._meetings._meetings.items()
+            if m.tombstoned_at is None
+            and (w, m.id) not in self._erased
+            and audio_expires_at(m.created_at, m.attestation.retention_policy_id) <= now
+        ]
+        return tuple(sorted(due, key=lambda d: d.created_at)[:limit])
+
+    def mark_audio_erased(self, workspace_id: str, meeting_id: str, when: datetime) -> None:
+        self._erased.add((workspace_id, meeting_id))
 
 
 class MemoryAuditLog:

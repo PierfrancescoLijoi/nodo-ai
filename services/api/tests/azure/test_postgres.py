@@ -399,6 +399,91 @@ def test_a_local_archive_is_copied_into_postgres_and_a_second_copy_changes_nothi
         assert [m["id"] for m in listed].count(meeting_id) == 1
 
 
+def test_the_retention_role_scans_every_workspace_and_can_only_mark_audio(admin_db, db) -> None:
+    """Migration 0004: the one job that must look across workspaces gets exactly that, as a role."""
+    from datetime import timedelta
+
+    from nodo_api.adapters.azure.retention_pg import PgRetentionStore
+
+    repo = PgMeetingRepository(db)
+    now = datetime.now(UTC)
+
+    def old(meeting_id: str, workspace: str, days: int, policy: str):
+        meeting = _meeting(meeting_id, workspace=workspace)
+        created = now - timedelta(days=days)
+        attestation = replace(
+            meeting.attestation, retention_policy_id=policy, acknowledged_at=created
+        )
+        return replace(meeting, created_at=created, attestation=attestation)
+
+    repo.add(A, old("ret-a-due", A, 10, "retention-7d"), "ret-k-1", "h")
+    repo.add(B, old("ret-b-due", B, 40, "retention-30d"), "ret-k-2", "h")
+    repo.add(A, old("ret-a-fresh", A, 10, "retention-30d"), "ret-k-3", "h")
+
+    with admin_db.admin() as conn:
+        conn.execute("DROP ROLE IF EXISTS ret_login")
+        conn.execute("CREATE ROLE ret_login LOGIN PASSWORD 'ret-password' IN ROLE nodo_retention")
+        conn.execute("GRANT USAGE ON SCHEMA public TO ret_login")
+    params = conninfo_to_dict(DSN)
+    params.update(user="ret_login", password="ret-password")
+    retention_db = PostgresDatabase.from_dsn(make_conninfo(**params))
+    try:
+        store = PgRetentionStore(retention_db)
+        due = {d.meeting_id: d for d in store.audio_due(now, 50)}
+        assert {"ret-a-due", "ret-b-due"} <= set(due) and "ret-a-fresh" not in due
+        assert {due["ret-a-due"].workspace_id, due["ret-b-due"].workspace_id} == {A, B}
+
+        for forbidden in (
+            "SELECT * FROM transcript_segments",
+            "SELECT * FROM entities",
+            "SELECT * FROM audit_events",
+            "UPDATE meetings SET title = 'changed'",
+            "DELETE FROM meetings",
+        ):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege), retention_db.admin() as conn:
+                conn.execute(forbidden)
+
+        store.mark_audio_erased(A, "ret-a-due", now)
+        assert "ret-a-due" not in {d.meeting_id for d in store.audio_due(now, 50)}
+        with retention_db.admin() as conn:  # a second mark changes nothing (policy: not yet erased)
+            assert (
+                conn.execute(
+                    "UPDATE meetings SET audio_erased_at = now() WHERE id = 'ret-a-due'"
+                ).rowcount
+                == 0
+            )
+    finally:
+        retention_db.close()
+
+    # the application role is still confined to its workspace
+    assert PgMeetingRepository(db).all_for_workspace(B)[0].workspace_id == B
+    with db.workspace(A) as conn:
+        assert (
+            conn.execute(
+                "SELECT count(*) AS n FROM meetings WHERE workspace_id = %s", (B,)
+            ).fetchone()["n"]
+            == 0
+        )
+
+
+def test_export_requests_are_scoped_to_their_workspace_and_owner(db) -> None:
+    from nodo_api.adapters.azure.exports_pg import PgExportStore
+    from nodo_api.domain.exports import ExportState
+
+    store = PgExportStore(db)
+    now = datetime.now(UTC)
+    mine = store.create(A, "alice", None, now)
+    assert store.get(A, "alice", mine.id).state is ExportState.QUEUED
+    with pytest.raises(NotFoundError):
+        store.get(A, "mallory", mine.id)  # another person in the same workspace
+    with pytest.raises(NotFoundError):
+        store.get(B, "alice", mine.id)  # another workspace: row level security
+    store.set_state(A, mine.id, ExportState.READY, "x.json", 12)
+    ready = store.get_for_processing(A, mine.id)
+    assert (ready.state, ready.blob_name, ready.size_bytes) == (ExportState.READY, "x.json", 12)
+    assert ready.expires_at > now
+
+
 from tests.graph_contract import GraphContract  # noqa: E402
 
 
