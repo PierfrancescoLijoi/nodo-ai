@@ -1,5 +1,3 @@
-
-
 const pl = {
   app: { name: 'NODO' },
   tabs: { home: 'Start', meetings: 'Spotkania', ask: 'Pytaj', graph: 'Graf' },
@@ -11,6 +9,8 @@ const pl = {
     seeAll: 'Zobacz wszystkie',
     aiDraft: 'Szkic AI',
     loadError: 'Nie udało się wczytać tej treści. Spróbuj ponownie.',
+    retry: 'Spróbuj ponownie',
+    loading: 'Ładowanie',
     sampleData: 'Dane przykładowe. Ta wersja nie nagrywa dźwięku.',
   },
   home: {
@@ -100,12 +100,12 @@ const pl = {
       action: 'Zadanie',
     },
     relation: {
-      mentionedIn: 'wspomniany w',
-      about: 'dotyczy',
-      decidedIn: 'decyzja ze spotkania',
-      proposedBy: 'propozycja od',
-      supersedes: 'zastępuje',
-      assignedTo: 'przypisany do',
+      mentionedIn: '{{from}}: wspomniano w {{to}}',
+      about: '{{from}} dotyczy: {{to}}',
+      decidedIn: '{{from}}: decyzja ze spotkania {{to}}',
+      proposedBy: '{{from}}: propozycja od {{to}}',
+      supersedes: '{{from}} zastępuje {{to}}',
+      assignedTo: '{{from}}: przypisano do {{to}}',
     },
   },
   capture: {
@@ -123,6 +123,7 @@ const pl = {
     retentionOption_many: '{{count}} dni',
     retentionOption_other: '{{count}} dnia',
     start: 'Rozpocznij nagrywanie',
+    startHint: 'Najpierw zaznacz potwierdzenie powyżej.',
     pause: 'Wstrzymaj',
     resume: 'Wznów',
     stop: 'Zatrzymaj i zapisz',

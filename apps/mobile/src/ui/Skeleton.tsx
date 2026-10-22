@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Animated, Platform, type DimensionValue } from 'react-native';
 
 import { useTheme } from '@/theme/ThemeProvider';
@@ -16,6 +17,7 @@ export function useReducedMotion(): boolean {
 
 export function Skeleton({ height = 16, width = '100%' }: { height?: number; width?: DimensionValue }) {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const reduced = useReducedMotion();
   const [opacity] = useState(() => new Animated.Value(0.6));
 
@@ -33,8 +35,9 @@ export function Skeleton({ height = 16, width = '100%' }: { height?: number; wid
 
   return (
     <Animated.View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
+      accessible
+      accessibilityLabel={t('common.loading')}
+      accessibilityState={{ busy: true }}
       style={{ height, width, borderRadius: radius.control, backgroundColor: colors.surfaceRaised, opacity }}
     />
   );

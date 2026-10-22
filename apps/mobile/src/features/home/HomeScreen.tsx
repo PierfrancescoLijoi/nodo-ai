@@ -39,12 +39,12 @@ export default function HomeScreen() {
   const changes = useAsync((r) => r.listChanges());
   const graph = useAsync((r) => r.getGraph());
 
-  const failed = [meetings, changes, graph].some((state) => state.status === 'error');
+  const failed = [meetings, changes, graph].find((state) => state.status === 'error');
   const decisionCount = meetings.status === 'ready' ? meetings.data.reduce((n, m) => n + m.decisions.length, 0) : 0;
 
   return (
     <Screen wordmark title={t('home.title')} right={<SettingsButton />}>
-      {failed ? <ErrorNotice /> : null}
+      {failed?.status === 'error' ? <ErrorNotice onRetry={failed.retry} /> : null}
       <Surface tone="accent">
         <Text variant="title">{t('home.record.title')}</Text>
         <Text tone="muted">{t('home.record.body')}</Text>

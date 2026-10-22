@@ -37,17 +37,17 @@ export function Segmented<T extends string>({ label, options, value, onChange }:
           <Pressable
             key={option.value}
             accessibilityRole="radio"
-            accessibilityState={{ selected }}
+            accessibilityState={{ checked: selected, selected }}
             onPress={() => onChange(option.value)}
             style={{
               flex: 1,
-              minHeight: touch - 8,
+              minHeight: touch,
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: radius.control - 4,
               backgroundColor: selected ? colors.surface : 'transparent',
-              borderWidth: selected ? 1 : 0,
-              borderColor: colors.border,
+              borderWidth: selected ? 2 : 0,
+              borderColor: colors.accent,
             }}
           >
             <Text variant="label" tone={selected ? 'default' : 'muted'}>

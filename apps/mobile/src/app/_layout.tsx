@@ -1,18 +1,17 @@
-import {
-  Geist_400Regular,
-  Geist_500Medium,
-  Geist_600SemiBold,
-  useFonts,
-} from '@expo-google-fonts/geist';
+import { Geist_400Regular, Geist_500Medium, Geist_600SemiBold, useFonts } from '@expo-google-fonts/geist';
 import { GeistMono_400Regular, GeistMono_500Medium } from '@expo-google-fonts/geist-mono';
 import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import '@/i18n';
 import { RepositoryProvider } from '@/data/RepositoryProvider';
 import { PrefsProvider } from '@/prefs/PrefsProvider';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
+
+void SplashScreen.preventAutoHideAsync();
 
 function ThemedStack() {
   const { colors, scheme } = useTheme();
@@ -27,14 +26,18 @@ function ThemedStack() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Geist_400Regular,
     Geist_500Medium,
     Geist_600SemiBold,
     GeistMono_400Regular,
     GeistMono_500Medium,
   });
-  if (!fontsLoaded) return null;
+  const ready = fontsLoaded || !!fontError;
+  useEffect(() => {
+    if (ready) void SplashScreen.hideAsync();
+  }, [ready]);
+  if (!ready) return null;
 
   return (
     <SafeAreaProvider>

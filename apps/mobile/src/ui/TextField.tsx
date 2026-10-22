@@ -16,7 +16,11 @@ export function TextField({ label, hideLabel, ...rest }: TextFieldProps) {
   const [focused, setFocused] = useState(false);
   return (
     <View style={{ gap: space[2] }}>
-      {hideLabel ? null : <Text variant="label">{label}</Text>}
+      {hideLabel ? null : (
+        <Text variant="label" importantForAccessibility="no" accessibilityElementsHidden>
+          {label}
+        </Text>
+      )}
       <TextInput
         {...rest}
         accessibilityLabel={label}

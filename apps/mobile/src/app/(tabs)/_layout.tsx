@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import { House, Notebook, Sparkle, TreeStructure, type Icon } from 'phosphor-react-native';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/theme/ThemeProvider';
 import { fonts } from '@/theme/tokens';
@@ -15,6 +16,7 @@ const TABS: { name: string; key: 'home' | 'meetings' | 'ask' | 'graph'; icon: Ic
 export default function TabsLayout() {
   const { colors } = useTheme();
   const { t } = useTranslation();
+  const { bottom } = useSafeAreaInsets();
 
   return (
     <Tabs
@@ -22,7 +24,12 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border, height: 72, paddingTop: 8 },
+        tabBarStyle: {
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
+          height: 72 + bottom,
+          paddingTop: 8,
+        },
         tabBarLabelStyle: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 16, marginBottom: 10 },
       }}
     >
@@ -33,7 +40,11 @@ export default function TabsLayout() {
           options={{
             title: t(`tabs.${key}`),
             tabBarIcon: ({ focused }) => (
-              <TabIcon size={24} color={focused ? colors.accent : colors.textMuted} weight={focused ? 'fill' : 'regular'} />
+              <TabIcon
+                size={24}
+                color={focused ? colors.accent : colors.textMuted}
+                weight={focused ? 'fill' : 'regular'}
+              />
             ),
           }}
         />

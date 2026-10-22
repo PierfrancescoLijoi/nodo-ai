@@ -1,16 +1,7 @@
 import type { Locale } from '@/i18n';
 import { formatDate } from '@/i18n/format';
 
-import type {
-  Answer,
-  Citation,
-  Graph,
-  GraphEdge,
-  GraphNode,
-  Meeting,
-  MeetingsRepository,
-  QuestionId,
-} from '../types';
+import type { Answer, Citation, Graph, GraphEdge, GraphNode, Meeting, MeetingsRepository, QuestionId } from '../types';
 import { CHANGE_FACTS, CONTENT, FACTS, SECOND_SEGMENT, type LocaleContent } from './content';
 
 const LATENCY_MS = 450;
@@ -59,14 +50,14 @@ function matchQuestion(text: string, keywords: LocaleContent['keywords']): Quest
 
 // Layout is illustrative; a real graph view would use server-provided subgraphs.
 const LAYOUT = {
-  m7: [55, 55],
-  ingestion: [170, 55],
-  m21: [285, 55],
-  syncFlow: [55, 165],
-  queue: [170, 165],
-  marco: [55, 275],
-  sara: [170, 275],
-  benchmark: [285, 275],
+  m7: [55, 45],
+  ingestion: [170, 45],
+  m21: [285, 45],
+  syncFlow: [55, 135],
+  queue: [170, 135],
+  marco: [55, 225],
+  sara: [170, 225],
+  benchmark: [285, 225],
 } as const;
 
 type LayoutId = keyof typeof LAYOUT;

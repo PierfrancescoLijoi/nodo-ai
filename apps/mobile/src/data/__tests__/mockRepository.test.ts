@@ -15,7 +15,9 @@ describe.each(codes)('mock repository (%s)', (locale) => {
       expect(answer.answerability).toBe('supported');
       expect(answer.citations.length).toBeGreaterThan(0);
       for (const citation of answer.citations) {
-        const segment = meetings.find((m) => m.id === citation.meetingId)?.segments.find((s) => s.id === citation.segmentId);
+        const segment = meetings
+          .find((m) => m.id === citation.meetingId)
+          ?.segments.find((s) => s.id === citation.segmentId);
         expect(segment?.text).toBe(citation.quote);
       }
     }

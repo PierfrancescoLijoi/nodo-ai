@@ -46,13 +46,7 @@ export type QuestionId = 'ingestionChange' | 'saraTasks' | 'ragChoice';
 
 export type EntityType = 'topic' | 'meeting' | 'decision' | 'person' | 'action';
 
-export type RelationKind =
-  | 'mentionedIn'
-  | 'about'
-  | 'decidedIn'
-  | 'proposedBy'
-  | 'supersedes'
-  | 'assignedTo';
+export type RelationKind = 'mentionedIn' | 'about' | 'decidedIn' | 'proposedBy' | 'supersedes' | 'assignedTo';
 
 export interface GraphNode {
   id: string;

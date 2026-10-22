@@ -66,7 +66,7 @@ export const lightColors: Colors = {
   borderStrong: '#76848F',
   text: '#0F1B26',
   textMuted: '#52606F',
-  accent: '#0B7A6E',
+  accent: '#0A6F64',
   accentText: '#FFFFFF',
   accentSoft: '#DDF3EF',
   warning: '#8A5A00',

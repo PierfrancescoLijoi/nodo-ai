@@ -28,7 +28,7 @@ function LanguagePicker() {
           <Pressable
             key={code}
             accessibilityRole="radio"
-            accessibilityState={{ selected }}
+            accessibilityState={{ checked: selected, selected }}
             accessibilityLanguage={code}
             onPress={() => setLocale(code)}
             style={{
@@ -92,7 +92,10 @@ export default function SettingsScreen() {
           label={t('settings.retention')}
           value={String(retentionDays)}
           onChange={(value) => setRetentionDays(Number(value) as RetentionDays)}
-          options={RETENTION.map((days) => ({ value: String(days), label: t('capture.retentionOption', { count: days }) }))}
+          options={RETENTION.map((days) => ({
+            value: String(days),
+            label: t('capture.retentionOption', { count: days }),
+          }))}
         />
       </View>
 

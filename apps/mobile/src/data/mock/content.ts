@@ -22,7 +22,10 @@ export interface LocaleContent {
   answers: Record<QuestionId, AnswerText>;
   unanswerable: string;
   keywords: Record<QuestionId, string[]>;
-  graph: Record<'ingestion' | 'queue' | 'syncFlow' | 'marco' | 'sara' | 'benchmark', { label: string; description: string }>;
+  graph: Record<
+    'ingestion' | 'queue' | 'syncFlow' | 'marco' | 'sara' | 'benchmark',
+    { label: string; description: string }
+  >;
 }
 
 export interface MeetingFacts {
@@ -39,19 +42,37 @@ export interface MeetingFacts {
 
 export const FACTS: MeetingFacts[] = [
   {
-    id: 'm1', startedAt: '2026-10-21T10:30:00Z', durationMin: 42, participants: ['Marco', 'Sara'],
-    tags: ['Architecture', 'Platform'], owner: 'Sara', dueDate: '2026-10-28',
-    segment: { id: 'm1-s1', startMs: 762000, speaker: 'Marco' }, actionId: 'a1',
+    id: 'm1',
+    startedAt: '2026-10-21T10:30:00Z',
+    durationMin: 42,
+    participants: ['Marco', 'Sara'],
+    tags: ['Architecture', 'Platform'],
+    owner: 'Sara',
+    dueDate: '2026-10-28',
+    segment: { id: 'm1-s1', startMs: 762000, speaker: 'Marco' },
+    actionId: 'a1',
   },
   {
-    id: 'm2', startedAt: '2026-10-14T14:00:00Z', durationMin: 35, participants: ['Sara', 'Marco'],
-    tags: ['RAG', 'Evaluation'], owner: 'Marco', dueDate: '2026-10-21',
-    segment: { id: 'm2-s1', startMs: 571000, speaker: 'Sara' }, actionId: 'a2',
+    id: 'm2',
+    startedAt: '2026-10-14T14:00:00Z',
+    durationMin: 35,
+    participants: ['Sara', 'Marco'],
+    tags: ['RAG', 'Evaluation'],
+    owner: 'Marco',
+    dueDate: '2026-10-21',
+    segment: { id: 'm2-s1', startMs: 571000, speaker: 'Sara' },
+    actionId: 'a2',
   },
   {
-    id: 'm3', startedAt: '2026-10-07T09:00:00Z', durationMin: 51, participants: ['Marco', 'Giulia'],
-    tags: ['Ingestion', 'Architecture'], owner: 'Giulia', dueDate: '2026-10-14',
-    segment: { id: 'm3-s1', startMs: 1083000, speaker: 'Giulia' }, actionId: 'a3',
+    id: 'm3',
+    startedAt: '2026-10-07T09:00:00Z',
+    durationMin: 51,
+    participants: ['Marco', 'Giulia'],
+    tags: ['Ingestion', 'Architecture'],
+    owner: 'Giulia',
+    dueDate: '2026-10-14',
+    segment: { id: 'm3-s1', startMs: 1083000, speaker: 'Giulia' },
+    actionId: 'a3',
   },
 ];
 
@@ -65,8 +86,12 @@ const en: LocaleContent = {
   meetings: {
     m1: {
       title: 'Platform architecture sync',
-      summary: 'The team chose an asynchronous queue for the ingestion pipeline. The earlier synchronous proposal was set aside to absorb traffic spikes and allow retries.',
-      decisions: ['Use an asynchronous queue for the ingestion pipeline.', 'Define idempotent retries and a dead-letter queue.'],
+      summary:
+        'The team chose an asynchronous queue for the ingestion pipeline. The earlier synchronous proposal was set aside to absorb traffic spikes and allow retries.',
+      decisions: [
+        'Use an asynchronous queue for the ingestion pipeline.',
+        'Define idempotent retries and a dead-letter queue.',
+      ],
       actionText: 'Prepare the benchmark',
       quote: 'For ingestion we go with the async queue: it isolates the spikes and lets us replay jobs.',
     },
@@ -86,11 +111,18 @@ const en: LocaleContent = {
     },
   },
   m1Quote2: 'I will prepare the benchmark by October 28, including retries and execution times.',
-  changes: ['The asynchronous queue replaces the synchronous flow for ingestion.', 'Hybrid retrieval is the option to evaluate for RAG.'],
+  changes: [
+    'The asynchronous queue replaces the synchronous flow for ingestion.',
+    'Hybrid retrieval is the option to evaluate for RAG.',
+  ],
   answers: {
     ingestionChange: {
       text: 'On October 7 a synchronous flow was proposed for simplicity. On October 21 Marco chose an asynchronous queue to absorb spikes and retry jobs, so the queue is the current decision. Sara will prepare a benchmark by October 28.',
-      cites: [['m3', 'm3-s1'], ['m1', 'm1-s1'], ['m1', 'm1-s2']],
+      cites: [
+        ['m3', 'm3-s1'],
+        ['m1', 'm1-s1'],
+        ['m1', 'm1-s2'],
+      ],
     },
     saraTasks: {
       text: 'Sara owns the benchmark for the asynchronous ingestion queue, due October 28. It has to cover retries and execution times.',
@@ -101,7 +133,8 @@ const en: LocaleContent = {
       cites: [['m2', 'm2-s1']],
     },
   },
-  unanswerable: "I cannot find enough evidence in your meetings to answer this reliably. Try the ingestion decision, RAG retrieval or Sara's deadline.",
+  unanswerable:
+    "I cannot find enough evidence in your meetings to answer this reliably. Try the ingestion decision, RAG retrieval or Sara's deadline.",
   keywords: {
     ingestionChange: ['ingestion', 'queue', 'async', 'change', 'sync'],
     saraTasks: ['sara', 'deadline', 'benchmark', 'due'],
@@ -121,8 +154,12 @@ const pl: LocaleContent = {
   meetings: {
     m1: {
       title: 'Synchronizacja architektury platformy',
-      summary: 'Zespół wybrał kolejkę asynchroniczną dla potoku ingestion. Wcześniejszą propozycję synchroniczną odłożono, aby absorbować szczyty ruchu i umożliwić ponowienia.',
-      decisions: ['Użyć kolejki asynchronicznej dla potoku ingestion.', 'Zdefiniować idempotentne ponowienia i kolejkę martwych wiadomości.'],
+      summary:
+        'Zespół wybrał kolejkę asynchroniczną dla potoku ingestion. Wcześniejszą propozycję synchroniczną odłożono, aby absorbować szczyty ruchu i umożliwić ponowienia.',
+      decisions: [
+        'Użyć kolejki asynchronicznej dla potoku ingestion.',
+        'Zdefiniować idempotentne ponowienia i kolejkę martwych wiadomości.',
+      ],
       actionText: 'Przygotować benchmark',
       quote: 'W ingestion idziemy w kolejkę asynchroniczną: izoluje piki obciążenia i pozwala ponawiać zadania.',
     },
@@ -142,11 +179,18 @@ const pl: LocaleContent = {
     },
   },
   m1Quote2: 'Przygotuję benchmark do 28 października, z ponowieniami i czasami wykonania.',
-  changes: ['Kolejka asynchroniczna zastępuje przepływ synchroniczny w ingestion.', 'Wyszukiwanie hybrydowe to opcja do oceny w RAG.'],
+  changes: [
+    'Kolejka asynchroniczna zastępuje przepływ synchroniczny w ingestion.',
+    'Wyszukiwanie hybrydowe to opcja do oceny w RAG.',
+  ],
   answers: {
     ingestionChange: {
       text: '7 października zaproponowano przepływ synchroniczny dla prostoty. 21 października Marco wybrał kolejkę asynchroniczną, aby absorbować szczyty i ponawiać zadania, więc obowiązuje decyzja o kolejce. Sara przygotuje benchmark do 28 października.',
-      cites: [['m3', 'm3-s1'], ['m1', 'm1-s1'], ['m1', 'm1-s2']],
+      cites: [
+        ['m3', 'm3-s1'],
+        ['m1', 'm1-s1'],
+        ['m1', 'm1-s2'],
+      ],
     },
     saraTasks: {
       text: 'Sara odpowiada za benchmark kolejki asynchronicznej w ingestion, termin 28 października. Musi obejmować ponowienia i czasy wykonania.',
@@ -157,7 +201,8 @@ const pl: LocaleContent = {
       cites: [['m2', 'm2-s1']],
     },
   },
-  unanswerable: 'Nie znajduję w Twoich spotkaniach wystarczających dowodów, by odpowiedzieć rzetelnie. Spróbuj zapytać o decyzję w sprawie ingestion, wyszukiwanie RAG lub termin Sary.',
+  unanswerable:
+    'Nie znajduję w Twoich spotkaniach wystarczających dowodów, by odpowiedzieć rzetelnie. Spróbuj zapytać o decyzję w sprawie ingestion, wyszukiwanie RAG lub termin Sary.',
   keywords: {
     ingestionChange: ['ingestion', 'kolejk', 'asynchron', 'zmieni', 'decyzj'],
     saraTasks: ['sar', 'termin', 'benchmark', 'zadani'],
@@ -177,8 +222,12 @@ const it: LocaleContent = {
   meetings: {
     m1: {
       title: 'Sync architettura piattaforma',
-      summary: 'Il team ha scelto una coda asincrona per la pipeline di ingestion. La proposta sincrona iniziale è stata messa da parte per assorbire i picchi e consentire i retry.',
-      decisions: ['Usare una coda asincrona per la pipeline di ingestion.', 'Definire retry idempotenti e una dead-letter queue.'],
+      summary:
+        'Il team ha scelto una coda asincrona per la pipeline di ingestion. La proposta sincrona iniziale è stata messa da parte per assorbire i picchi e consentire i retry.',
+      decisions: [
+        'Usare una coda asincrona per la pipeline di ingestion.',
+        'Definire retry idempotenti e una dead-letter queue.',
+      ],
       actionText: 'Preparare il benchmark',
       quote: 'Per l’ingestion scegliamo la coda asincrona: isola i picchi e possiamo ripetere i job.',
     },
@@ -198,11 +247,18 @@ const it: LocaleContent = {
     },
   },
   m1Quote2: 'Preparo il benchmark per il 28 ottobre, includendo retry e tempi di esecuzione.',
-  changes: ['La coda asincrona sostituisce il flusso sincrono per l’ingestion.', 'Il retrieval ibrido è l’opzione da valutare per il RAG.'],
+  changes: [
+    'La coda asincrona sostituisce il flusso sincrono per l’ingestion.',
+    'Il retrieval ibrido è l’opzione da valutare per il RAG.',
+  ],
   answers: {
     ingestionChange: {
       text: 'Il 7 ottobre era stato proposto un flusso sincrono per semplicità. Il 21 ottobre Marco ha scelto una coda asincrona per assorbire i picchi e ripetere i job, quindi la decisione attuale è la coda. Sara preparerà un benchmark entro il 28 ottobre.',
-      cites: [['m3', 'm3-s1'], ['m1', 'm1-s1'], ['m1', 'm1-s2']],
+      cites: [
+        ['m3', 'm3-s1'],
+        ['m1', 'm1-s1'],
+        ['m1', 'm1-s2'],
+      ],
     },
     saraTasks: {
       text: 'Sara è responsabile del benchmark sulla coda asincrona di ingestion, con scadenza il 28 ottobre. Deve includere retry e tempi di esecuzione.',
@@ -213,7 +269,8 @@ const it: LocaleContent = {
       cites: [['m2', 'm2-s1']],
     },
   },
-  unanswerable: 'Non trovo prove sufficienti nei tuoi meeting per rispondere in modo affidabile. Prova con la decisione sull’ingestion, il retrieval RAG o la scadenza di Sara.',
+  unanswerable:
+    'Non trovo prove sufficienti nei tuoi meeting per rispondere in modo affidabile. Prova con la decisione sull’ingestion, il retrieval RAG o la scadenza di Sara.',
   keywords: {
     ingestionChange: ['ingestion', 'coda', 'asincron', 'cambi', 'decisione'],
     saraTasks: ['sara', 'scadenz', 'benchmark', 'responsab'],
@@ -233,8 +290,12 @@ const da: LocaleContent = {
   meetings: {
     m1: {
       title: 'Arkitektursynk for platformen',
-      summary: 'Teamet valgte en asynkron kø til ingestion-pipelinen. Det tidligere synkrone forslag blev lagt til side for at håndtere spidsbelastninger og muliggøre genforsøg.',
-      decisions: ['Brug en asynkron kø til ingestion-pipelinen.', 'Definér idempotente genforsøg og en dead-letter-kø.'],
+      summary:
+        'Teamet valgte en asynkron kø til ingestion-pipelinen. Det tidligere synkrone forslag blev lagt til side for at håndtere spidsbelastninger og muliggøre genforsøg.',
+      decisions: [
+        'Brug en asynkron kø til ingestion-pipelinen.',
+        'Definér idempotente genforsøg og en dead-letter-kø.',
+      ],
       actionText: 'Forbered benchmarket',
       quote: 'Til ingestion vælger vi den asynkrone kø: den isolerer spidsbelastninger, og vi kan afspille jobs igen.',
     },
@@ -254,11 +315,18 @@ const da: LocaleContent = {
     },
   },
   m1Quote2: 'Jeg forbereder benchmarket til den 28. oktober, inklusive genforsøg og kørselstider.',
-  changes: ['Den asynkrone kø erstatter det synkrone flow til ingestion.', 'Hybrid søgning er den mulighed, der skal evalueres til RAG.'],
+  changes: [
+    'Den asynkrone kø erstatter det synkrone flow til ingestion.',
+    'Hybrid søgning er den mulighed, der skal evalueres til RAG.',
+  ],
   answers: {
     ingestionChange: {
       text: 'Den 7. oktober blev et synkront flow foreslået for enkelheds skyld. Den 21. oktober valgte Marco en asynkron kø for at håndtere spidsbelastninger og gentage jobs, så køen er den gældende beslutning. Sara forbereder et benchmark til den 28. oktober.',
-      cites: [['m3', 'm3-s1'], ['m1', 'm1-s1'], ['m1', 'm1-s2']],
+      cites: [
+        ['m3', 'm3-s1'],
+        ['m1', 'm1-s1'],
+        ['m1', 'm1-s2'],
+      ],
     },
     saraTasks: {
       text: 'Sara har ansvaret for benchmarket af den asynkrone ingestion-kø med frist den 28. oktober. Det skal dække genforsøg og kørselstider.',
@@ -269,7 +337,8 @@ const da: LocaleContent = {
       cites: [['m2', 'm2-s1']],
     },
   },
-  unanswerable: 'Jeg kan ikke finde nok belæg i dine møder til at svare pålideligt. Prøv beslutningen om ingestion, RAG-søgning eller Saras frist.',
+  unanswerable:
+    'Jeg kan ikke finde nok belæg i dine møder til at svare pålideligt. Prøv beslutningen om ingestion, RAG-søgning eller Saras frist.',
   keywords: {
     ingestionChange: ['ingestion', 'kø', 'asynkron', 'ændr', 'beslutning'],
     saraTasks: ['sara', 'frist', 'benchmark', 'opgave'],

@@ -2,13 +2,15 @@ import { useRouter } from 'expo-router';
 import { ArrowUpRight, PaperPlaneTilt, Warning } from 'phosphor-react-native';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, View } from 'react-native';
+import { AccessibilityInfo, Pressable, View } from 'react-native';
 
 import { useAsync, useRepository } from '@/data/RepositoryProvider';
 import type { Answer, QuestionId } from '@/data/types';
 import { formatClock } from '@/i18n/format';
+import { usePrefs } from '@/prefs/PrefsProvider';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space, touch } from '@/theme/tokens';
+import { ErrorNotice } from '@/ui/ErrorNotice';
 import { Screen } from '@/ui/Screen';
 import { SettingsButton } from '@/ui/SettingsButton';
 import { Skeleton } from '@/ui/Skeleton';
@@ -22,10 +24,12 @@ let nextTurnId = 0;
 interface Turn {
   id: number;
   question: string;
+  questionId?: QuestionId;
   answer?: Answer;
+  failed?: boolean;
 }
 
-function AnswerCard({ turn, titles }: { turn: Turn; titles: Record<string, string> }) {
+function AnswerCard({ turn, titles, onRetry }: { turn: Turn; titles: Record<string, string>; onRetry: () => void }) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const router = useRouter();
@@ -36,8 +40,10 @@ function AnswerCard({ turn, titles }: { turn: Turn; titles: Record<string, strin
       <Text variant="label" tone="muted">
         {turn.question}
       </Text>
-      {!answer ? (
-        <View accessibilityLiveRegion="polite" style={{ gap: space[2] }}>
+      {turn.failed ? (
+        <ErrorNotice onRetry={onRetry} />
+      ) : !answer ? (
+        <View style={{ gap: space[2] }}>
           <Text variant="small" tone="muted">
             {t('ask.thinking')}
           </Text>
@@ -54,7 +60,7 @@ function AnswerCard({ turn, titles }: { turn: Turn; titles: Record<string, strin
               </Text>
             </View>
           ) : null}
-          <Text accessibilityLiveRegion="polite">{answer.text}</Text>
+          <Text>{answer.text}</Text>
           {answer.citations.length > 0 ? (
             <View style={{ gap: space[2] }}>
               <Text variant="label" tone="muted">
@@ -65,7 +71,10 @@ function AnswerCard({ turn, titles }: { turn: Turn; titles: Record<string, strin
                   key={citation.segmentId}
                   accessibilityRole="link"
                   onPress={() =>
-                    router.push({ pathname: '/meeting/[id]', params: { id: citation.meetingId, seg: citation.segmentId } })
+                    router.push({
+                      pathname: '/meeting/[id]',
+                      params: { id: citation.meetingId, seg: citation.segmentId },
+                    })
                   }
                   style={({ pressed }) => ({
                     gap: space[1],
@@ -76,7 +85,7 @@ function AnswerCard({ turn, titles }: { turn: Turn; titles: Record<string, strin
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Text variant="label">
-                      {titles[citation.meetingId]}, {formatClock(citation.startMs / 1000)}
+                      {[titles[citation.meetingId], formatClock(citation.startMs / 1000)].filter(Boolean).join(', ')}
                     </Text>
                     <ArrowUpRight size={16} color={colors.accent} weight="bold" />
                   </View>
@@ -93,7 +102,13 @@ function AnswerCard({ turn, titles }: { turn: Turn; titles: Record<string, strin
   );
 }
 
+// Keyed by locale: a language switch starts a fresh conversation instead of mixing languages.
 export default function AskScreen() {
+  const { locale } = usePrefs();
+  return <AskConversation key={locale} />;
+}
+
+function AskConversation() {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const repository = useRepository();
@@ -101,18 +116,29 @@ export default function AskScreen() {
   const [text, setText] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
 
-  const titles =
-    meetings.status === 'ready' ? Object.fromEntries(meetings.data.map((m) => [m.id, m.title])) : {};
+  const titles = meetings.status === 'ready' ? Object.fromEntries(meetings.data.map((m) => [m.id, m.title])) : {};
+
+  const update = (id: number, patch: Partial<Turn>) =>
+    setTurns((current) => current.map((turn) => (turn.id === id ? { ...turn, ...patch } : turn)));
+
+  const run = (id: number, question: string, questionId?: QuestionId) => {
+    update(id, { failed: false, answer: undefined });
+    repository.ask({ questionId, text: question }).then(
+      (answer) => {
+        update(id, { answer });
+        AccessibilityInfo.announceForAccessibility(answer.text);
+      },
+      () => update(id, { failed: true }),
+    );
+  };
 
   const submit = (question: string, questionId?: QuestionId) => {
     const trimmed = question.trim();
     if (!trimmed) return;
     const id = ++nextTurnId;
-    setTurns((current) => [{ id, question: trimmed }, ...current]);
+    setTurns((current) => [{ id, question: trimmed, questionId }, ...current]);
     setText('');
-    void repository.ask({ questionId, text: trimmed }).then((answer) => {
-      setTurns((current) => current.map((turn) => (turn.id === id ? { ...turn, answer } : turn)));
-    });
+    run(id, trimmed, questionId);
   };
 
   return (
@@ -178,7 +204,12 @@ export default function AskScreen() {
 
       <View style={{ gap: space[3] }}>
         {turns.map((turn) => (
-          <AnswerCard key={turn.id} turn={turn} titles={titles} />
+          <AnswerCard
+            key={turn.id}
+            turn={turn}
+            titles={titles}
+            onRetry={() => run(turn.id, turn.question, turn.questionId)}
+          />
         ))}
       </View>
       <Text variant="small" tone="muted">

@@ -5,7 +5,10 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { useReducedMotion } from '@/ui/Skeleton';
 
 const BARS = 28;
-const HEIGHTS = Array.from({ length: BARS }, (_, i) => 10 + Math.round(34 * Math.abs(Math.sin(i * 1.43) * Math.cos(i * 0.21))));
+const HEIGHTS = Array.from(
+  { length: BARS },
+  (_, i) => 10 + Math.round(34 * Math.abs(Math.sin(i * 1.43) * Math.cos(i * 0.21))),
+);
 
 function Bar({ index, height, active, animate }: { index: number; height: number; active: boolean; animate: boolean }) {
   const { colors } = useTheme();
@@ -18,8 +21,16 @@ function Bar({ index, height, active, animate }: { index: number; height: number
     }
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(scale, { toValue: 1, duration: 500 + (index % 7) * 70, useNativeDriver: Platform.OS !== 'web' }),
-        Animated.timing(scale, { toValue: 0.4, duration: 500 + (index % 5) * 90, useNativeDriver: Platform.OS !== 'web' }),
+        Animated.timing(scale, {
+          toValue: 1,
+          duration: 500 + (index % 7) * 70,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(scale, {
+          toValue: 0.4,
+          duration: 500 + (index % 5) * 90,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
       ]),
     );
     loop.start();

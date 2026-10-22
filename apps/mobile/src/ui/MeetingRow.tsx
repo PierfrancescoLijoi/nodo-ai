@@ -21,7 +21,7 @@ export function MeetingRow({ meeting, locale }: { meeting: Meeting; locale: Loca
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${meeting.title}, ${when}`}
+      accessibilityLabel={[meeting.title, when, meeting.participants.join(', '), meeting.tags.join(', ')].join('. ')}
       onPress={() => router.push({ pathname: '/meeting/[id]', params: { id: meeting.id } })}
       style={({ pressed }) => ({
         flexDirection: 'row',

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
 
 import { useAsync } from '@/data/RepositoryProvider';
+import { foldText } from '@/i18n/format';
 import { usePrefs } from '@/prefs/PrefsProvider';
 import { space } from '@/theme/tokens';
 import { MeetingRow } from '@/ui/MeetingRow';
@@ -21,11 +22,11 @@ export default function MeetingsScreen() {
 
   const visible = useMemo(() => {
     if (meetings.status !== 'ready') return [];
-    const needle = query.trim().toLowerCase();
+    const needle = foldText(query.trim(), locale);
     return meetings.data.filter((m) =>
-      [m.title, m.tags.join(' '), m.participants.join(' ')].join(' ').toLowerCase().includes(needle),
+      foldText([m.title, m.tags.join(' '), m.participants.join(' ')].join(' '), locale).includes(needle),
     );
-  }, [meetings, query]);
+  }, [meetings, query, locale]);
 
   return (
     <Screen title={t('meetings.title')} right={<SettingsButton />}>
@@ -37,7 +38,7 @@ export default function MeetingsScreen() {
         autoCapitalize="none"
         returnKeyType="search"
       />
-      {meetings.status === 'error' ? <ErrorNotice /> : null}
+      {meetings.status === 'error' ? <ErrorNotice onRetry={meetings.retry} /> : null}
       {meetings.status === 'loading' ? (
         <View style={{ gap: space[3] }}>
           <Skeleton height={112} />

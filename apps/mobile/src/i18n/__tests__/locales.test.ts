@@ -36,7 +36,13 @@ describe.each(['pl', 'it', 'da'])('locale %s', (code) => {
   });
 
   it('has every plural form its language needs', () => {
-    const pluralBases = [...new Set(Object.keys(reference).filter((k) => PLURAL_SUFFIX.test(k)).map(baseKey))];
+    const pluralBases = [
+      ...new Set(
+        Object.keys(reference)
+          .filter((k) => PLURAL_SUFFIX.test(k))
+          .map(baseKey),
+      ),
+    ];
     for (const base of pluralBases) {
       for (const form of REQUIRED_FORMS[code] as string[]) {
         expect(flat[`${base}_${form}`]).toBeTruthy();

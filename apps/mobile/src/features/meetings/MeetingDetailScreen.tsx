@@ -115,7 +115,7 @@ export default function MeetingDetailScreen() {
   return (
     <Screen back title={meeting.status === 'ready' ? meeting.data?.title : undefined} bottomInset>
       {meeting.status === 'loading' ? <Skeleton height={160} /> : null}
-      {meeting.status === 'error' ? <ErrorNotice /> : null}
+      {meeting.status === 'error' ? <ErrorNotice onRetry={meeting.retry} /> : null}
       {meeting.status === 'ready' && !meeting.data ? <Text tone="muted">{t('meeting.notFound')}</Text> : null}
       {meeting.status === 'ready' && meeting.data ? <Body meeting={meeting.data} highlight={seg} /> : null}
     </Screen>

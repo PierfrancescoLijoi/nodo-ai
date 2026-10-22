@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import { CaretLeft } from 'phosphor-react-native';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, View } from 'react-native';
+import { KeyboardAvoidingView, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/theme/ThemeProvider';
@@ -32,48 +32,59 @@ export function Screen({ title, intro, back, right, wordmark, bottomInset, child
       edges={bottomInset ? ['top', 'bottom'] : ['top']}
       style={{ flex: 1, backgroundColor: colors.background }}
     >
-      <ScrollView
-        contentContainerStyle={{
-          width: '100%',
-          maxWidth: MAX_WIDTH,
-          alignSelf: 'center',
-          paddingHorizontal: space[5],
-          paddingTop: space[3],
-          paddingBottom: space[10],
-          gap: space[6],
-        }}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={{ gap: space[3] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: touch }}>
-            {back ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('common.back')}
-                onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-                style={{ minHeight: touch, flexDirection: 'row', alignItems: 'center', gap: space[1], marginLeft: -space[2], paddingHorizontal: space[2] }}
-              >
-                <CaretLeft size={22} color={colors.text} weight="bold" />
-                <Text variant="label">{t('common.back')}</Text>
-              </Pressable>
-            ) : wordmark ? (
-              <Text variant="heading" style={{ letterSpacing: 3 }}>
-                {t('app.name')}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={{
+            width: '100%',
+            maxWidth: MAX_WIDTH,
+            alignSelf: 'center',
+            paddingHorizontal: space[5],
+            paddingTop: space[3],
+            paddingBottom: space[10],
+            gap: space[6],
+          }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={{ gap: space[3] }}>
+            <View
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: touch }}
+            >
+              {back ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('common.back')}
+                  onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+                  style={{
+                    minHeight: touch,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: space[1],
+                    marginLeft: -space[2],
+                    paddingHorizontal: space[2],
+                  }}
+                >
+                  <CaretLeft size={22} color={colors.text} weight="bold" />
+                  <Text variant="label">{t('common.back')}</Text>
+                </Pressable>
+              ) : wordmark ? (
+                <Text variant="heading" style={{ letterSpacing: 3 }}>
+                  {t('app.name')}
+                </Text>
+              ) : (
+                <View />
+              )}
+              {right}
+            </View>
+            {title ? (
+              <Text variant="display" accessibilityRole="header">
+                {title}
               </Text>
-            ) : (
-              <View />
-            )}
-            {right}
+            ) : null}
+            {intro ? <Text tone="muted">{intro}</Text> : null}
           </View>
-          {title ? (
-            <Text variant="display" accessibilityRole="header">
-              {title}
-            </Text>
-          ) : null}
-          {intro ? <Text tone="muted">{intro}</Text> : null}
-        </View>
-        {children}
-      </ScrollView>
+          {children}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

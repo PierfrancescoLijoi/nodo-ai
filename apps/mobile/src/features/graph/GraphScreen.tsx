@@ -46,13 +46,7 @@ function NodeDetail({ graph, nodeId }: { graph: Graph; nodeId: string }) {
         {relations.length === 0 ? <Text variant="small">{t('graph.noRelations')}</Text> : null}
         {relations.map((edge) => (
           <Text key={`${edge.from}-${edge.kind}-${edge.to}`} variant="small">
-            <Text variant="label" tone={edge.from === nodeId ? 'accent' : 'default'}>
-              {labelOf(edge.from)}
-            </Text>{' '}
-            {t(`graph.relation.${edge.kind}`)}{' '}
-            <Text variant="label" tone={edge.to === nodeId ? 'accent' : 'default'}>
-              {labelOf(edge.to)}
-            </Text>
+            {t(`graph.relation.${edge.kind}`, { from: labelOf(edge.from), to: labelOf(edge.to) })}
           </Text>
         ))}
       </View>
@@ -133,7 +127,7 @@ export default function GraphScreen() {
         ]}
       />
       {graph.status === 'error' ? (
-        <ErrorNotice />
+        <ErrorNotice onRetry={graph.retry} />
       ) : graph.status !== 'ready' ? (
         <Skeleton height={240} />
       ) : view === 'list' ? (

@@ -1,12 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type DependencyList,
-  type ReactNode,
-} from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type DependencyList, type ReactNode } from 'react';
 
 import { usePrefs } from '@/prefs/PrefsProvider';
 
@@ -28,34 +20,49 @@ export function useRepository(): MeetingsRepository {
   return value;
 }
 
-export type AsyncState<T> =
-  | { status: 'loading' }
-  | { status: 'ready'; data: T }
-  | { status: 'error'; error: Error };
+type Settled<T> = { status: 'ready'; data: T } | { status: 'error'; error: Error };
 
+export type AsyncState<T> =
+  { status: 'loading' } | { status: 'ready'; data: T } | { status: 'error'; error: Error; retry: () => void };
+
+interface Stored<T> {
+  repository: MeetingsRepository;
+  key: string;
+  settled: Settled<T>;
+}
+
+/**
+ * Loads data from the repository. A result only counts for the exact repository (locale) and inputs
+ * it was loaded for, so a change shows `loading` immediately instead of one frame of stale data.
+ */
 export function useAsync<T>(
   load: (repository: MeetingsRepository) => Promise<T>,
   deps: DependencyList = [],
 ): AsyncState<T> {
   const repository = useRepository();
-  const [state, setState] = useState<AsyncState<T>>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  const [stored, setStored] = useState<Stored<T> | null>(null);
+  const key = JSON.stringify([...deps, attempt]);
+
   useEffect(() => {
     let cancelled = false;
-    // Reset to loading when the inputs change; the cancel flag below prevents stale results.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setState({ status: 'loading' });
+    const settle = (settled: Settled<T>) => {
+      if (!cancelled) setStored({ repository, key, settled });
+    };
     load(repository).then(
-      (data) => {
-        if (!cancelled) setState({ status: 'ready', data });
-      },
-      (error: unknown) => {
-        if (!cancelled) setState({ status: 'error', error: error instanceof Error ? error : new Error(String(error)) });
-      },
+      (data) => settle({ status: 'ready', data }),
+      (error: unknown) => settle({ status: 'error', error: error instanceof Error ? error : new Error(String(error)) }),
     );
     return () => {
       cancelled = true;
     };
+    // `load` is an inline closure whose inputs are covered by `key`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repository, ...deps]);
-  return state;
+  }, [repository, key]);
+
+  if (!stored || stored.repository !== repository || stored.key !== key) return { status: 'loading' };
+  if (stored.settled.status === 'error') {
+    return { status: 'error', error: stored.settled.error, retry: () => setAttempt((n) => n + 1) };
+  }
+  return stored.settled;
 }

@@ -18,7 +18,15 @@ interface ButtonProps {
   fullWidth?: boolean;
 }
 
-export function Button({ label, onPress, variant = 'primary', icon: IconComponent, disabled, hint, fullWidth }: ButtonProps) {
+export function Button({
+  label,
+  onPress,
+  variant = 'primary',
+  icon: IconComponent,
+  disabled,
+  hint,
+  fullWidth,
+}: ButtonProps) {
   const { colors } = useTheme();
   const background = { primary: colors.accent, secondary: colors.surfaceRaised, ghost: 'transparent' }[variant];
   const tone = variant === 'primary' ? 'onAccent' : variant === 'ghost' ? 'accent' : 'default';

@@ -1,8 +1,8 @@
 import { useRouter } from 'expo-router';
 import { Check, Info, Microphone, Pause, Play, Stop, Warning } from 'phosphor-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, View } from 'react-native';
+import { AccessibilityInfo, Pressable, View } from 'react-native';
 
 import { formatClock } from '@/i18n/format';
 import { usePrefs, type RetentionDays } from '@/prefs/PrefsProvider';
@@ -95,7 +95,14 @@ function Attestation({ onStart }: { onStart: () => void }) {
         />
       </View>
 
-      <Button label={t('capture.start')} icon={Microphone} disabled={!attested} onPress={onStart} fullWidth />
+      <Button
+        label={t('capture.start')}
+        hint={attested ? undefined : t('capture.startHint')}
+        icon={Microphone}
+        disabled={!attested}
+        onPress={onStart}
+        fullWidth
+      />
     </>
   );
 }
@@ -160,6 +167,17 @@ export default function CaptureScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const recorder = useSimulatedRecorder();
+
+  // The focused Start button disappears when recording starts, so announce each state change.
+  useEffect(() => {
+    const message = {
+      idle: undefined,
+      recording: t('capture.state.recording'),
+      paused: t('capture.state.paused'),
+      saved: t('capture.saved.title'),
+    }[recorder.state];
+    if (message) AccessibilityInfo.announceForAccessibility(message);
+  }, [recorder.state, t]);
 
   return (
     <Screen back title={t('capture.title')} bottomInset>

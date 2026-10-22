@@ -16,10 +16,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const system = useColorScheme();
   const { themePreference } = usePrefs();
   const scheme = themePreference === 'system' ? (system === 'light' ? 'light' : 'dark') : themePreference;
-  const value = useMemo<ThemeValue>(
-    () => ({ scheme, colors: scheme === 'dark' ? darkColors : lightColors }),
-    [scheme],
-  );
+  const value = useMemo<ThemeValue>(() => ({ scheme, colors: scheme === 'dark' ? darkColors : lightColors }), [scheme]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
