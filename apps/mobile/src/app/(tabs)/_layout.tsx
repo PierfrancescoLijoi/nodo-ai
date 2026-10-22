@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
-import { House, Notebook, Sparkle, TreeStructure, type Icon } from 'phosphor-react-native';
+import { House, Notebook, Sparkle, TreeStructure } from '@/ui/icons';
+import type { Icon } from 'phosphor-react-native';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 

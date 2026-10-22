@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Gear } from 'phosphor-react-native';
+import { Gear } from '@/ui/icons';
 import { useTranslation } from 'react-i18next';
 import { Pressable } from 'react-native';
 

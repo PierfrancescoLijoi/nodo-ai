@@ -1,4 +1,5 @@
-import { Calendar, CheckSquare, DesktopTower, Folder, Hash, SealCheck, User, type Icon } from 'phosphor-react-native';
+import { Calendar, CheckSquare, DesktopTower, Folder, Hash, SealCheck, User } from '@/ui/icons';
+import type { Icon } from 'phosphor-react-native';
 
 import type { EntityType } from '@/data/types';
 

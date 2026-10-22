@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { CaretRight } from 'phosphor-react-native';
+import { CaretRight } from '@/ui/icons';
 import { useTranslation } from 'react-i18next';
 import { Pressable, View } from 'react-native';
 

@@ -1,6 +1,8 @@
 import type { Locale } from '@/i18n';
 import { formatDate } from '@/i18n/format';
 
+import { ApiError } from '../http/client';
+import { validateSpeakerName } from '../speakerName';
 import type {
   Answer,
   Citation,
@@ -23,7 +25,11 @@ function buildMeetings(content: LocaleContent): Meeting[] {
   return FACTS.map((facts) => {
     const text = content.meetings[facts.id as MeetingKey];
     const segments = [{ ...facts.segment, text: text.quote }];
-    if (facts.id === 'm1') segments.push({ ...SECOND_SEGMENT, text: content.m1Quote2 });
+    segments.push(
+      facts.id === 'm1'
+        ? { ...SECOND_SEGMENT, text: content.m1Quote2 }
+        : { id: `${facts.id}-s2`, startMs: facts.segment.startMs + 30_000, speaker: 'S2', text: text.quote },
+    );
     return {
       id: facts.id,
       startedAt: facts.startedAt,
@@ -35,6 +41,11 @@ function buildMeetings(content: LocaleContent): Meeting[] {
       decisions: text.decisions,
       actions: [{ id: facts.actionId, text: text.actionText, owner: facts.owner, dueDate: facts.dueDate }],
       segments,
+      speakers: [
+        { id: 'S1', name: null, segments: 1, talkMs: facts.durationMin * 36_000 },
+        { id: 'S2', name: null, segments: 1, talkMs: facts.durationMin * 24_000 },
+      ],
+      state: 'ready',
     };
   });
 }
@@ -143,6 +154,20 @@ export function createMockRepository(locale: Locale): MeetingsRepository {
     async getMeeting(id) {
       await pause(120);
       return meetings.find((m) => m.id === id);
+    },
+    async nameSpeaker(meetingId, speakerId, name) {
+      await pause(120);
+      const meeting = meetings.find((item) => item.id === meetingId);
+      if (!meeting) throw new ApiError('Meeting not found', 404, 'meeting_not_found');
+      if (meeting.state !== 'review' && meeting.state !== 'ready') {
+        throw new ApiError('Meeting speakers cannot be edited', 409, 'meeting_not_editable');
+      }
+      const speaker = meeting.speakers.find((item) => item.id === speakerId);
+      if (!speaker) throw new ApiError('Speaker not found', 404, 'speaker_not_found');
+      const validationError = validateSpeakerName(name);
+      if (validationError) throw new ApiError('Invalid speaker name', 422, validationError);
+      speaker.name = name;
+      return meeting;
     },
     async listChanges() {
       await pause(120);

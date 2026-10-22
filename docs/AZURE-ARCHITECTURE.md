@@ -158,7 +158,7 @@ Not yet verified against a live Azure account, and therefore the first things to
 
 1. `pgaadauth_create_principal` accepts the identity name as the role name, and the Entra token works as the password.
 2. The Speech batch request and result shapes (`languageIdentification.mode`, `recognizedPhrases` fields) match the API version in use.
-3. Search index creation (vector profile, analyzer names) and the `search.in` filter on a real service.
+3. Search index creation (vector profile, analyzer names) and the `owner_id eq` filter on a real service.
 4. The embedding deployment size equals `NODO_OPENAI_EMBEDDING_DIMENSIONS`.
 5. A Container Apps job starts from the Service Bus rule with the worker identity and finishes within its replica timeout.
 

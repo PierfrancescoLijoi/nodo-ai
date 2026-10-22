@@ -23,6 +23,10 @@
     "duration_ms": 60001,
     "summary": "Summary",
     "recording_attestation": {},
+    "speakers": [
+      { "id": "S1", "name": "Ada", "segments": 3, "talk_ms": 42000 },
+      { "id": "S2", "name": null, "segments": 1, "talk_ms": 18000 }
+    ],
     "insights": {
       "people": [{ "id": "p1", "label": "Ada" }],
       "topics": [{ "id": "t1", "label": "Platform" }],

@@ -1,4 +1,4 @@
-import { Warning } from 'phosphor-react-native';
+import { Warning } from '@/ui/icons';
 import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
 

@@ -21,6 +21,11 @@ describe('API mappers', () => {
     const meeting = mapMeeting(fixture.meeting, [fixture.segment]);
     expect(meeting.actions).toEqual([{ id: 'a1', text: 'Test', owner: undefined, dueDate: undefined }]);
     expect(meeting.segments[0]).toMatchObject({ speaker: 'S1', startMs: 1000 });
+    expect(meeting.speakers).toEqual([
+      { id: 'S1', name: 'Ada', segments: 3, talkMs: 42000 },
+      { id: 'S2', name: null, segments: 1, talkMs: 18000 },
+    ]);
+    expect(meeting.state).toBe('ready');
   });
 
   it('maps query, graph, and changes', () => {

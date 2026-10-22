@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Check, Info, Microphone, Pause, Play, Stop, Warning } from 'phosphor-react-native';
+import { Check, Info, Microphone, Pause, Play, Stop, Warning } from '@/ui/icons';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, View } from 'react-native';

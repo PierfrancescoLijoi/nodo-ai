@@ -1,10 +1,12 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { CheckCircle, TreeStructure } from 'phosphor-react-native';
+import { CheckCircle, TreeStructure } from '@/ui/icons';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
 
-import { useAsync } from '@/data/RepositoryProvider';
-import type { Meeting } from '@/data/types';
+import { useAsync, useRepository } from '@/data/RepositoryProvider';
+import { speakerLabel, validateSpeakerName, type SpeakerNameValidationError } from '@/data/speakerName';
+import type { Meeting, Speaker } from '@/data/types';
 import { formatClock, formatDate } from '@/i18n/format';
 import { usePrefs } from '@/prefs/PrefsProvider';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -17,12 +19,133 @@ import { Skeleton } from '@/ui/Skeleton';
 import { Surface } from '@/ui/Surface';
 import { Tag } from '@/ui/Tag';
 import { Text } from '@/ui/Text';
+import { TextField } from '@/ui/TextField';
+
+const VALIDATION_KEYS: Record<
+  SpeakerNameValidationError,
+  | 'meeting.speakerNameRequired'
+  | 'meeting.speakerNameTooLong'
+  | 'meeting.speakerNameTooManyWords'
+  | 'meeting.speakerNameInvalidCharacters'
+> = {
+  required: 'meeting.speakerNameRequired',
+  tooLong: 'meeting.speakerNameTooLong',
+  tooManyWords: 'meeting.speakerNameTooManyWords',
+  invalidCharacters: 'meeting.speakerNameInvalidCharacters',
+};
+
+function SpeakerRow({
+  meetingId,
+  speaker,
+  totalTalkMs,
+  onUpdated,
+}: {
+  meetingId: string;
+  speaker: Speaker;
+  totalTalkMs: number;
+  onUpdated: (speakers: Speaker[]) => void;
+}) {
+  const { t } = useTranslation();
+  const { colors } = useTheme();
+  const repository = useRepository();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(speaker.name ?? '');
+  const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const normalized = draft.trim();
+  const validation = validateSpeakerName(normalized);
+  const unchanged = normalized === (speaker.name ?? '');
+  const percent = totalTalkMs > 0 ? Math.round((speaker.talkMs / totalTalkMs) * 100) : 0;
+
+  const save = async (name: string | null) => {
+    setSaving(true);
+    setSaveFailed(false);
+    try {
+      const updated = await repository.nameSpeaker(meetingId, speaker.id, name);
+      onUpdated(updated.speakers);
+      setDraft(name ?? '');
+      setEditing(false);
+    } catch {
+      setSaveFailed(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Surface>
+      <View style={{ gap: space[3] }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+          <Text variant="heading" style={{ flex: 1 }}>
+            {speakerLabel([speaker], speaker.id, t)}
+          </Text>
+          <Text variant="label" tone="muted">
+            {percent}%
+          </Text>
+        </View>
+        <View
+          accessibilityLabel={t('meeting.talkShare', { percent })}
+          style={{ height: 4, borderRadius: radius.pill, backgroundColor: colors.border, overflow: 'hidden' }}
+        >
+          <View style={{ width: `${percent}%`, height: '100%', backgroundColor: colors.accent }} />
+        </View>
+        {editing ? (
+          <View style={{ gap: space[2] }}>
+            <TextField
+              label={t('meeting.speakerNameInput', { speaker: speaker.id })}
+              value={draft}
+              onChangeText={setDraft}
+              maxLength={80}
+              autoCapitalize="words"
+              autoCorrect={false}
+            />
+            {validation ? (
+              <Text variant="small" tone="danger">
+                {t(VALIDATION_KEYS[validation])}
+              </Text>
+            ) : null}
+            {saveFailed ? (
+              <Text variant="small" tone="danger">
+                {t('meeting.speakerSaveError')}
+              </Text>
+            ) : null}
+            <View style={{ flexDirection: 'row', gap: space[2], flexWrap: 'wrap' }}>
+              <Button
+                label={t('meeting.saveSpeakerName')}
+                onPress={() => void save(normalized)}
+                disabled={saving || !!validation || unchanged}
+              />
+              <Button
+                label={t('meeting.clearSpeakerName')}
+                variant="secondary"
+                onPress={() => void save(null)}
+                disabled={saving || speaker.name === null}
+              />
+            </View>
+          </View>
+        ) : (
+          <Button
+            label={speaker.name ? t('meeting.renameSpeaker') : t('meeting.nameSpeaker')}
+            variant="secondary"
+            onPress={() => {
+              setDraft(speaker.name ?? '');
+              setSaveFailed(false);
+              setEditing(true);
+            }}
+          />
+        )}
+      </View>
+    </Surface>
+  );
+}
 
 function Body({ meeting, highlight }: { meeting: Meeting; highlight?: string }) {
   const { t } = useTranslation();
   const { locale } = usePrefs();
   const { colors } = useTheme();
   const router = useRouter();
+  const [speakers, setSpeakers] = useState(meeting.speakers);
+  const totalTalkMs = speakers.reduce((total, speaker) => total + speaker.talkMs, 0);
 
   return (
     <>
@@ -73,6 +196,19 @@ function Body({ meeting, highlight }: { meeting: Meeting; highlight?: string }) 
       </View>
 
       <View style={{ gap: space[3] }}>
+        <SectionHeader title={t('meeting.speakers')} />
+        {speakers.map((speaker) => (
+          <SpeakerRow
+            key={speaker.id}
+            meetingId={meeting.id}
+            speaker={speaker}
+            totalTalkMs={totalTalkMs}
+            onUpdated={setSpeakers}
+          />
+        ))}
+      </View>
+
+      <View style={{ gap: space[3] }}>
         <SectionHeader title={t('meeting.transcript')} />
         {meeting.segments.map((segment) => {
           const cited = segment.id === highlight;
@@ -92,7 +228,7 @@ function Body({ meeting, highlight }: { meeting: Meeting; highlight?: string }) 
                 <Text variant="mono" tone="muted">
                   {formatClock(segment.startMs / 1000)}
                 </Text>
-                <Text variant="label">{segment.speaker}</Text>
+                <Text variant="label">{speakerLabel(speakers, segment.speaker, t)}</Text>
                 {cited ? <Tag label={t('meeting.citedSegment')} tone="accent" /> : null}
               </View>
               <Text>{segment.text}</Text>
@@ -121,7 +257,9 @@ export default function MeetingDetailScreen() {
       {meeting.status === 'loading' ? <Skeleton height={160} /> : null}
       {meeting.status === 'error' ? <ErrorNotice onRetry={meeting.retry} /> : null}
       {meeting.status === 'ready' && !meeting.data ? <Text tone="muted">{t('meeting.notFound')}</Text> : null}
-      {meeting.status === 'ready' && meeting.data ? <Body meeting={meeting.data} highlight={seg} /> : null}
+      {meeting.status === 'ready' && meeting.data ? (
+        <Body key={meeting.data.id} meeting={meeting.data} highlight={seg} />
+      ) : null}
     </Screen>
   );
 }

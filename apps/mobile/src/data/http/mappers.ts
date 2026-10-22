@@ -41,6 +41,13 @@ export function mapMeeting(item: AnyRecord, segments: AnyRecord[]): Meeting {
       speaker: segment.speaker_id,
       text: segment.text,
     })),
+    speakers: item.speakers.map((speaker: AnyRecord) => ({
+      id: speaker.id,
+      name: speaker.name,
+      segments: speaker.segments,
+      talkMs: speaker.talk_ms,
+    })),
+    state: item.state as MeetingState,
   };
 }
 

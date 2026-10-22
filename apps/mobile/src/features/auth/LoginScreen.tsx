@@ -1,4 +1,4 @@
-import { SignIn } from 'phosphor-react-native';
+import { SignIn } from '@/ui/icons';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 

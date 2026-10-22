@@ -1,4 +1,4 @@
-import { Check } from 'phosphor-react-native';
+import { Check } from '@/ui/icons';
 import { useTranslation } from 'react-i18next';
 import { Pressable, View } from 'react-native';
 

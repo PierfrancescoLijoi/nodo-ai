@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Microphone } from 'phosphor-react-native';
+import { Microphone } from '@/ui/icons';
 import { useTranslation } from 'react-i18next';
 import { Pressable, View } from 'react-native';
 

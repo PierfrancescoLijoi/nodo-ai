@@ -49,7 +49,7 @@ export const FACTS: MeetingFacts[] = [
     tags: ['Architecture', 'Platform'],
     owner: 'Sara',
     dueDate: '2026-10-28',
-    segment: { id: 'm1-s1', startMs: 762000, speaker: 'Marco' },
+    segment: { id: 'm1-s1', startMs: 762000, speaker: 'S1' },
     actionId: 'a1',
   },
   {
@@ -60,7 +60,7 @@ export const FACTS: MeetingFacts[] = [
     tags: ['RAG', 'Evaluation'],
     owner: 'Marco',
     dueDate: '2026-10-21',
-    segment: { id: 'm2-s1', startMs: 571000, speaker: 'Sara' },
+    segment: { id: 'm2-s1', startMs: 571000, speaker: 'S1' },
     actionId: 'a2',
   },
   {
@@ -71,12 +71,12 @@ export const FACTS: MeetingFacts[] = [
     tags: ['Ingestion', 'Architecture'],
     owner: 'Giulia',
     dueDate: '2026-10-14',
-    segment: { id: 'm3-s1', startMs: 1083000, speaker: 'Giulia' },
+    segment: { id: 'm3-s1', startMs: 1083000, speaker: 'S1' },
     actionId: 'a3',
   },
 ];
 
-export const SECOND_SEGMENT = { id: 'm1-s2', startMs: 1695000, speaker: 'Sara' } as const;
+export const SECOND_SEGMENT = { id: 'm1-s2', startMs: 1695000, speaker: 'S2' } as const;
 export const CHANGE_FACTS: Pick<Change, 'id' | 'date' | 'meetingId'>[] = [
   { id: 'c1', date: '2026-10-21', meetingId: 'm1' },
   { id: 'c2', date: '2026-10-14', meetingId: 'm2' },

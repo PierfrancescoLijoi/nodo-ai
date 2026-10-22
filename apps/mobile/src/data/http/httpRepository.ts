@@ -50,6 +50,14 @@ export function createHttpRepository(client: ApiClient, locale: Locale): Meeting
         throw error;
       }
     },
+    async nameSpeaker(meetingId, speakerId, name) {
+      const meetingPath = `/v1/meetings/${encodeURIComponent(meetingId)}`;
+      const meeting = await client.patch(`${meetingPath}/speakers/${encodeURIComponent(speakerId)}`, { name });
+      return mapMeeting(
+        meeting as Record<string, unknown>,
+        (await transcript(client, meetingId)) as Record<string, unknown>[],
+      );
+    },
     async ask({ text }) {
       return mapAnswer(await client.post('/v1/query', { question: text, ui_locale: locale }));
     },

@@ -6,6 +6,13 @@ export interface Segment {
   text: string;
 }
 
+export interface Speaker {
+  id: string;
+  name: string | null;
+  segments: number;
+  talkMs: number;
+}
+
 export interface ActionItem {
   id: string;
   text: string;
@@ -39,6 +46,8 @@ export interface Meeting {
   decisions: string[];
   actions: ActionItem[];
   segments: Segment[];
+  speakers: Speaker[];
+  state: MeetingState;
 }
 
 export interface Citation {
@@ -100,6 +109,7 @@ export interface Change {
 export interface MeetingsRepository {
   listMeetings(): Promise<MeetingSummary[]>;
   getMeeting(id: string): Promise<Meeting | undefined>;
+  nameSpeaker(meetingId: string, speakerId: string, name: string | null): Promise<Meeting>;
   listChanges(): Promise<Change[]>;
   ask(input: { questionId?: QuestionId; text: string }): Promise<Answer>;
   getGraph(options?: { seedId?: string }): Promise<Graph>;

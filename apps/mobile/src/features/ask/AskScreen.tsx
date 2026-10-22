@@ -1,11 +1,12 @@
 import { useRouter } from 'expo-router';
-import { ArrowUpRight, PaperPlaneTilt, Warning } from 'phosphor-react-native';
+import { ArrowUpRight, PaperPlaneTilt, Warning } from '@/ui/icons';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, View } from 'react-native';
 
 import { useAsync, useRepository } from '@/data/RepositoryProvider';
-import type { Answer, QuestionId } from '@/data/types';
+import { speakerLabel } from '@/data/speakerName';
+import type { Answer, QuestionId, Speaker } from '@/data/types';
 import { formatClock } from '@/i18n/format';
 import { usePrefs } from '@/prefs/PrefsProvider';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -29,7 +30,17 @@ interface Turn {
   failed?: boolean;
 }
 
-function AnswerCard({ turn, titles, onRetry }: { turn: Turn; titles: Record<string, string>; onRetry: () => void }) {
+function AnswerCard({
+  turn,
+  titles,
+  speakers,
+  onRetry,
+}: {
+  turn: Turn;
+  titles: Record<string, string>;
+  speakers: Record<string, Speaker[]>;
+  onRetry: () => void;
+}) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const router = useRouter();
@@ -90,7 +101,7 @@ function AnswerCard({ turn, titles, onRetry }: { turn: Turn; titles: Record<stri
                     <ArrowUpRight size={16} color={colors.accent} weight="bold" />
                   </View>
                   <Text variant="small" tone="muted">
-                    {citation.speaker}: {citation.quote}
+                    {speakerLabel(speakers[citation.meetingId] ?? [], citation.speaker, t)}: {citation.quote}
                   </Text>
                 </Pressable>
               ))}
@@ -112,11 +123,24 @@ function AskConversation() {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const repository = useRepository();
-  const meetings = useAsync((r) => r.listMeetings());
+  const meetings = useAsync(async (repository) => {
+    const summaries = await repository.listMeetings();
+    const details = await Promise.all(summaries.map((meeting) => repository.getMeeting(meeting.id)));
+    return { summaries, details };
+  });
   const [text, setText] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
 
-  const titles = meetings.status === 'ready' ? Object.fromEntries(meetings.data.map((m) => [m.id, m.title])) : {};
+  const titles =
+    meetings.status === 'ready' ? Object.fromEntries(meetings.data.summaries.map((m) => [m.id, m.title])) : {};
+  const speakers =
+    meetings.status === 'ready'
+      ? Object.fromEntries(
+          meetings.data.details
+            .filter((meeting) => meeting !== undefined)
+            .map((meeting) => [meeting.id, meeting.speakers]),
+        )
+      : {};
 
   const update = (id: number, patch: Partial<Turn>) =>
     setTurns((current) => current.map((turn) => (turn.id === id ? { ...turn, ...patch } : turn)));
@@ -208,6 +232,7 @@ function AskConversation() {
             key={turn.id}
             turn={turn}
             titles={titles}
+            speakers={speakers}
             onRetry={() => run(turn.id, turn.question, turn.questionId)}
           />
         ))}
