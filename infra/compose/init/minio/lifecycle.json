@@ -1,0 +1,11 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-audio-after-30-days",
+      "Status": "Enabled",
+      "Expiration": {"Days": 30},
+      "Filter": {"Prefix": ""}
+    }
+  ]
+}
+

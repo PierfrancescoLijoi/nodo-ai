@@ -1,0 +1,95 @@
+{
+  "meetings": [
+    {
+      "id": "meeting-aurora-01",
+      "workspace_id": "workspace-north",
+      "project_id": "project-aurora",
+      "title": "Aurora ingestion kickoff",
+      "spoken_language": "en",
+      "started_at": "2026-01-08T09:00:00Z",
+      "segments": [
+        {"id": "seg-a01-01", "speaker": "Mira Chen", "start_ms": 0, "end_ms": 9000, "version": 1, "text": "Aurora receives partner files through a synchronous HTTP endpoint."},
+        {"id": "seg-a01-02", "speaker": "Jon Bell", "start_ms": 9000, "end_ms": 19000, "version": 1, "text": "We decide to validate and transform every file inside the request before returning success."},
+        {"id": "seg-a01-03", "speaker": "Mira Chen", "start_ms": 19000, "end_ms": 28000, "version": 1, "text": "The initial latency target is three seconds for files below ten megabytes."},
+        {"id": "seg-a01-04", "speaker": "Jon Bell", "start_ms": 28000, "end_ms": 37000, "version": 1, "text": "Failed requests will be retried twice by the client."},
+        {"id": "seg-a01-05", "speaker": "Mira Chen", "start_ms": 37000, "end_ms": 47000, "version": 1, "text": "We will review the synchronous design after the first load test."}
+      ]
+    },
+    {
+      "id": "meeting-aurora-02",
+      "workspace_id": "workspace-north",
+      "project_id": "project-aurora",
+      "title": "Revisione del carico Aurora",
+      "spoken_language": "it",
+      "started_at": "2026-01-15T10:00:00Z",
+      "segments": [
+        {"id": "seg-a02-01", "speaker": "Mira Chen", "start_ms": 0, "end_ms": 9000, "version": 1, "text": "Il test ha mostrato timeout quando arrivano piu file contemporaneamente."},
+        {"id": "seg-a02-02", "speaker": "Elena Rossi", "start_ms": 9000, "end_ms": 19000, "version": 1, "text": "Propongo di salvare prima il file e pubblicare un messaggio con il riferimento all'oggetto."},
+        {"id": "seg-a02-03", "speaker": "Jon Bell", "start_ms": 19000, "end_ms": 31000, "version": 1, "text": "La decisione sincrona e superata: useremo una coda asincrona e risponderemo con un identificatore del job."},
+        {"id": "seg-a02-04", "speaker": "Elena Rossi", "start_ms": 31000, "end_ms": 43000, "version": 1, "text": "Azione per Elena Rossi: configurare la dead-letter queue entro il 22 gennaio 2026."},
+        {"id": "seg-a02-05", "speaker": "Mira Chen", "start_ms": 43000, "end_ms": 52000, "version": 2, "text": "La vecchia password di test era annotata qui.", "tombstoned": true, "tombstoned_at": "2026-01-16T08:00:00Z"}
+      ]
+    },
+    {
+      "id": "meeting-borealis-01",
+      "workspace_id": "workspace-north",
+      "project_id": "project-borealis",
+      "title": "Kolejka projektu Borealis",
+      "spoken_language": "pl",
+      "started_at": "2026-01-20T11:00:00Z",
+      "segments": [
+        {"id": "seg-b01-01", "speaker": "Alex Nowak", "start_ms": 0, "end_ms": 9000, "version": 1, "text": "Prowadze projekt Borealis i odpowiadam za importer danych pogodowych."},
+        {"id": "seg-b01-02", "speaker": "Iga Lis", "start_ms": 9000, "end_ms": 19000, "version": 1, "text": "Borealis uzywa osobnej kolejki o nazwie borealis-weather."},
+        {"id": "seg-b01-03", "speaker": "Alex Nowak", "start_ms": 19000, "end_ms": 30000, "version": 1, "text": "Ponawiamy zadanie trzy razy, a potem wysylamy je do kolejki bledow."},
+        {"id": "seg-b01-04", "speaker": "Iga Lis", "start_ms": 30000, "end_ms": 40000, "version": 1, "text": "Dane pogodowe przechowujemy przez czternascie dni."},
+        {"id": "seg-b01-05", "speaker": "Alex Nowak", "start_ms": 40000, "end_ms": 50000, "version": 1, "text": "Nie laczymy rekordow Borealis z projektem Aurora."}
+      ]
+    },
+    {
+      "id": "meeting-aurora-03",
+      "workspace_id": "workspace-north",
+      "project_id": "project-aurora",
+      "title": "Drift af Aurora-koen",
+      "spoken_language": "da",
+      "started_at": "2026-01-27T09:30:00Z",
+      "segments": [
+        {"id": "seg-a03-01", "speaker": "Freja Holm", "start_ms": 0, "end_ms": 10000, "version": 1, "text": "Aurora-forbrugeren behandler hoejst fem job ad gangen."},
+        {"id": "seg-a03-02", "speaker": "Elena Rossi", "start_ms": 10000, "end_ms": 21000, "version": 1, "text": "Dead-letter-koen er nu oprettet og alarmen udloeses efter fem minutter."},
+        {"id": "seg-a03-03", "speaker": "Freja Holm", "start_ms": 21000, "end_ms": 32000, "version": 1, "text": "Et idempotency key forhindrer dobbelt behandling af samme fil."},
+        {"id": "seg-a03-04", "speaker": "Elena Rossi", "start_ms": 32000, "end_ms": 43000, "version": 1, "text": "Jobstatus kan vaere queued, processing, completed eller failed."},
+        {"id": "seg-a03-05", "speaker": "Freja Holm", "start_ms": 43000, "end_ms": 52000, "version": 1, "text": "Den gamle graense var syv job.", "tombstoned": true, "tombstoned_at": "2026-01-28T12:00:00Z"}
+      ]
+    },
+    {
+      "id": "meeting-borealis-02",
+      "workspace_id": "workspace-north",
+      "project_id": "project-borealis",
+      "title": "Borealis retention review",
+      "spoken_language": "en",
+      "started_at": "2026-02-03T14:00:00Z",
+      "segments": [
+        {"id": "seg-b02-01", "speaker": "Alex Morgan", "start_ms": 0, "end_ms": 9000, "version": 1, "text": "I am Alex Morgan, the compliance owner for project Borealis."},
+        {"id": "seg-b02-02", "speaker": "Iga Lis", "start_ms": 9000, "end_ms": 20000, "version": 1, "text": "The weather payload retention remains fourteen days."},
+        {"id": "seg-b02-03", "speaker": "Alex Morgan", "start_ms": 20000, "end_ms": 31000, "version": 1, "text": "Aurora's thirty-day audio policy does not apply to Borealis payloads."},
+        {"id": "seg-b02-04", "speaker": "Iga Lis", "start_ms": 31000, "end_ms": 41000, "version": 1, "text": "Alex Nowak owns the importer, while Alex Morgan owns compliance."},
+        {"id": "seg-b02-05", "speaker": "Alex Morgan", "start_ms": 41000, "end_ms": 51000, "version": 1, "text": "Cross-project joins require an explicit reviewed relationship."}
+      ]
+    },
+    {
+      "id": "meeting-cedar-01",
+      "workspace_id": "workspace-south",
+      "project_id": "project-cedar",
+      "title": "Pianificazione Cedar",
+      "spoken_language": "it",
+      "started_at": "2026-02-10T08:30:00Z",
+      "segments": [
+        {"id": "seg-c01-01", "speaker": "Nora Valli", "start_ms": 0, "end_ms": 9000, "version": 1, "text": "Cedar appartiene esclusivamente allo spazio di lavoro South."},
+        {"id": "seg-c01-02", "speaker": "Luca Ferri", "start_ms": 9000, "end_ms": 20000, "version": 1, "text": "La coda Cedar si chiama cedar-private e non e condivisa con altri progetti."},
+        {"id": "seg-c01-03", "speaker": "Nora Valli", "start_ms": 20000, "end_ms": 31000, "version": 1, "text": "Il limite riservato e di undici job concorrenti."},
+        {"id": "seg-c01-04", "speaker": "Luca Ferri", "start_ms": 31000, "end_ms": 41000, "version": 1, "text": "I file Cedar vengono eliminati dopo sette giorni."},
+        {"id": "seg-c01-05", "speaker": "Nora Valli", "start_ms": 41000, "end_ms": 51000, "version": 1, "text": "Nessun utente dello spazio North deve recuperare questi segmenti."}
+      ]
+    }
+  ]
+}
+
