@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
 
   neo4j:
-    image: neo4j:5.26.12-community
+    image: neo4j:5.26.31-community
     environment:
       NEO4J_AUTH: ${NEO4J_AUTH}
     ports:
