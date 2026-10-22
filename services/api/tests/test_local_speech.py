@@ -108,3 +108,18 @@ def test_real_models_transcribe_in_the_right_language_and_separate_two_voices(la
     spoken = " ".join(p.text for p in phrases).lower()
     assert "ingest" in spoken
     assert phrases[-1].end_ms / 1000 <= reference["duration"] + 1
+
+
+def test_only_real_media_files_reach_ffmpeg(tmp_path) -> None:
+    from nodo_api.adapters.local.speech import decode_audio, looks_like_media
+
+    webm = tmp_path / "a"
+    webm.write_bytes(bytes([0x1A, 0x45, 0xDF, 0xA3]) + b"rest")
+    playlist = tmp_path / "b"
+    playlist.write_text("#EXTM3U" + chr(10) + "file:///C:/Users/me/secret.txt", encoding="utf-8")
+    concat = tmp_path / "c"
+    concat.write_text("ffconcat version 1.0" + chr(10) + "file /etc/passwd", encoding="utf-8")
+    assert looks_like_media(webm)
+    assert not looks_like_media(playlist) and not looks_like_media(concat)
+    with pytest.raises(ValueError, match="not an audio"):
+        decode_audio(playlist, "ffmpeg")

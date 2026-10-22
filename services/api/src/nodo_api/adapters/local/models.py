@@ -52,6 +52,7 @@ class LocalModelPaths:
     llama_server: Path | None
     llm_gguf: Path | None
     diarization_dir: Path | None
+    embedding_dir: Path | None = None
     whisper_model: str = "medium"
     embedding_model: str = "intfloat/multilingual-e5-base"
     ffmpeg: str | None = None
@@ -62,12 +63,14 @@ class LocalModelPaths:
         server = root / "llama.cpp" / "llama-server.exe"
         server = server if server.exists() else root / "llama.cpp" / "llama-server"
         diarization = root / "diarization"
+        embeddings = root / "embeddings" / "multilingual-e5-base"
         import shutil
 
         return cls(
             llama_server=server if server.exists() else None,
             llm_gguf=find_gguf("models--Qwen--Qwen3-4B-GGUF", "Qwen3-4B-*.gguf"),
             diarization_dir=diarization if diarization.exists() else None,
+            embedding_dir=embeddings if (embeddings / "model.int8.onnx").exists() else None,
             ffmpeg=os.environ.get("NODO_FFMPEG") or shutil.which("ffmpeg"),
         )
 
@@ -80,6 +83,8 @@ class LocalModelPaths:
             gaps.append("language model (GGUF)")
         if self.diarization_dir is None:
             gaps.append("speaker separation models")
+        if self.embedding_dir is None:
+            gaps.append("embedding model (run tools/local-setup/export_embedding_onnx.py)")
         if self.ffmpeg is None:
             gaps.append("ffmpeg")
         return gaps

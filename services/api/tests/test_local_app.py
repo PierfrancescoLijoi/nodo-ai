@@ -176,3 +176,9 @@ def test_the_web_app_is_served_with_a_single_page_fallback(tmp_path) -> None:
         assert client.get("/missing.png").status_code == 404
         assert client.get("/healthz").json() == {"status": "ok"}
         assert client.get("/v1/meetings").status_code == 401  # the API still wins over the files
+
+
+def test_requests_for_a_foreign_host_name_are_refused(client) -> None:
+    reply = client.get("/healthz", headers={"Host": "evil.example.com:8765"})
+    assert reply.status_code == 421
+    assert client.get("/healthz", headers={"Host": "127.0.0.1:8765"}).status_code == 200

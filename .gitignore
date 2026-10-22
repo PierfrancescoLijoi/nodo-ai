@@ -25,3 +25,6 @@ coverage/
 *.tfvars
 !*.tfvars.example
 backend.hcl
+
+# exported web app that the desktop engine serves
+services/api/src/nodo_api/web/

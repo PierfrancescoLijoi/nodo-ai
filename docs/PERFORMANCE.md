@@ -24,7 +24,17 @@ What this means for Azure: the production path is Azure AI Speech batch transcri
 
 ## 2. Who is speaking
 
-The app never identifies a person from the voice (ADR-013). Diarization gives anonymous labels inside one recording, the owner names them. The quality of the labels is measured by `speaker_accuracy` in `tools/speech-bench/score.py`: the share of real speaking time attributed to the right speaker after the best matching of labels. The scoring is unit tested; **the diarization itself is not measured** until Azure (or a downloaded local model, which was not authorised).
+The app never identifies a person from the voice (ADR-013). Diarization gives anonymous labels inside one recording, the owner names them. The quality of the labels is measured by `speaker_accuracy` in `tools/speech-bench/score.py`: the share of real speaking time attributed to the right speaker after the best matching of labels.
+
+Local separation (sherpa-onnx: pyannote segmentation 3.0 plus a speaker embedding model), two synthetic voices (the English and the Italian Windows voice reading the same scripts), `tools/speech-bench/bench_diarization.py`:
+
+| Embedding model | English | Italian | Speakers counted right |
+|---|---|---|---|
+| 3D-Speaker ERes2Net (chosen) | 78 % | 80 % | yes, at every clustering threshold from 0.5 to 0.9 |
+| NeMo TitaNet small | 78 % | 43 % | no |
+| WeSpeaker CAM++ | 44 % | 51 % | no (2 to 6 extra speakers) |
+
+The same voice pitched down (what the first corpus used) is not separated by any model (41 to 53 %): a speaker model listens to the voice, not to its pitch. **Synthetic voices are a weak test**: they are monotone and few. Treat 78 to 80 % as "works on clearly different voices", and measure real people before promising anything. Azure Speech's diarization is **not measured** (no subscription).
 
 ## 3. API and database
 
@@ -91,3 +101,43 @@ Not measured: cold start time and memory on a device (needs a phone or emulator;
 1. Record two real conversations (one you and a second person, in Italian or English, with a phone on a table) and add them next to the synthetic ones: noise, interruptions and room echo are what separates 3 % from 15 %.
 2. After the first deployment run `bench_azure.py` on the corpus and fill the **not measured** rows, including Polish and Danish.
 3. Repeat `bench_api.py` against the Container App with real latency to the database.
+
+## 7. Local engine (the desktop app, ADR-014)
+
+Same laptop. The recordings go through the real engine over HTTP, as the app does it (`tools/local-check/e2e_http.py`; WebM/Opus files like a browser makes). Models: Whisper medium on the GPU, ERes2Net on 8 CPU threads in a separate process, E5 base (int8 ONNX) on the CPU, Qwen3 4B Q5_K_M on the GPU through llama.cpp (context 16 384).
+
+| Recording | Upload to reviewable | speech, speakers and index | extraction | One question |
+|---|---|---|---|---|
+| 2 min, Italian (first run, models cold) | 76 s | 55 s | 21 s | 2.2 s |
+| 9 min, English (first run) | 127 s | 80 s | 47 s | 2.7 s |
+| **60 min, English (34 copies of the test meeting)** | **about 15 min** | **534 s** | **356 s** (about ten windows, adaptive) | 3.5 s |
+
+Where the speech time goes, 3 595 s of audio (`tools/local-check/profile_speech.py`):
+
+| Step | Time | Real-time factor |
+|---|---|---|
+| decode (ffmpeg) | 5 s | 0.001 |
+| load Whisper (once per start) | 9 s | |
+| language detection | 0.4 s | |
+| transcription with word times (batched, GPU) | 61 s | 0.017 |
+| **speaker separation (CPU, 8 threads)** | **477 s** | **0.13** |
+| assemble phrases | 5 s | |
+
+Speaker separation is the cost and it runs **in parallel** with the transcription, so the speech step takes as long as the separation (about 8 minutes per hour of audio). Options if it matters: segment on the GPU, skip stretches without speech. E5 as int8 ONNX loads in 1.5 s and embeds 144 sentences per second.
+
+**Engine responsiveness.** While a one hour recording was processed, a probe request every 0.5 s took at most 1.4 s over 2 038 probes. It was not like that at first: the native separation library holds Python's global lock, which froze every request for the length of the call, and a crash in native code takes the whole process with it. The separation now runs in its own process (`diarize_worker.py`). The search model's import chain (PyTorch, transformers, pandas, pyarrow) crashed the engine twice with an access violation inside pyarrow; the engine no longer imports any of it.
+
+**A failure the test found.** The first one hour run failed after five attempts: the language model's answer was cut off in dense windows (the output limit) and the extraction was all or nothing. A window that cannot be extracted is now cut in halves and retried (up to three times), a stretch that still fails is skipped with a warning, and only a transcript with nothing extractable fails the job. Windows are 3 500 tokens, the output limit 4 096.
+
+**Targets for the local engine on a laptop with a 6 GB GPU**
+
+| Area | Target | Status |
+|---|---|---|
+| One hour meeting, upload to reviewable | ≤ 20 min | **measured about 15 min** |
+| Engine stays responsive while processing | slowest trivial request ≤ 2 s | **measured 1.4 s** |
+| Question to answer, model warm | ≤ 5 s | measured 2.2 to 3.9 s |
+| Question after 10 idle minutes | ≤ 30 s | the model reloads; **not measured** |
+| GPU memory | ≤ 5 GB at any moment | the lease keeps one model on the GPU; speech 2.1 GB, language model about 4 GB with a 16k context |
+| Quality | no claim | the 4B model misses tasks and owners and Whisper medium mishears product names ("Service Bus" as "Ashar Service Bus"); everything it proposes waits for approval |
+
+What the local engine cannot do at all: switch language inside one recording; use more than one GPU model at once on a 6 GB card.

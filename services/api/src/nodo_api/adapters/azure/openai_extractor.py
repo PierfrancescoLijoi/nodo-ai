@@ -19,6 +19,7 @@ from nodo_api.domain.graph import (
     ExtractedEntity,
     ExtractedRelation,
     Extraction,
+    ExtractionError,
     RelationKind,
 )
 from nodo_api.domain.models import Locale, TranscriptSegment
@@ -91,10 +92,6 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
 }
 
 _TAG = re.compile(r"</?\s*transcript\s*>", re.IGNORECASE)
-
-
-class ExtractionError(RuntimeError):
-    pass
 
 
 def _prompt(
@@ -186,7 +183,10 @@ class AzureOpenAiExtractor:
             },
             **self._options,
         )
-        return parse_extraction(response.choices[0].message.content, segments)
+        choice = response.choices[0]
+        if getattr(choice, "finish_reason", None) == "length":
+            raise ExtractionError("The model ran out of room before finishing")
+        return parse_extraction(choice.message.content, segments)
 
 
 __all__ = ["EXISTING_PREFIX", "AzureOpenAiExtractor", "ExtractionError", "parse_extraction"]

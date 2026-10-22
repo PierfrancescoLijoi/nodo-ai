@@ -1,8 +1,9 @@
 import type { Locale } from '@/i18n';
 
-import type { MeetingsRepository } from '../types';
+import type { MeetingState, MeetingsRepository } from '../types';
 import { ApiError, type ApiClient } from './client';
 import { mapAnswer, mapChange, mapGraph, mapMeeting, mapMeetingSummary } from './mappers';
+import { uploadAudioToUrl } from './upload';
 
 interface Page<T> {
   items: T[];
@@ -33,8 +34,52 @@ async function transcript(client: ApiClient, id: string): Promise<unknown[]> {
   }
 }
 
-export function createHttpRepository(client: ApiClient, locale: Locale): MeetingsRepository {
+interface HttpRepositoryOptions {
+  mode?: 'local' | 'azure';
+  fetchImpl?: typeof fetch;
+  createIdempotencyKey?: () => string;
+}
+
+const randomKey = () => {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
+  return `nodo-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
+export function createHttpRepository(
+  client: ApiClient,
+  locale: Locale,
+  { mode = 'azure', fetchImpl = fetch, createIdempotencyKey = randomKey }: HttpRepositoryOptions = {},
+): MeetingsRepository {
   return {
+    async createMeeting({ title, locale: recordingLocale, retentionDays }) {
+      const response = await client.post<{ id: string }>(
+        '/v1/meetings',
+        {
+          recording_attestation: {
+            notice_version: '2026-10-v1',
+            locale: recordingLocale,
+            retention_policy_id: `retention-${retentionDays}d`,
+            acknowledged: true,
+          },
+          ...(title ? { title } : {}),
+        },
+        { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+      );
+      return { id: response.id };
+    },
+    async uploadAudio(meetingId, audio, onProgress) {
+      const encoded = encodeURIComponent(meetingId);
+      const session = await client.post<{ upload_url: string }>(`/v1/meetings/${encoded}/upload-sessions`, {});
+      await uploadAudioToUrl({ url: session.upload_url, audio, mode, fetchImpl, onProgress });
+      await client.post(`/v1/meetings/${encoded}/complete`, {});
+    },
+    async getMeetingState(id) {
+      const meeting = await client.get<{ state: MeetingState }>(`/v1/meetings/${encodeURIComponent(id)}`);
+      return meeting.state;
+    },
+    async deleteMeeting(id) {
+      await client.delete(`/v1/meetings/${encodeURIComponent(id)}`);
+    },
     async listMeetings() {
       return (await cursorPages(client, '/v1/meetings', 50)).map((item) =>
         mapMeetingSummary(item as Record<string, unknown>),

@@ -8,9 +8,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/theme/ThemeProvider';
 import { space, touch } from '@/theme/tokens';
 
+import { useLayout } from './useLayout';
+
 import { Text } from './Text';
 
-const MAX_WIDTH = 640;
+const PHONE_WIDTH = 640;
+const DESKTOP_WIDTH = 1120;
 
 interface ScreenProps {
   title?: string;
@@ -26,6 +29,7 @@ export function Screen({ title, intro, back, right, wordmark, bottomInset, child
   const { colors } = useTheme();
   const router = useRouter();
   const { t } = useTranslation();
+  const { isDesktop } = useLayout();
 
   return (
     <SafeAreaView
@@ -36,10 +40,10 @@ export function Screen({ title, intro, back, right, wordmark, bottomInset, child
         <ScrollView
           contentContainerStyle={{
             width: '100%',
-            maxWidth: MAX_WIDTH,
+            maxWidth: isDesktop ? DESKTOP_WIDTH : PHONE_WIDTH,
             alignSelf: 'center',
-            paddingHorizontal: space[5],
-            paddingTop: space[3],
+            paddingHorizontal: isDesktop ? space[8] : space[5],
+            paddingTop: isDesktop ? space[6] : space[3],
             paddingBottom: space[10],
             gap: space[6],
           }}

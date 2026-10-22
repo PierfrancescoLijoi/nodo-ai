@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type Dependenc
 
 import { usePrefs } from '@/prefs/PrefsProvider';
 import { useAuth } from '@/auth/AuthProvider';
-import { config } from '@/config';
+import { useConnection } from '@/connection/ConnectionProvider';
 
 import { createApiClient } from './http/client';
 import { createHttpRepository } from './http/httpRepository';
@@ -15,15 +15,17 @@ const RepositoryContext = createContext<MeetingsRepository | null>(null);
 export function RepositoryProvider({ children }: { children: ReactNode }) {
   const { locale } = usePrefs();
   const auth = useAuth();
+  const { connection } = useConnection();
   const repository = useMemo(() => {
-    if (config.dataSource === 'mock') return createMockRepository(locale);
+    if (connection.mode === 'mock' || connection.mode === 'setup') return createMockRepository(locale);
+    const baseUrl = connection.mode === 'local' ? connection.apiBaseUrl : connection.profile.apiBaseUrl;
     const client = createApiClient({
-      baseUrl: config.apiBaseUrl,
+      baseUrl,
       getAccessToken: auth.getAccessToken,
       onUnauthorized: auth.signOut,
     });
-    return createHttpRepository(client, locale);
-  }, [auth.getAccessToken, auth.signOut, locale]);
+    return createHttpRepository(client, locale, { mode: connection.mode });
+  }, [auth.getAccessToken, auth.signOut, connection, locale]);
   return <RepositoryContext.Provider value={repository}>{children}</RepositoryContext.Provider>;
 }
 

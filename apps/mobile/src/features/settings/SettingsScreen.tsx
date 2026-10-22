@@ -1,10 +1,12 @@
 import { Check } from '@/ui/icons';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, View } from 'react-native';
 
 import { LOCALES } from '@/i18n';
 import { useAuth } from '@/auth/AuthProvider';
-import { config } from '@/config';
+import { useConnection } from '@/connection/ConnectionProvider';
+import { localEngineApi } from '@/connection/localApi';
 import { usePrefs, type RetentionDays, type ThemePreference } from '@/prefs/PrefsProvider';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space, touch } from '@/theme/tokens';
@@ -14,6 +16,9 @@ import { Segmented } from '@/ui/Segmented';
 import { SectionHeader } from '@/ui/SectionHeader';
 import { Surface } from '@/ui/Surface';
 import { Text } from '@/ui/Text';
+
+import { AzureSyncSection } from './AzureSyncSection';
+import { EngineSection } from './EngineSection';
 
 const THEMES: ThemePreference[] = ['system', 'light', 'dark'];
 const RETENTION: RetentionDays[] = [7, 30, 90];
@@ -70,7 +75,12 @@ function DataRow({ title, body }: { title: string; body: string }) {
 export default function SettingsScreen() {
   const { t } = useTranslation();
   const { status, signOut } = useAuth();
+  const { connection, forgetAzure } = useConnection();
   const { themePreference, setThemePreference, retentionDays, setRetentionDays } = usePrefs();
+  const localApi = useMemo(
+    () => (connection.mode === 'local' ? localEngineApi(connection.apiBaseUrl, connection.token) : undefined),
+    [connection],
+  );
 
   return (
     <Screen back title={t('settings.title')} intro={t('settings.intro')} bottomInset>
@@ -79,14 +89,27 @@ export default function SettingsScreen() {
         <Surface>
           <Text variant="heading">{t('settings.dataSource')}</Text>
           <Text tone="muted">
-            {t(config.dataSource === 'cloud' ? 'settings.dataSourceCloud' : 'settings.dataSourceMock')}
+            {t(
+              connection.mode === 'azure'
+                ? 'settings.dataSourceCloud'
+                : connection.mode === 'local'
+                  ? 'settings.dataSourceLocal'
+                  : 'settings.dataSourceMock',
+            )}
           </Text>
-          <Text tone="muted">{t('settings.signedIn')}</Text>
-          {config.dataSource === 'cloud' && status === 'signedIn' ? (
-            <Button variant="secondary" label={t('settings.signOut')} onPress={() => void signOut()} />
+          {connection.mode === 'azure' ? <Text tone="muted">{t('settings.signedIn')}</Text> : null}
+          {connection.mode === 'azure' && status === 'signedIn' ? (
+            <Button
+              variant="secondary"
+              label={t('settings.forgetAzure')}
+              onPress={() => void signOut().then(forgetAzure)}
+            />
           ) : null}
         </Surface>
       </View>
+
+      {localApi ? <EngineSection api={localApi} /> : null}
+      {localApi ? <AzureSyncSection api={localApi} /> : null}
 
       <View style={{ gap: space[3] }}>
         <SectionHeader title={t('settings.language')} />

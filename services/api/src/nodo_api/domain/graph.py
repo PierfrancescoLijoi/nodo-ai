@@ -231,6 +231,10 @@ class Change:
     at: datetime | None
 
 
+class ExtractionError(RuntimeError):
+    """The model's answer could not be used (not valid, or cut off before it was complete)."""
+
+
 ANONYMOUS_SPEAKER = re.compile(r"s[0-9]+")
 
 

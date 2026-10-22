@@ -49,7 +49,7 @@ def main() -> None:
     extractor = ChunkedExtractor(LocalExtractor(server, arbiter), max_tokens=6000)
     llm = LocalLlm(server, arbiter)
     db = LocalDatabase(Path(tempfile.mkdtemp()) / "check.db")
-    graph, embedder = SqliteGraphStore(db), LocalEmbedder()
+    graph, embedder = SqliteGraphStore(db), LocalEmbedder(models.embedding_dir)
     retriever = SqliteRetriever(db, embedder, min_similarity=0.78)
 
     phrases = timed("speech to text + speakers", lambda: speech.transcribe(audio, CANDIDATES))

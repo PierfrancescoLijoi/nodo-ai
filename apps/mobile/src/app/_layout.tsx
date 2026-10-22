@@ -9,6 +9,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import '@/i18n';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { RepositoryProvider } from '@/data/RepositoryProvider';
+import { ConnectionProvider, useConnection } from '@/connection/ConnectionProvider';
+import FirstRunScreen from '@/features/connection/FirstRunScreen';
 import LoginScreen from '@/features/auth/LoginScreen';
 import { PrefsProvider } from '@/prefs/PrefsProvider';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
@@ -28,7 +30,9 @@ function ThemedStack() {
 }
 
 function AuthenticatedApp() {
+  const { connection } = useConnection();
   const { status } = useAuth();
+  if (connection.mode === 'setup') return <FirstRunScreen />;
   if (status === 'loading') return null;
   if (status === 'signedOut') return <LoginScreen />;
   return (
@@ -56,9 +60,11 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <PrefsProvider>
         <ThemeProvider>
-          <AuthProvider>
-            <AuthenticatedApp />
-          </AuthProvider>
+          <ConnectionProvider>
+            <AuthProvider>
+              <AuthenticatedApp />
+            </AuthProvider>
+          </ConnectionProvider>
         </ThemeProvider>
       </PrefsProvider>
     </SafeAreaProvider>

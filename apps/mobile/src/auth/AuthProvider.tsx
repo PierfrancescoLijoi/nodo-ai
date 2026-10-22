@@ -2,7 +2,8 @@ import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { config } from '@/config';
+import { useConnection } from '@/connection/ConnectionProvider';
+import type { AzureProfile } from '@/connection/types';
 
 import { createSession, type StoredTokens } from './session';
 import { tokenStore } from './tokenStore';
@@ -27,8 +28,11 @@ const toStoredTokens = (token: AuthSession.TokenResponse, fallbackRefreshToken?:
   expiresAt: (token.issuedAt + (token.expiresIn ?? 3600)) * 1000,
 });
 
-function useSession(discovery: AuthSession.DiscoveryDocument | null, setStatus: (status: AuthStatus) => void) {
-  const { clientId, apiScope } = config.oidc;
+function useSession(
+  discovery: AuthSession.DiscoveryDocument | null,
+  setStatus: (status: AuthStatus) => void,
+  { clientId, apiScope }: AzureProfile,
+) {
   return useMemo(
     () =>
       createSession({
@@ -52,8 +56,8 @@ function useCodeExchange(
   redirectUri: string,
   onSuccess: () => void,
   onError: (error: Error) => void,
+  clientId: string,
 ) {
-  const { clientId } = config.oidc;
   useEffect(() => {
     if (response?.type !== 'success' || !response.params.code || !request?.codeVerifier || !discovery) return;
     void AuthSession.exchangeCodeAsync(
@@ -82,8 +86,8 @@ function DevAuthProvider({ children, token }: { children: ReactNode; token: stri
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-function OidcAuthProvider({ children }: { children: ReactNode }) {
-  const { issuer, clientId, apiScope } = config.oidc;
+function OidcAuthProvider({ children, profile }: { children: ReactNode; profile: AzureProfile }) {
+  const { issuer, clientId, apiScope } = profile;
   const discovery = AuthSession.useAutoDiscovery(issuer);
   const redirectUri = AuthSession.makeRedirectUri({ scheme: 'nodo', path: 'auth' });
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
@@ -98,7 +102,7 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
   );
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [error, setError] = useState<Error>();
-  const session = useSession(discovery, setStatus);
+  const session = useSession(discovery, setStatus, profile);
 
   useEffect(() => {
     void tokenStore.get().then(
@@ -112,7 +116,7 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
     setError(cause);
     setStatus('signedOut');
   }, []);
-  useCodeExchange(request, response, discovery, redirectUri, exchangeSucceeded, exchangeFailed);
+  useCodeExchange(request, response, discovery, redirectUri, exchangeSucceeded, exchangeFailed, clientId);
 
   const signIn = useCallback(async () => {
     setError(undefined);
@@ -130,13 +134,15 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  if (config.dataSource === 'mock') {
+  const { connection } = useConnection();
+  if (connection.mode === 'mock' || connection.mode === 'setup') {
     return <DevAuthProvider token="mock">{children}</DevAuthProvider>;
   }
-  return config.devToken ? (
-    <DevAuthProvider token={config.devToken}>{children}</DevAuthProvider>
+  if (connection.mode === 'local') return <DevAuthProvider token={connection.token}>{children}</DevAuthProvider>;
+  return connection.devToken ? (
+    <DevAuthProvider token={connection.devToken}>{children}</DevAuthProvider>
   ) : (
-    <OidcAuthProvider>{children}</OidcAuthProvider>
+    <OidcAuthProvider profile={connection.profile}>{children}</OidcAuthProvider>
   );
 }
 

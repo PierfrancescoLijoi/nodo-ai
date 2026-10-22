@@ -62,3 +62,23 @@ An edge reads `source KIND target`, for example `decision-queue DECIDED_IN meeti
 `PATCH /v1/graph/relations/{id}` body `{ "status": "approved" | "rejected" }` returns the edge (`rejected` edges disappear from later reads). Approving a `SUPERSEDES` edge marks the replaced decision `superseded`.
 
 `GET /v1/graph/changes?limit=10` returns `{ items: { id, new_label, old_label, meeting_id, at }[] }`: the latest approved or proposed supersessions, newest first.
+
+## Recording lifecycle (all backends)
+
+1. `POST /v1/meetings` with header `Idempotency-Key` (a fresh random string per recording, 8 to 128 characters) and body `{ recording_attestation: { notice_version: "2026-10-v1", locale: "en"|"pl"|"it"|"da", retention_policy_id: "retention-7d"|"retention-30d"|"retention-90d", acknowledged: true }, title?, project? }` returns the meeting (state `uploading`).
+2. `POST /v1/meetings/{id}/upload-sessions` returns `{ id, upload_url, expires_in_seconds }`.
+3. Send the audio to `upload_url` with `PUT`. **Local engine:** one request, raw bytes, no `Authorization` header (the link is the credential), answered `204`; a link works once. **Azure:** the link is a blob SAS URL: add header `x-ms-blob-type: BlockBlob` for one request up to 256 MiB, or stage blocks of 4 MiB with `PUT <url>&comp=block&blockid=<base64>` and finish with `PUT <url>&comp=blocklist` (body: `<BlockList><Latest>id</Latest>...</BlockList>`).
+4. `POST /v1/meetings/{id}/complete` starts processing (state `transcribing`, then `extracting`, then `review`). Poll `GET /v1/meetings/{id}` every 3 seconds until the state is `review`, `ready` or `failed`.
+5. `DELETE /v1/meetings/{id}` (204) erases audio, transcript, search rows and graph contribution.
+
+## Local engine only (`/v1/local/...`)
+
+The app is served by the engine and receives the secret in the address fragment (`http://127.0.0.1:PORT/#token=...`). It stores the token for the tab (`sessionStorage`), removes the fragment from the address, and sends it as `Authorization: Bearer <token>` like any other token. API base URL = the page's own origin.
+
+- `GET /v1/local/status` returns `{ backend: "local", missing: string[], pending_jobs: number, gpu: boolean }`. `missing` names models or tools that are not installed (for example `"language model (GGUF)"`); with something missing, questions answer `503 model_unavailable`.
+- `POST /v1/local/sync` body `{ cloud_url, access_token, force? }` starts copying the archive to an Azure deployment (ADR-015) and answers `202` with the progress object. `cloud_url` is the cloud API address (`https://...`); `access_token` is an Entra access token for that API; `force` sends every meeting again. `422` if the address is not a plain https address.
+- `GET /v1/local/sync` returns `{ state: "idle"|"running"|"done"|"failed", total, done, pushed, unchanged, deleted, failed: { meeting_id, reason }[], message }`. Poll every 2 seconds while `running`.
+
+## Cloud only
+
+`PUT /v1/sync/meetings/{id}` receives one meeting from a local engine (ADR-015). Used by the engine, not by the app.

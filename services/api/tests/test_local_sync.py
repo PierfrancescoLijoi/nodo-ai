@@ -265,3 +265,12 @@ def test_a_loopback_address_is_allowed_for_tests_and_the_hash_is_stable(app, cli
         meeting, app.state.container.transcripts, app.state.container.graph, runtime.sync._source
     )
     assert content_hash(one) == content_hash(two)
+
+
+def test_the_cloud_refuses_an_oversized_package_before_reading_it_all(cloud) -> None:
+    _, cloud_client = cloud
+    big = b"x" * (41 * 1024 * 1024)
+    reply = cloud_client.put(
+        "/v1/sync/meetings/some-meeting-id", headers=CLOUD_HEADERS, content=big
+    )
+    assert reply.status_code == 413

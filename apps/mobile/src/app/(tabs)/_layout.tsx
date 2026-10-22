@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/theme/ThemeProvider';
 import { fonts } from '@/theme/tokens';
+import { useLayout } from '@/ui/useLayout';
 
 const TABS: { name: string; key: 'home' | 'meetings' | 'ask' | 'graph'; icon: Icon }[] = [
   { name: 'index', key: 'home', icon: House },
@@ -18,6 +19,7 @@ export default function TabsLayout() {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const { bottom } = useSafeAreaInsets();
+  const { isDesktop } = useLayout();
 
   return (
     <Tabs
@@ -25,13 +27,21 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-          height: 72 + bottom,
-          paddingTop: 8,
-        },
-        tabBarLabelStyle: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 16, marginBottom: 10 },
+        tabBarPosition: isDesktop ? 'left' : 'bottom',
+        tabBarVariant: isDesktop ? 'material' : 'uikit',
+        tabBarStyle: isDesktop
+          ? {
+              backgroundColor: colors.surface,
+              borderRightColor: colors.border,
+              width: 232,
+              minWidth: 232,
+              maxWidth: 232,
+              paddingTop: 24,
+            }
+          : { backgroundColor: colors.surface, borderTopColor: colors.border, height: 72 + bottom, paddingTop: 8 },
+        tabBarLabelStyle: isDesktop
+          ? { fontFamily: fonts.medium, fontSize: 14, lineHeight: 20 }
+          : { fontFamily: fonts.medium, fontSize: 12, lineHeight: 16, marginBottom: 10 },
       }}
     >
       {TABS.map(({ name, key, icon: TabIcon }) => (

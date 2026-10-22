@@ -47,6 +47,20 @@ describe('free-text matching', () => {
   });
 });
 
+describe('mock recording lifecycle', () => {
+  test('creates, uploads, reports state, and deletes a meeting in memory', async () => {
+    const repository = createMockRepository('en');
+    const { id } = await repository.createMeeting({ title: 'New meeting', locale: 'en', retentionDays: 7 });
+    expect(await repository.getMeetingState(id)).toBe('uploading');
+    const progress = jest.fn();
+    await repository.uploadAudio(id, new Blob(['audio']), progress);
+    expect(progress).toHaveBeenLastCalledWith(1);
+    expect(await repository.getMeetingState(id)).toBe('ready');
+    await repository.deleteMeeting(id);
+    expect(await repository.getMeeting(id)).toBeUndefined();
+  });
+});
+
 describe('formatClock', () => {
   test('pads minutes and seconds and clamps negatives', () => {
     expect(formatClock(762)).toBe('12:42');

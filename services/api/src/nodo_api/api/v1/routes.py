@@ -3,7 +3,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    status,
+)
+from fastapi.concurrency import run_in_threadpool
 
 from nodo_api.api.v1.mapping import (
     decode_cursor,
@@ -275,11 +286,26 @@ def _query_request(question, locale, filters: QueryFiltersInput | None) -> Query
     return QueryRequest(question, locale, service_filters)
 
 
+MAX_SYNC_BYTES = 40 * 1024 * 1024  # a long meeting with many versions is a few MB
+
+
 @router.put("/sync/meetings/{meeting_id}", response_model=SyncResult)
-def import_meeting(meeting_id: str, package: SyncPackage, actor: PrincipalDep, request: Request):
+async def import_meeting(meeting_id: str, actor: PrincipalDep, request: Request):
     """Copy a meeting from a local engine (ADR-015). Safe to repeat."""
+    body = bytearray()
+    async for chunk in request.stream():  # bounded here, before anything is parsed
+        body += chunk
+        if len(body) > MAX_SYNC_BYTES:
+            raise HTTPException(status_code=413)
+    try:
+        package = SyncPackage.model_validate_json(bytes(body))
+    except ValueError as error:
+        raise ValidationFailed from error
     if package.meeting_id != meeting_id:
         raise ValidationFailed
-    return request.app.state.container.sync_import.import_meeting(
-        actor.workspace_id, actor.user_id, package
+    return await run_in_threadpool(
+        request.app.state.container.sync_import.import_meeting,
+        actor.workspace_id,
+        actor.user_id,
+        package,
     )

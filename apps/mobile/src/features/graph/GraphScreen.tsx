@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, View } from 'react-native';
 
 import { useAsync } from '@/data/RepositoryProvider';
-import { config } from '@/config';
+import { useConnection } from '@/connection/ConnectionProvider';
 import type { EntityType, Graph } from '@/data/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space, touch } from '@/theme/tokens';
@@ -117,6 +117,7 @@ function EntityList({ graph, selected, onSelect }: { graph: Graph; selected: str
 
 export default function GraphScreen() {
   const { t } = useTranslation();
+  const { connection } = useConnection();
   const [seedId, setSeedId] = useState<string>();
   const graph = useAsync((r) => r.getGraph(seedId ? { seedId } : undefined), [seedId]);
   const [view, setView] = useState<'list' | 'map'>('list');
@@ -129,7 +130,7 @@ export default function GraphScreen() {
         : selected;
   const select = (id: string) => {
     setSelected(id);
-    if (config.dataSource === 'cloud') setSeedId(id);
+    if (connection.mode !== 'mock') setSeedId(id);
   };
 
   return (

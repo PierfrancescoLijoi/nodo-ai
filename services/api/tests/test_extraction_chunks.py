@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from nodo_api.domain.graph import (
     EXISTING_PREFIX,
     EntityType,
     ExtractedEntity,
     ExtractedRelation,
     Extraction,
+    ExtractionError,
     RelationKind,
 )
 from nodo_api.domain.models import Locale, TranscriptSegment
@@ -101,3 +104,64 @@ def test_chunked_extractor_calls_the_model_once_per_window_and_merges() -> None:
     assert len(inner.calls) > 1 and sum(inner.calls) == 10
     assert [e.label for e in result.entities] == ["Sara"]
     assert result.summary.startswith("part 1.")
+
+
+class FailsOnLongInput:
+    """Fails whenever it is given more than two segments, like a model that runs out of room."""
+
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    def extract(self, segments, locale, known_decisions, speakers=None):
+        self.calls.append(len(segments))
+        if len(segments) > 2:
+            raise ExtractionError("too long")
+        return _part(f"{len(segments)} segments.", [f"Person{segments[0].id}"])
+
+
+def test_a_window_the_model_fails_on_is_halved_and_retried() -> None:
+    inner = FailsOnLongInput()
+    result = ChunkedExtractor(inner, max_tokens=100_000).extract(_segments(6), Locale.EN, (), None)
+    assert inner.calls[0] == 6 and set(inner.calls[1:]) <= {3, 1, 2}
+    assert len([e for e in result.entities if e.type is EntityType.PERSON]) >= 2
+
+
+def test_nothing_extracted_at_all_is_an_error_so_the_job_is_retried() -> None:
+    class AlwaysFails:
+        def extract(self, *args, **kwargs):
+            raise ExtractionError("no")
+
+    with pytest.raises(ExtractionError):
+        ChunkedExtractor(AlwaysFails(), max_tokens=100).extract(_segments(4), Locale.EN, (), None)
+
+
+def test_one_hopeless_stretch_is_skipped_but_the_rest_is_kept() -> None:
+    class FailsOnOneSegment:
+        def extract(self, segments, locale, known_decisions, speakers=None):
+            if any(s.id == "s3" for s in segments) and len(segments) == 1:
+                raise ExtractionError("no")
+            if any(s.id == "s3" for s in segments):
+                raise ExtractionError("no")
+            return _part("ok.", [f"P{segments[0].id}"])
+
+    result = ChunkedExtractor(FailsOnOneSegment(), max_tokens=100).extract(
+        _segments(6), Locale.EN, (), None
+    )
+    assert result.entities, "the segments that could be read still count"
+    assert all("s3" not in e.evidence for e in result.entities)
+
+
+def test_the_merged_summary_is_a_few_whole_distinct_sentences() -> None:
+    parts = [
+        _part("The group chose a queue. Marco will measure the cost.", ["A"]),
+        _part("The group chose a queue. Katarzyna reviews the Polish text.", ["B"]),
+        _part("A fourth sentence that is not needed at all.", ["C"]),
+    ]
+    merged = merge(parts)
+    assert merged.summary == (
+        "The group chose a queue. Marco will measure the cost. Katarzyna reviews the Polish text."
+    )
+    long_part = _part("word " * 400 + "end.", ["D"])
+    assert (
+        merge([long_part, long_part]).summary == ""
+    )  # one sentence over the limit is dropped, not cut

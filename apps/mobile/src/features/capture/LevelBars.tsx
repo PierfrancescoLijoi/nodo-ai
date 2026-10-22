@@ -10,11 +10,27 @@ const HEIGHTS = Array.from(
   (_, i) => 10 + Math.round(34 * Math.abs(Math.sin(i * 1.43) * Math.cos(i * 0.21))),
 );
 
-function Bar({ index, height, active, animate }: { index: number; height: number; active: boolean; animate: boolean }) {
+function Bar({
+  index,
+  height,
+  active,
+  animate,
+  level,
+}: {
+  index: number;
+  height: number;
+  active: boolean;
+  animate: boolean;
+  level?: number;
+}) {
   const { colors } = useTheme();
   const [scale] = useState(() => new Animated.Value(0.5));
 
   useEffect(() => {
+    if (level !== undefined) {
+      scale.setValue(active ? Math.max(0.15, Math.min(1, level * (0.8 + (index % 5) * 0.12))) : 0.15);
+      return;
+    }
     if (!active || !animate) {
       scale.setValue(active ? 1 : 0.4);
       return;
@@ -35,7 +51,7 @@ function Bar({ index, height, active, animate }: { index: number; height: number
     );
     loop.start();
     return () => loop.stop();
-  }, [active, animate, index, scale]);
+  }, [active, animate, index, level, scale]);
 
   return (
     <Animated.View
@@ -52,7 +68,7 @@ function Bar({ index, height, active, animate }: { index: number; height: number
 }
 
 // Decorative: it signals "recording is live" and carries no audio data in this build.
-export function LevelBars({ active }: { active: boolean }) {
+export function LevelBars({ active, level }: { active: boolean; level?: number }) {
   const reduced = useReducedMotion();
   return (
     <View
@@ -61,7 +77,7 @@ export function LevelBars({ active }: { active: boolean }) {
       style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, height: 56 }}
     >
       {HEIGHTS.map((height, index) => (
-        <Bar key={index} index={index} height={height} active={active} animate={!reduced} />
+        <Bar key={index} index={index} height={height} active={active} animate={!reduced} level={level} />
       ))}
     </View>
   );

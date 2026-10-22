@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { CheckCircle, TreeStructure } from '@/ui/icons';
+import { CheckCircle, Trash, TreeStructure } from '@/ui/icons';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
@@ -14,6 +14,7 @@ import { radius, space } from '@/theme/tokens';
 import { Button } from '@/ui/Button';
 import { Screen } from '@/ui/Screen';
 import { SectionHeader } from '@/ui/SectionHeader';
+import { useLayout } from '@/ui/useLayout';
 import { ErrorNotice } from '@/ui/ErrorNotice';
 import { Skeleton } from '@/ui/Skeleton';
 import { Surface } from '@/ui/Surface';
@@ -144,20 +145,16 @@ function Body({ meeting, highlight }: { meeting: Meeting; highlight?: string }) 
   const { locale } = usePrefs();
   const { colors } = useTheme();
   const router = useRouter();
+  const repository = useRepository();
   const [speakers, setSpeakers] = useState(meeting.speakers);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
+  const { isDesktop } = useLayout();
   const totalTalkMs = speakers.reduce((total, speaker) => total + speaker.talkMs, 0);
 
-  return (
+  const overview = (
     <>
-      <View style={{ gap: space[2] }}>
-        <Text variant="small" tone="muted">
-          {formatDate(meeting.startedAt, locale, 'long')}, {t('meeting.duration', { count: meeting.durationMin })}
-        </Text>
-        <Text variant="small" tone="muted">
-          {meeting.participants.join(', ')}
-        </Text>
-      </View>
-
       <Surface>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Text variant="heading">{t('meeting.summary')}</Text>
@@ -207,7 +204,10 @@ function Body({ meeting, highlight }: { meeting: Meeting; highlight?: string }) 
           />
         ))}
       </View>
-
+    </>
+  );
+  const transcript = (
+    <>
       <View style={{ gap: space[3] }}>
         <SectionHeader title={t('meeting.transcript')} />
         {meeting.segments.map((segment) => {
@@ -236,6 +236,31 @@ function Body({ meeting, highlight }: { meeting: Meeting; highlight?: string }) 
           );
         })}
       </View>
+    </>
+  );
+
+  return (
+    <>
+      <View style={{ gap: space[2] }}>
+        <Text variant="small" tone="muted">
+          {formatDate(meeting.startedAt, locale, 'long')}, {t('meeting.duration', { count: meeting.durationMin })}
+        </Text>
+        <Text variant="small" tone="muted">
+          {meeting.participants.join(', ')}
+        </Text>
+      </View>
+
+      {isDesktop ? (
+        <View style={{ flexDirection: 'row', gap: space[8], alignItems: 'flex-start' }}>
+          <View style={{ flex: 2, gap: space[6] }}>{overview}</View>
+          <View style={{ flex: 3, gap: space[3] }}>{transcript}</View>
+        </View>
+      ) : (
+        <>
+          {overview}
+          {transcript}
+        </>
+      )}
 
       <Button
         variant="secondary"
@@ -243,6 +268,49 @@ function Body({ meeting, highlight }: { meeting: Meeting; highlight?: string }) 
         label={t('meeting.openGraph')}
         onPress={() => router.push('/graph')}
       />
+
+      <View style={{ gap: space[3] }}>
+        <SectionHeader title={t('meeting.delete.title')} />
+        {!confirmDelete ? (
+          <Button
+            variant="secondary"
+            icon={Trash}
+            label={t('meeting.delete.button')}
+            onPress={() => setConfirmDelete(true)}
+          />
+        ) : (
+          <Surface tone="warning">
+            <Text variant="heading" tone="warning">
+              {t('meeting.delete.confirmTitle')}
+            </Text>
+            <Text>{t('meeting.delete.body')}</Text>
+            {deleteFailed ? <Text tone="danger">{t('meeting.delete.error')}</Text> : null}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space[2] }}>
+              <Button
+                label={t('meeting.delete.confirm')}
+                disabled={deleting}
+                onPress={() => {
+                  setDeleting(true);
+                  setDeleteFailed(false);
+                  void repository.deleteMeeting(meeting.id).then(
+                    () => router.replace('/meetings'),
+                    () => {
+                      setDeleting(false);
+                      setDeleteFailed(true);
+                    },
+                  );
+                }}
+              />
+              <Button
+                variant="secondary"
+                label={t('common.cancel')}
+                disabled={deleting}
+                onPress={() => setConfirmDelete(false)}
+              />
+            </View>
+          </Surface>
+        )}
+      </View>
     </>
   );
 }

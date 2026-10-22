@@ -82,12 +82,28 @@ def create_app(
     if effective_settings.backend == "local":
         from nodo_api.api import local
 
+        _only_loopback_hosts(app, effective_settings)
+
         app.include_router(local.router)
         web = effective_settings.local_web_dir
         if web is not None and web.is_dir():
             local.mount_web(app, web)  # last: it matches everything the API did not
 
     return app
+
+
+def _only_loopback_hosts(app: FastAPI, settings: Settings) -> None:
+    """Refuse requests whose Host header is not this computer's loopback address. A web page on the
+    internet can make a browser send requests to 127.0.0.1 under its own name (DNS rebinding); the
+    secret already stops it, and this closes the door a second time."""
+    port = settings.local_public_url.rsplit(":", 1)[1]
+    allowed = {f"127.0.0.1:{port}", f"localhost:{port}", "testserver"}
+
+    @app.middleware("http")
+    async def host_check(request: Request, call_next):
+        if request.headers.get("host", "") not in allowed:
+            return JSONResponse(status_code=421, content={"error": {"code": "misdirected"}})
+        return await call_next(request)
 
 
 def _container(settings: Settings, key_provider) -> AppContainer:

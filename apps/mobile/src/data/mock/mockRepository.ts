@@ -136,6 +136,40 @@ export function createMockRepository(locale: Locale): MeetingsRepository {
   const graph = buildGraph(content, meetings, locale);
 
   return {
+    async createMeeting({ title }) {
+      const id = `mock-${Date.now()}-${meetings.length}`;
+      meetings.unshift({
+        id,
+        startedAt: new Date().toISOString(),
+        durationMin: 0,
+        title: title ?? 'Untitled meeting',
+        participants: [],
+        tags: [],
+        summary: '',
+        decisions: [],
+        actions: [],
+        segments: [],
+        speakers: [],
+        state: 'uploading',
+      });
+      return { id };
+    },
+    async uploadAudio(meetingId, _audio, onProgress) {
+      const meeting = meetings.find((item) => item.id === meetingId);
+      if (!meeting) throw new ApiError('Meeting not found', 404, 'meeting_not_found');
+      onProgress?.(1);
+      meeting.state = 'ready';
+    },
+    async getMeetingState(id) {
+      const meeting = meetings.find((item) => item.id === id);
+      if (!meeting) throw new ApiError('Meeting not found', 404, 'meeting_not_found');
+      return meeting.state;
+    },
+    async deleteMeeting(id) {
+      const index = meetings.findIndex((item) => item.id === id);
+      if (index < 0) throw new ApiError('Meeting not found', 404, 'meeting_not_found');
+      meetings.splice(index, 1);
+    },
     async listMeetings() {
       await pause(120);
       return meetings.map((meeting): MeetingSummary => ({

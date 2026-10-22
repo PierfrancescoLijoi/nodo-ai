@@ -107,6 +107,14 @@ export interface Change {
 }
 
 export interface MeetingsRepository {
+  createMeeting(input: {
+    title?: string;
+    locale: import('@/i18n').Locale;
+    retentionDays: 7 | 30 | 90;
+  }): Promise<{ id: string }>;
+  uploadAudio(meetingId: string, audio: Blob, onProgress?: (fraction: number) => void): Promise<void>;
+  getMeetingState(id: string): Promise<MeetingState>;
+  deleteMeeting(id: string): Promise<void>;
   listMeetings(): Promise<MeetingSummary[]>;
   getMeeting(id: string): Promise<Meeting | undefined>;
   nameSpeaker(meetingId: string, speakerId: string, name: string | null): Promise<Meeting>;

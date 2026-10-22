@@ -24,7 +24,7 @@ ANSWER_OPTIONS: dict[str, Any] = {
 }
 EXTRACTION_OPTIONS: dict[str, Any] = {
     "temperature": 0.1,
-    "max_tokens": 3072,
+    "max_tokens": 4096,
     "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
 }
 MODEL_NAME = "local"

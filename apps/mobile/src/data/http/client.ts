@@ -26,8 +26,9 @@ export class ApiError extends Error {
 
 export interface ApiClient {
   get<T>(path: string): Promise<T>;
-  post<T>(path: string, body: unknown): Promise<T>;
+  post<T>(path: string, body: unknown, options?: { headers?: Record<string, string> }): Promise<T>;
   patch<T>(path: string, body: unknown): Promise<T>;
+  delete(path: string): Promise<void>;
 }
 
 async function fetchWithTimeout(
@@ -58,7 +59,13 @@ export function createApiClient({
   timeoutMs = 20_000,
   onUnauthorized,
 }: ClientOptions): ApiClient {
-  const request = async <T>(method: string, path: string, body?: unknown, retried = false): Promise<T> => {
+  const request = async <T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: { headers?: Record<string, string> },
+    retried = false,
+  ): Promise<T> => {
     const token = await getAccessToken(retried);
     const response = await fetchWithTimeout(
       fetchImpl,
@@ -69,12 +76,13 @@ export function createApiClient({
           Authorization: `Bearer ${token}`,
           Accept: 'application/json',
           ...(body ? { 'Content-Type': 'application/json' } : {}),
+          ...options?.headers,
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
       },
       timeoutMs,
     );
-    if (response.status === 401 && !retried) return request(method, path, body, true);
+    if (response.status === 401 && !retried) return request(method, path, body, options, true);
     if (response.status === 401) await onUnauthorized?.();
     const payload = (await response.json().catch(() => undefined)) as ErrorEnvelope | T | undefined;
     if (!response.ok) {
@@ -90,7 +98,9 @@ export function createApiClient({
   };
   return {
     get: <T>(path: string) => request<T>('GET', path),
-    post: <T>(path: string, body: unknown) => request<T>('POST', path, body),
+    post: <T>(path: string, body: unknown, options?: { headers?: Record<string, string> }) =>
+      request<T>('POST', path, body, options),
     patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
+    delete: (path: string) => request<void>('DELETE', path),
   };
 }

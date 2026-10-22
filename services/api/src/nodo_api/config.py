@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     local_web_dir: Path | None = None  # the exported web app, served by the engine itself
     local_public_url: str = "http://127.0.0.1:8765"
     local_llm_context: int = Field(default=16384, ge=2048, le=131072)
-    local_extract_window_tokens: int = Field(default=6000, ge=500, le=100000)
+    local_extract_window_tokens: int = Field(default=3500, ge=500, le=100000)
+    local_warm_up: bool = False  # load the search model at start instead of at the first use
     local_search_margin: float = Field(default=0.035, ge=0.0, le=0.5)
 
     azure_storage_account: str | None = None

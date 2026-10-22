@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -61,9 +62,20 @@ class LocalRuntime:
     models: LocalModelPaths
     server: LlamaServer | None
     sync: LocalSyncService
+    embedder: LocalEmbedder
+    warm_up: bool = False
 
     def start(self) -> None:
         self.loop.start()
+        if self.warm_up:
+            threading.Thread(target=self._warm, name="nodo-warm-up", daemon=True).start()
+
+    def _warm(self) -> None:
+        """The search model takes about 30 s to load; do it while the window opens."""
+        try:
+            self.embedder.embed_passages(["warm up"])
+        except Exception as error:  # a missing model is reported when it is needed, not here
+            logger.warning("warm_up_skipped type=%s", type(error).__name__)
 
     def stop(self) -> None:
         self.loop.stop()
@@ -86,7 +98,7 @@ def local_adapters(settings: Settings):
         lambda: settings.local_public_url,
         upload_seconds=settings.upload_session_seconds,
     )
-    embedder = LocalEmbedder(models.embedding_model)
+    embedder = LocalEmbedder(models.embedding_dir)
     retriever = SqliteRetriever(db, embedder, min_margin=settings.local_search_margin)
     graph = SqliteGraphStore(db)
     queue = SqliteJobQueue(db)
@@ -126,7 +138,15 @@ def local_adapters(settings: Settings):
     )
     sync = LocalSyncService(db, meetings, transcripts, graph, source, LOCAL_WORKSPACE, LOCAL_USER)
     runtime = LocalRuntime(
-        db, blobs, queue, LocalWorkerLoop(queue, Worker(ingestion)), models, server, sync
+        db,
+        blobs,
+        queue,
+        LocalWorkerLoop(queue, Worker(ingestion)),
+        models,
+        server,
+        sync,
+        embedder,
+        settings.local_warm_up,
     )
     return Adapters(
         meetings,

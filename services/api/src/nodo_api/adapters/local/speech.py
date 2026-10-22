@@ -16,8 +16,11 @@ inside a meeting), and speaker quality depends on a small embedding model.
 from __future__ import annotations
 
 import gc
+import json
 import logging
+import os
 import subprocess
+import sys
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -38,6 +41,8 @@ SENTENCE_END = (".", "?", "!", "…")
 SPEAKER_EMBEDDING_FILE = "3dspeaker_eres2net.onnx"
 SEGMENTATION_DIR = "sherpa-onnx-pyannote-segmentation-3-0"
 CLUSTER_THRESHOLD = 0.6
+SEPARATION_TIMEOUT_SECONDS = 6 * 3600
+SPEAKER_THREADS = min(8, max(2, (os.cpu_count() or 4) // 2))  # 8 threads: 25 % faster than 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,18 +127,45 @@ def build_phrases(tagged: Sequence[tuple[Word, int]], language: str) -> tuple[Sp
     return tuple(phrases)
 
 
+# Signatures of the audio and video containers a recording can be in. Anything else (a playlist, a
+# concat script, text that ffmpeg would interpret as a list of other files) is refused before ffmpeg
+# sees it: the upload is an untrusted file.
+CONTAINER_SIGNATURES = (
+    (0, b"RIFF"),  # WAV
+    (0, b"OggS"),
+    (0, bytes([0x1A, 0x45, 0xDF, 0xA3])),  # Matroska and WebM
+    (0, b"fLaC"),
+    (0, b"ID3"),
+    (4, b"ftyp"),  # MP4 and M4A
+    (0, bytes([0xFF, 0xFB])),  # MP3 frame
+    (0, bytes([0xFF, 0xF3])),
+    (0, bytes([0xFF, 0xF1])),  # AAC (ADTS)
+)
+
+
+def looks_like_media(path: Path | str) -> bool:
+    with Path(path).open("rb") as handle:
+        head = handle.read(16)
+    return any(head[offset : offset + len(sig)] == sig for offset, sig in CONTAINER_SIGNATURES)
+
+
 def decode_audio(path: Path | str, ffmpeg: str | None) -> np.ndarray:
     """Any audio or video file to 16 kHz mono float samples. ffmpeg handles every container."""
     if ffmpeg is None:
         raise RuntimeError("ffmpeg is not installed")
+    if not looks_like_media(path):
+        raise ValueError("The recording is not an audio or video file")
     result = subprocess.run(
         [
             ffmpeg,
             "-nostdin",
             "-v",
             "error",
+            "-protocol_whitelist",
+            "file",  # no network, no pipes, no other protocols, whatever the file says
             "-i",
             str(path),
+            "-vn",
             "-f",
             "s16le",
             "-ac",
@@ -168,7 +200,6 @@ class LocalSpeechToText:
         self._arbiter = arbiter
         self._whisper = None
         self._batched = None
-        self._diarizer = None
         self._lock = threading.Lock()
         arbiter.register("speech", self.unload)
 
@@ -196,31 +227,6 @@ class LocalSpeechToText:
             self._whisper = None
             self._batched = None
         gc.collect()
-
-    def _load_diarizer(self):
-        if self._diarizer is not None or self._models.diarization_dir is None:
-            return self._diarizer
-        import sherpa_onnx
-
-        root = self._models.diarization_dir
-        config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
-            segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
-                pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
-                    model=str(root / SEGMENTATION_DIR / "model.onnx")
-                ),
-                num_threads=4,
-            ),
-            embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-                model=str(root / SPEAKER_EMBEDDING_FILE), num_threads=4
-            ),
-            clustering=sherpa_onnx.FastClusteringConfig(
-                num_clusters=-1, threshold=CLUSTER_THRESHOLD
-            ),
-            min_duration_on=0.3,
-            min_duration_off=0.5,
-        )
-        self._diarizer = sherpa_onnx.OfflineSpeakerDiarization(config)
-        return self._diarizer
 
     # --------------------------------------------------------------- steps
 
@@ -251,13 +257,36 @@ class LocalSpeechToText:
         ]
         return language, words
 
-    def _separate(self, audio: np.ndarray) -> list[Turn]:
-        diarizer = self._load_diarizer()
-        if diarizer is None:
+    def _start_separation(self, audio_path: str) -> subprocess.Popen | None:
+        """Start speaker separation in a separate process (see diarize_worker.py); it runs while the
+        words are transcribed, so the two do not add up."""
+        if self._models.diarization_dir is None or self._models.ffmpeg is None:
             logger.warning("speaker_models_missing: every word is attributed to speaker 1")
+            return None
+        command = [
+            sys.executable,
+            "-m",
+            "nodo_api.adapters.local.diarize_worker",
+            str(audio_path),
+            self._models.ffmpeg,
+            str(self._models.diarization_dir),
+        ]
+        return subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    @staticmethod
+    def _finish_separation(process: subprocess.Popen | None) -> list[Turn]:
+        if process is None:
             return []
-        result = diarizer.process(audio).sort_by_start_time()
-        return [Turn(r.start, r.end, r.speaker) for r in result]
+        output, _ = process.communicate(timeout=SEPARATION_TIMEOUT_SECONDS)
+        if process.returncode != 0:
+            logger.warning("speaker_separation_failed code=%s", process.returncode)
+            return []  # one speaker beats losing the transcript
+        return [Turn(start, end, speaker) for start, end, speaker in json.loads(output)]
 
     # ----------------------------------------------------------------- port
 
@@ -265,7 +294,13 @@ class LocalSpeechToText:
         self, audio_url: str, candidate_locales: tuple[str, ...]
     ) -> tuple[SpokenPhrase, ...]:
         audio = decode_audio(audio_url, self._models.ffmpeg)
-        with self._arbiter.lease("speech"):
-            language, words = self._transcribe(audio, candidate_locales)
-        turns = self._separate(audio)
+        separation = self._start_separation(audio_url)
+        try:
+            with self._arbiter.lease("speech"):
+                language, words = self._transcribe(audio, candidate_locales)
+            turns = self._finish_separation(separation)
+        except BaseException:
+            if separation is not None and separation.poll() is None:
+                separation.kill()
+            raise
         return build_phrases(assign_speakers(words, turns), language)

@@ -1,10 +1,13 @@
 import { useRouter } from 'expo-router';
 import { Check, Info, Microphone, Pause, Play, Stop, Warning } from '@/ui/icons';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, View } from 'react-native';
 
 import { formatClock } from '@/i18n/format';
+import { useConnection } from '@/connection/ConnectionProvider';
+import { useRepository } from '@/data/RepositoryProvider';
+import type { MeetingState } from '@/data/types';
 import { usePrefs, type RetentionDays } from '@/prefs/PrefsProvider';
 import { useTheme } from '@/theme/ThemeProvider';
 import { fonts, space, touch } from '@/theme/tokens';
@@ -15,10 +18,18 @@ import { Surface } from '@/ui/Surface';
 import { Text } from '@/ui/Text';
 
 import { LevelBars } from './LevelBars';
-import { useSimulatedRecorder } from './useSimulatedRecorder';
+import { useSimulatedRecorder, type Recorder } from './useSimulatedRecorder';
+import { useWebRecorder } from './webRecorder';
 
 const RETENTION_OPTIONS: RetentionDays[] = [7, 30, 90];
 const PIPELINE = ['upload', 'transcribe', 'extract', 'review', 'ready'] as const;
+const STEP_OF_STATE = {
+  uploading: 'upload',
+  transcribing: 'transcribe',
+  extracting: 'extract',
+  review: 'review',
+  ready: 'ready',
+} as const;
 
 function SimulationNotice() {
   const { t } = useTranslation();
@@ -107,7 +118,7 @@ function Attestation({ onStart }: { onStart: () => void }) {
   );
 }
 
-function Recording({ recorder }: { recorder: ReturnType<typeof useSimulatedRecorder> }) {
+function Recording({ recorder, real }: { recorder: Recorder; real: boolean }) {
   const { t } = useTranslation();
   const paused = recorder.state === 'paused';
   return (
@@ -121,7 +132,7 @@ function Recording({ recorder }: { recorder: ReturnType<typeof useSimulatedRecor
       >
         {formatClock(recorder.seconds)}
       </Text>
-      <LevelBars active={!paused} />
+      <LevelBars active={!paused} level={real ? recorder.level : undefined} />
       <View style={{ flexDirection: 'row', gap: space[3], alignSelf: 'stretch' }}>
         <View style={{ flex: 1 }}>
           <Button
@@ -140,25 +151,67 @@ function Recording({ recorder }: { recorder: ReturnType<typeof useSimulatedRecor
   );
 }
 
-function Saved({ onDone }: { onDone: () => void }) {
+type PipelineState = 'uploading' | MeetingState | 'error';
+
+function Processing({
+  state,
+  progress,
+  meetingId,
+  onRetry,
+  onOpen,
+}: {
+  state: PipelineState;
+  progress: number;
+  meetingId?: string;
+  onRetry(): void;
+  onOpen(): void;
+}) {
   const { t } = useTranslation();
+  const { colors } = useTheme();
+  const current = state === 'error' || state === 'failed' ? -1 : PIPELINE.indexOf(STEP_OF_STATE[state]);
+  const canOpen = state === 'review' || state === 'ready';
   return (
     <>
-      <Surface tone="accent">
-        <Text variant="title">{t('capture.saved.title')}</Text>
-        <Text tone="muted">{t('capture.saved.body')}</Text>
+      <Surface tone={state === 'error' || state === 'failed' ? undefined : 'accent'}>
+        <Text variant="title">
+          {t(state === 'error' || state === 'failed' ? 'capture.processing.failedTitle' : 'capture.saved.title')}
+        </Text>
+        <Text tone="muted">
+          {t(state === 'error' || state === 'failed' ? 'capture.processing.failedBody' : 'capture.saved.body')}
+        </Text>
+        {state === 'uploading' ? (
+          <View style={{ gap: space[2] }}>
+            <View style={{ height: 6, backgroundColor: colors.border, borderRadius: 999, overflow: 'hidden' }}>
+              <View
+                style={{ width: `${Math.round(progress * 100)}%`, height: '100%', backgroundColor: colors.accent }}
+              />
+            </View>
+            <Text variant="small" tone="muted">
+              {t('capture.processing.uploadProgress', { percent: Math.round(progress * 100) })}
+            </Text>
+          </View>
+        ) : null}
       </Surface>
       <View style={{ gap: space[3] }}>
         {PIPELINE.map((step, index) => (
           <View key={step} style={{ flexDirection: 'row', gap: space[3], alignItems: 'center' }}>
-            <Text variant="mono" tone="muted" style={{ width: 20 }}>
-              {index + 1}
-            </Text>
+            <View style={{ width: 20 }}>
+              {index < current ? (
+                <Check size={18} color={colors.accent} weight="bold" />
+              ) : (
+                <Text variant="mono" tone={index === current ? 'accent' : 'muted'}>
+                  {index + 1}
+                </Text>
+              )}
+            </View>
             <Text>{t(`capture.steps.${step}`)}</Text>
           </View>
         ))}
       </View>
-      <Button label={t('common.done')} onPress={onDone} fullWidth />
+      {state === 'error' || state === 'failed' ? (
+        <Button label={t('common.retry')} onPress={onRetry} fullWidth />
+      ) : null}
+      {canOpen && meetingId ? <Button label={t('capture.processing.openMeeting')} onPress={onOpen} fullWidth /> : null}
     </>
   );
 }
@@ -166,7 +219,43 @@ function Saved({ onDone }: { onDone: () => void }) {
 export default function CaptureScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const recorder = useSimulatedRecorder();
+  const repository = useRepository();
+  const { locale, retentionDays } = usePrefs();
+  const { connection } = useConnection();
+  const simulated = useSimulatedRecorder();
+  const web = useWebRecorder();
+  const real = connection.mode !== 'mock' && typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+  const recorder = real ? web : simulated;
+  const [pipeline, setPipeline] = useState<PipelineState>('uploading');
+  const [progress, setProgress] = useState(0);
+  const [meetingId, setMeetingId] = useState<string>();
+
+  const processAudio = useCallback(
+    async (retry = false) => {
+      if (!recorder.audio) return;
+      await Promise.resolve(); // state is set after the effect that started this has finished
+      setPipeline('uploading');
+      setProgress(0);
+      try {
+        const id = retry && meetingId ? meetingId : (await repository.createMeeting({ locale, retentionDays })).id;
+        setMeetingId(id);
+        await repository.uploadAudio(id, recorder.audio, setProgress);
+        for (;;) {
+          const state = await repository.getMeetingState(id);
+          setPipeline(state);
+          if (state === 'ready' || state === 'review' || state === 'failed') break;
+          await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+        }
+      } catch {
+        setPipeline('error');
+      }
+    },
+    [locale, meetingId, recorder.audio, repository, retentionDays],
+  );
+
+  useEffect(() => {
+    if (recorder.state === 'saved' && recorder.audio && !meetingId) queueMicrotask(() => void processAudio());
+  }, [meetingId, processAudio, recorder.audio, recorder.state]);
 
   // The focused Start button disappears when recording starts, so announce each state change.
   useEffect(() => {
@@ -175,16 +264,38 @@ export default function CaptureScreen() {
       recording: t('capture.state.recording'),
       paused: t('capture.state.paused'),
       saved: t('capture.saved.title'),
+      requesting: t('capture.state.requesting'),
+      error: recorder.error ? t(`capture.errors.${recorder.error}`) : t('capture.errors.recorder'),
     }[recorder.state];
     if (message) AccessibilityInfo.announceForAccessibility(message);
-  }, [recorder.state, t]);
+  }, [recorder.error, recorder.state, t]);
 
   return (
     <Screen back title={t('capture.title')} bottomInset>
-      <SimulationNotice />
+      {!real ? <SimulationNotice /> : null}
       {recorder.state === 'idle' ? <Attestation onStart={recorder.start} /> : null}
-      {recorder.state === 'recording' || recorder.state === 'paused' ? <Recording recorder={recorder} /> : null}
-      {recorder.state === 'saved' ? <Saved onDone={() => router.replace('/')} /> : null}
+      {recorder.state === 'requesting' ? <Text tone="muted">{t('capture.state.requesting')}</Text> : null}
+      {recorder.state === 'error' ? (
+        <Surface tone="warning">
+          <Text variant="heading" tone="warning">
+            {t('capture.errors.title')}
+          </Text>
+          <Text>{t(`capture.errors.${recorder.error ?? 'recorder'}`)}</Text>
+          <Button label={t('common.retry')} onPress={() => void recorder.start()} />
+        </Surface>
+      ) : null}
+      {recorder.state === 'recording' || recorder.state === 'paused' ? (
+        <Recording recorder={recorder} real={real} />
+      ) : null}
+      {recorder.state === 'saved' ? (
+        <Processing
+          state={pipeline}
+          progress={progress}
+          meetingId={meetingId}
+          onRetry={() => void processAudio(true)}
+          onOpen={() => router.replace(`/meeting/${meetingId}`)}
+        />
+      ) : null}
     </Screen>
   );
 }

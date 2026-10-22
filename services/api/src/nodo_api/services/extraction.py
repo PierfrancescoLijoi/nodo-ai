@@ -7,6 +7,8 @@ Azure path (a large context) behaves exactly as before."""
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
@@ -16,13 +18,16 @@ from nodo_api.domain.graph import (
     ExtractedEntity,
     ExtractedRelation,
     Extraction,
+    ExtractionError,
     normalize_label,
 )
 from nodo_api.domain.models import Locale, TranscriptSegment
 from nodo_api.ports import Extractor
 
+logger = logging.getLogger("nodo_extraction")
+MAX_SPLITS = 3  # a window that still fails after being halved this many times is skipped
 CHARS_PER_TOKEN = 3.0  # conservative for Polish and Danish, which tokenize into more pieces
-MAX_SUMMARY_PARTS = 4
+MAX_SUMMARY_SENTENCES = 3
 SUMMARY_LIMIT = 700
 
 
@@ -41,6 +46,25 @@ def windows(
         groups[-1].append(segment)
         used += size
     return [tuple(g) for g in groups if g]
+
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def _summary(parts: Sequence[str]) -> str:
+    """The first distinct sentences of the windows' summaries, whole sentences only. Windows of one
+    meeting repeat each other, and cutting at a character count ends in the middle of a word."""
+    chosen: list[str] = []
+    seen: set[str] = set()
+    for text in parts:
+        for sentence in _SENTENCE_END.split(text.strip()):
+            key = normalize_label(sentence)
+            if key and key not in seen and len(" ".join([*chosen, sentence])) <= SUMMARY_LIMIT:
+                seen.add(key)
+                chosen.append(sentence)
+            if len(chosen) == MAX_SUMMARY_SENTENCES:
+                return " ".join(chosen)
+    return " ".join(chosen)
 
 
 def merge(parts: Sequence[Extraction]) -> Extraction:
@@ -79,12 +103,17 @@ def merge(parts: Sequence[Extraction]) -> Extraction:
                     confidence=max(known.confidence, rel.confidence),
                     evidence=tuple(dict.fromkeys((*known.evidence, *rel.evidence))),
                 )
-    summaries = [p.summary.strip() for p in parts if p.summary.strip()]
-    summary = " ".join(summaries[:MAX_SUMMARY_PARTS])[:SUMMARY_LIMIT]
+    summary = _summary([p.summary for p in parts])
     return Extraction(summary, tuple(canonical.values()), tuple(relations.values()))
 
 
 class ChunkedExtractor:
+    """Cuts a long transcript into windows, and a window the model can not answer into halves.
+
+    A model that fails on one dense stretch must not cost the whole meeting: the stretch is split
+    and retried, and only if halves keep failing is it left out (with a warning). If nothing at all
+    could be extracted the error is raised, so the job is retried instead of finishing empty."""
+
     def __init__(self, inner: Extractor, max_tokens: int) -> None:
         self._inner = inner
         self._max_tokens = max_tokens
@@ -96,7 +125,26 @@ class ChunkedExtractor:
         known_decisions: tuple[Entity, ...],
         speakers: Mapping[str, str] | None = None,
     ) -> Extraction:
-        parts = windows(segments, self._max_tokens)
-        if len(parts) <= 1:
-            return self._inner.extract(segments, locale, known_decisions, speakers)
-        return merge([self._inner.extract(p, locale, known_decisions, speakers) for p in parts])
+        parts = [
+            self._window(p, locale, known_decisions, speakers, 0)
+            for p in windows(segments, self._max_tokens)
+        ]
+        done = [p for p in parts if p is not None]
+        if not done:
+            raise ExtractionError("No part of the transcript could be extracted")
+        return done[0] if len(parts) == 1 else merge(done)
+
+    def _window(self, window, locale, known, speakers, depth) -> Extraction | None:
+        try:
+            return self._inner.extract(window, locale, known, speakers)
+        except ExtractionError:
+            if len(window) < 2 or depth >= MAX_SPLITS:
+                logger.warning("extraction_window_skipped segments=%s depth=%s", len(window), depth)
+                return None
+        middle = len(window) // 2
+        halves = [
+            self._window(half, locale, known, speakers, depth + 1)
+            for half in (window[:middle], window[middle:])
+        ]
+        done = [h for h in halves if h is not None]
+        return merge(done) if done else None

@@ -360,3 +360,35 @@ def test_the_worker_thread_picks_up_a_job_by_itself(db) -> None:
         loop.stop()
     assert recorder.seen == [("transcribe", "m1")]
     assert json.loads(json.dumps({"ok": True}))["ok"]
+
+
+# --- the embedding model ---------------------------------------------------------------------
+
+
+def test_a_missing_embedding_model_is_reported_not_crashed_on(tmp_path) -> None:
+    from nodo_api.adapters.local.embedder import LocalEmbedder
+    from nodo_api.errors import ModelUnavailable
+
+    assert not LocalEmbedder.installed(None) and not LocalEmbedder.installed(tmp_path)
+    with pytest.raises(ModelUnavailable):
+        LocalEmbedder(tmp_path).embed_query("anything")
+
+
+def test_the_installed_embedding_model_embeds_with_unit_length_vectors() -> None:
+    import os
+
+    import numpy as np
+
+    from nodo_api.adapters.local.embedder import LocalEmbedder, onnx_folder
+    from nodo_api.adapters.local.models import data_dir
+
+    folder = onnx_folder(data_dir() / "models")
+    if os.environ.get("NODO_TEST_LOCAL_MODELS") != "1" or not LocalEmbedder.installed(folder):
+        pytest.skip("the embedding model is not installed here")
+    embedder = LocalEmbedder(folder)
+    vectors = np.array(embedder.embed_passages(["una frase", "another sentence"]))
+    assert vectors.shape == (2, 768)
+    assert np.allclose(np.linalg.norm(vectors, axis=1), 1.0, atol=1e-4)
+    close = float(np.dot(vectors[0], np.array(embedder.embed_query("una frase"))[0]))
+    far = float(np.dot(vectors[1], np.array(embedder.embed_query("una frase"))[0]))
+    assert close > far
