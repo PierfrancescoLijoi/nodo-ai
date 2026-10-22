@@ -1,0 +1,5 @@
+fastapi<0.160,>=0.159
+pydantic<3,>=2.14
+pydantic-settings<3,>=2
+PyJWT[crypto]<3,>=2
+uvicorn<1,>=0.30
