@@ -20,3 +20,5 @@ graphify-out/
 tmp/
 apps/mobile/.claude/
 coverage/
+*.egg-info/
+.coverage
