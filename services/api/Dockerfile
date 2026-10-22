@@ -10,8 +10,15 @@ RUN python -m venv "$VIRTUAL_ENV"
 COPY pyproject.toml ./
 COPY src ./src
 
+# Package tooling is not needed at run time, and its bundled libraries are flagged by scanners,
+# so it is removed from the venv after the install.
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir ".[azure]"
+    && python -m pip install --no-cache-dir ".[azure]" \
+    && rm -rf /opt/venv/lib/python3.13/site-packages/pip \
+              /opt/venv/lib/python3.13/site-packages/pip-* \
+              /opt/venv/lib/python3.13/site-packages/setuptools* \
+              /opt/venv/lib/python3.13/site-packages/wheel* \
+              /opt/venv/bin/pip*
 
 FROM python:3.13-slim-bookworm AS runtime
 
@@ -20,8 +27,8 @@ ENV VIRTUAL_ENV=/opt/venv \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Build tooling is not needed at run time; removing it also removes its vulnerabilities.
-RUN python -m pip uninstall -y setuptools wheel 2>/dev/null; python -m pip install --no-cache-dir --upgrade pip
+# The base image ships its own pip and setuptools; the application does not use them.
+RUN python -m pip uninstall -y pip setuptools wheel
 
 RUN groupadd --gid 10001 nodo \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin nodo
