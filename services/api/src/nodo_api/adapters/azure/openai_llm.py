@@ -61,9 +61,13 @@ def _unanswerable() -> Any:
 
 
 class AzureOpenAiLlm:
-    def __init__(self, client: Any, deployment: str) -> None:
+    """Works against any server that speaks the OpenAI chat API (Azure OpenAI, llama.cpp);
+    `options` are extra request fields such as temperature or a chat template switch."""
+
+    def __init__(self, client: Any, deployment: str, options: dict[str, Any] | None = None) -> None:
         self._client = client
         self._deployment = deployment
+        self._options = options or {}
 
     def answer(
         self,
@@ -88,6 +92,7 @@ class AzureOpenAiLlm:
                 "type": "json_schema",
                 "json_schema": {"name": "grounded_answer", "strict": True, "schema": ANSWER_SCHEMA},
             },
+            **self._options,
         )
         return self._parse(response.choices[0].message.content, evidence)
 

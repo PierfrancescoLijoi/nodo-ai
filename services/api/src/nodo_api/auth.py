@@ -24,8 +24,18 @@ class Principal:
     workspace_id: str
 
 
+LOCAL_USER = "local-user"
+LOCAL_WORKSPACE = "local"
+
+
 class DevAuthenticator:
     def __init__(self, settings: Settings) -> None:
+        if settings.auth_mode == "local":  # one person, one secret per launch (ADR-014)
+            assert settings.local_token is not None
+            self._tokens = {
+                settings.local_token.get_secret_value(): Principal(LOCAL_USER, LOCAL_WORKSPACE)
+            }
+            return
         self._tokens = {
             settings.dev_token: Principal(settings.dev_user_id, settings.dev_workspace_id)
         }
@@ -90,7 +100,8 @@ class AuthManager:
         settings: Settings,
         key_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
-        if settings.auth_mode == "dev":
+        self._settings_mode_local = settings.auth_mode == "local"
+        if settings.auth_mode in ("dev", "local"):
             self._authenticator = DevAuthenticator(settings)
         else:
             if key_provider is None:
@@ -101,6 +112,6 @@ class AuthManager:
         return self._authenticator.authenticate(token)
 
     def add_dev_token(self, token: str, user_id: str, workspace_id: str) -> None:
-        if not isinstance(self._authenticator, DevAuthenticator):
-            raise AuthError("Dev tokens are disabled in oidc mode")
+        if not isinstance(self._authenticator, DevAuthenticator) or self._settings_mode_local:
+            raise AuthError("Dev tokens are disabled in this mode")
         self._authenticator.add_dev_token(token, user_id, workspace_id)

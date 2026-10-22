@@ -1,6 +1,6 @@
 """Build the test corpus: one WAV per conversation plus a JSON with the exact reference.
 
-    python tools/speech-bench/make_corpus.py [out_dir]
+    python tools/speech-bench/make_corpus.py [out_dir] [--two-voices]
 
 Windows only (SAPI voices installed on the machine). Output is 16 kHz mono PCM, 0.5 s of silence
 between turns, and `<lang>.json` with the reference text and the true speaker turns.
@@ -14,7 +14,7 @@ import sys
 import wave
 from pathlib import Path
 
-from conversations import CONVERSATIONS
+from conversations import CONVERSATIONS, TWO_VOICES
 
 RATE = 16000
 # Passed with -Command (not as a script file) so the machine's script execution policy is untouched.
@@ -37,10 +37,11 @@ def read_wav(path: Path) -> bytes:
 
 def main() -> None:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "tmp/speech-bench")
+    conversations = TWO_VOICES if "--two-voices" in sys.argv else CONVERSATIONS
     work = out / "turns"
     work.mkdir(parents=True, exist_ok=True)
     jobs = []
-    for lang, conv in CONVERSATIONS.items():
+    for lang, conv in conversations.items():
         for index, (speaker, text) in enumerate(conv["turns"]):
             jobs.append(
                 {
@@ -58,7 +59,7 @@ def main() -> None:
     )
 
     gap = b"\x00\x00" * int(RATE * GAP_SECONDS)
-    for lang, conv in CONVERSATIONS.items():
+    for lang, conv in conversations.items():
         pcm, cursor, turns = bytearray(), 0.0, []
         for index, (speaker, text) in enumerate(conv["turns"]):
             audio = read_wav(work / f"{lang}-{index:02d}.wav")

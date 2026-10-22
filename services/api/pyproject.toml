@@ -40,6 +40,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "nodo_api.migrations" = ["*.sql"]
+"nodo_api.adapters.local" = ["schema/*.sql"]
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers"
@@ -65,5 +66,6 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 # Long SQL statements read better unbroken.
 "src/nodo_api/adapters/azure/graph_pg.py" = ["E501"]
+"src/nodo_api/adapters/local/*.py" = ["E501"]
 "scripts/bench_*.py" = ["E501", "B023"]
 

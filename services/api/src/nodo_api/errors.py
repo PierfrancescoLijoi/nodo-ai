@@ -22,6 +22,14 @@ class ConflictError(NodoError):
     public_message = "Request conflicts with current state"
 
 
+class ModelUnavailable(NodoError):
+    """A local model the request needs is not installed or could not start."""
+
+    code = "model_unavailable"
+    status_code = 503
+    public_message = "A local model needed for this request is not available"
+
+
 class ValidationFailed(NodoError):
     code = "validation_error"
     status_code = 422

@@ -124,12 +124,46 @@ class MeetingService:
         if payload.get("retention_policy_id") not in self._retention_policies:
             raise ValidationFailed
 
-    def _attestation(
-        self, workspace_id: str, user_id: str, meeting_id: str, payload: dict[str, Any]
+    def attest_import(
+        self,
+        workspace_id: str,
+        user_id: str,
+        meeting_id: str,
+        original: dict[str, Any],
+        source_event_id: str,
+        source_signature: str,
     ) -> RecordingAttestation:
-        acknowledged_at = datetime.now(UTC)
+        """Sign, with this deployment's key, the attestation a local copy carried. The original
+        acknowledgement time is kept; the original signature (made with another key that this
+        deployment can not check) is recorded by hash in the audit event, not trusted."""
+        self._validate_attestation({**original, "acknowledged": True})
+        return self._attestation(
+            workspace_id,
+            user_id,
+            meeting_id,
+            original,
+            acknowledged_at=original["acknowledged_at"],
+            event="meeting_imported",
+            extra={
+                "source_event_id": source_event_id[:128],
+                "source_signature_sha256": hashlib.sha256(source_signature.encode()).hexdigest(),
+            },
+        )
+
+    def _attestation(
+        self,
+        workspace_id: str,
+        user_id: str,
+        meeting_id: str,
+        payload: dict[str, Any],
+        *,
+        acknowledged_at: datetime | None = None,
+        event: str = "recording_attested",
+        extra: dict[str, str] | None = None,
+    ) -> RecordingAttestation:
+        acknowledged_at = acknowledged_at or datetime.now(UTC)
         audit_id = self._audit.append(
-            workspace_id, "recording_attested", {"user_id": user_id, "meeting_id": meeting_id}
+            workspace_id, event, {"user_id": user_id, "meeting_id": meeting_id, **(extra or {})}
         )
         locale = Locale(payload["locale"])
         signed = {
@@ -237,9 +271,13 @@ class MeetingService:
         self._audit.append(
             workspace_id, "speaker_named", {"meeting_id": meeting_id, "speaker_id": speaker_id}
         )
-        digest = hashlib.sha256(json.dumps(updated.speaker_names).encode()).hexdigest()[:16]
+        # A fresh key per change: renaming back to an earlier name set must still rebuild the graph,
+        # which a key derived from the names would suppress as a duplicate of the old job.
         self._jobs.publish_once(
-            workspace_id, f"{meeting_id}:speakers:{digest}", "reanalyze", {"meeting_id": meeting_id}
+            workspace_id,
+            f"{meeting_id}:speakers:{uuid4().hex}",
+            "reanalyze",
+            {"meeting_id": meeting_id},
         )
         return updated
 

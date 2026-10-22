@@ -318,6 +318,87 @@ def test_the_http_api_works_end_to_end_on_postgres(db, monkeypatch) -> None:
         assert client.delete(f"/v1/meetings/{meeting_id}", headers=headers).status_code == 204
 
 
+def test_a_local_archive_is_copied_into_postgres_and_a_second_copy_changes_nothing(
+    db, monkeypatch, tmp_path
+) -> None:
+    """The cloud side of ADR-015 on the real database: repositories, graph reviews, constraints."""
+    from fastapi.testclient import TestClient
+
+    from nodo_api import bootstrap
+    from nodo_api.config import Settings
+    from nodo_api.main import create_app
+    from tests import test_local_app as local
+    from tests.test_local_sync import _Borrowed
+
+    memory = bootstrap.memory_adapters(
+        Settings(environment="test", auth_mode="dev", attestation_hmac_key="x" * 20)
+    )
+    pg = bootstrap.Adapters(
+        meetings=PgMeetingRepository(db),
+        transcripts=PgTranscriptRepository(db),
+        blobs=memory.blobs,
+        jobs=memory.jobs,
+        retriever=memory.retriever,
+        graph=PgGraphStore(db),
+        llm=memory.llm,
+        audit=PgAuditLog(db),
+        speech=memory.speech,
+        extractor=memory.extractor,
+    )
+    cloud_settings = Settings(
+        environment="test",
+        auth_mode="dev",
+        dev_token="sync-token-0123456789",
+        dev_user_id="alice",
+        dev_workspace_id=A,
+        attestation_hmac_key="sync-attestation-key-0123456789",
+    )
+    monkeypatch.setattr("nodo_api.main.build_adapters", lambda settings: pg)
+    cloud_app = create_app(cloud_settings)
+    monkeypatch.undo()  # the local engine below builds its own adapters
+
+    local_app = local.create_app(local._settings(tmp_path))
+    container = local_app.state.container
+    from nodo_api.adapters.memory import MemorySpeech
+    from nodo_api.adapters.memory.extractor import KeywordExtractor
+    from nodo_api.services.ingestion import IngestionService
+    from nodo_api.worker import Worker
+    from tests.test_local_adapters import HashEmbedder
+
+    container.retriever._embedder = HashEmbedder()
+    container.runtime.loop._worker = Worker(
+        IngestionService(
+            container.meetings,
+            container.transcripts,
+            container.blobs,
+            container.retriever,
+            MemorySpeech(),
+            ("en-GB",),
+            KeywordExtractor(),
+            container.graph,
+        )
+    )
+    container.runtime.start = lambda: None
+    with TestClient(local_app) as local_client, TestClient(cloud_app) as cloud_client:
+        meeting_id = local._record(local_client)
+        container.runtime.loop.run_pending()
+        sync = container.runtime.sync
+        sync._http = lambda: _Borrowed(cloud_client)
+        first = sync.run("http://127.0.0.1:9", "sync-token-0123456789")
+        assert (first.pushed, first.failed) == (1, [])
+        again = sync.run("http://127.0.0.1:9", "sync-token-0123456789", force=True)
+        assert (again.pushed, again.failed) == (1, [])  # sent again: still one meeting
+        headers = {"Authorization": "Bearer sync-token-0123456789"}
+        copied = cloud_client.get(f"/v1/meetings/{meeting_id}", headers=headers).json()
+        here = local_client.get(f"/v1/meetings/{meeting_id}", headers=local.HEADERS).json()
+        assert copied["state"] == here["state"] and len(copied["speakers"]) == 2
+        assert {p["label"] for p in copied["insights"]["people"]} == {
+            p["label"] for p in here["insights"]["people"]
+        }
+        listed = cloud_client.get("/v1/meetings", headers=headers).json()["items"]
+        assert [m["id"] for m in listed].count(meeting_id) == 1
+
+
 from tests.graph_contract import GraphContract  # noqa: E402
 
 

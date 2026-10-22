@@ -160,3 +160,21 @@ def test_the_summary_is_trimmed_and_capped() -> None:
 
 def test_validation_never_raises_on_empty_input() -> None:
     assert clean() == Extraction("summary", (), ())
+
+
+def test_diarization_labels_are_not_people() -> None:
+    raw = Extraction(
+        "",
+        (
+            ExtractedEntity("a", EntityType.PERSON, "S1", ("seg-1",)),
+            ExtractedEntity("b", EntityType.PERSON, "s12", ("seg-1",)),
+            ExtractedEntity("c", EntityType.PERSON, "Sara", ("seg-1",)),
+            ExtractedEntity("d", EntityType.TOPIC, "S1", ("seg-1",)),
+        ),
+        (),
+    )
+    kept = validate_extraction(raw, frozenset({"seg-1"}))
+    assert [(e.type, e.label) for e in kept.entities] == [
+        (EntityType.PERSON, "Sara"),
+        (EntityType.TOPIC, "S1"),
+    ]

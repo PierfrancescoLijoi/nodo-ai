@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
@@ -20,6 +21,7 @@ from nodo_api.bootstrap import build_adapters
 from nodo_api.config import Settings
 from nodo_api.errors import NodoError
 from nodo_api.services import EvidenceValidator, GraphService, MeetingService, QueryService
+from nodo_api.services.sync_import import SyncImportService
 
 logger = logging.getLogger("nodo_api")
 
@@ -41,6 +43,20 @@ class AppContainer:
     meeting_service: MeetingService
     query_service: QueryService
     graph_service: GraphService
+    sync_import: SyncImportService
+    runtime: Any = None
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    runtime = app.state.container.runtime
+    if runtime is not None:
+        runtime.start()
+    try:
+        yield
+    finally:
+        if runtime is not None:
+            runtime.stop()
 
 
 def create_app(
@@ -48,7 +64,7 @@ def create_app(
     oidc_key_provider: Callable[[], dict[str, Any]] | None = None,
 ) -> FastAPI:
     effective_settings = settings or Settings()
-    app = FastAPI(title="NODO AI API", version="0.1.0")
+    app = FastAPI(title="NODO AI API", version="0.1.0", lifespan=_lifespan)
     app.state.container = _container(effective_settings, oidc_key_provider)
     app.include_router(router)
     _configure_cors(app, effective_settings)
@@ -62,6 +78,14 @@ def create_app(
     @app.get("/readyz", include_in_schema=False)
     def readiness() -> dict[str, str]:
         return {"status": "ready"}
+
+    if effective_settings.backend == "local":
+        from nodo_api.api import local
+
+        app.include_router(local.router)
+        web = effective_settings.local_web_dir
+        if web is not None and web.is_dir():
+            local.mount_web(app, web)  # last: it matches everything the API did not
 
     return app
 
@@ -102,6 +126,8 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         meeting_service,
         query_service,
         GraphService(a.graph),
+        SyncImportService(a.meetings, a.transcripts, a.retriever, a.graph, meeting_service),
+        a.runtime,
     )
 
 

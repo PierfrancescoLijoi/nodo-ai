@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     environment: Literal["dev", "test", "prod"] = "prod"
     # The worker and the admin job never authenticate end users, so they do not need OIDC settings.
     service: Literal["api", "worker", "admin"] = "api"
-    auth_mode: Literal["dev", "oidc"] = "oidc"
+    auth_mode: Literal["dev", "oidc", "local"] = "oidc"
     dev_token: str = Field(default="dev-only-change-me", min_length=16, repr=False)
     dev_user_id: str = "dev-user"
     dev_workspace_id: str = "dev-workspace"
@@ -38,7 +39,18 @@ class Settings(BaseSettings):
     cors_origins: tuple[str, ...] = ()
 
     # Azure backend (ADR-010). backend=memory keeps the in-memory adapters for tests.
-    backend: Literal["memory", "azure"] = "memory"
+    backend: Literal["memory", "azure", "local"] = "memory"
+    # Local backend (ADR-014): everything on this computer. auth_mode=local accepts one secret
+    # token, generated at every start by the desktop shell, and the server listens on loopback.
+    local_token: SecretStr | None = Field(default=None, repr=False)
+    local_data_dir: Path | None = None
+    local_models_dir: Path | None = None
+    local_web_dir: Path | None = None  # the exported web app, served by the engine itself
+    local_public_url: str = "http://127.0.0.1:8765"
+    local_llm_context: int = Field(default=16384, ge=2048, le=131072)
+    local_extract_window_tokens: int = Field(default=6000, ge=500, le=100000)
+    local_search_margin: float = Field(default=0.035, ge=0.0, le=0.5)
+
     azure_storage_account: str | None = None
     azure_servicebus_fqdn: str | None = None
     azure_servicebus_queue: str = "ingest"
@@ -73,6 +85,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_environment(self) -> Settings:
         development = self.environment in NON_PRODUCTION
+        if self.auth_mode == "local":
+            self._validate_local()
+        elif self.backend == "local":
+            raise ValueError("The local backend requires auth_mode=local")
         if self.auth_mode == "dev" and not development:
             raise ValueError("Dev auth requires NODO_ENVIRONMENT to be dev or test")
         if self.seed_demo_data and not development:
@@ -90,6 +106,19 @@ class Settings(BaseSettings):
                 "characters is required outside dev and test"
             )
         return self
+
+    def _validate_local(self) -> None:
+        if self.backend != "local":
+            raise ValueError("auth_mode=local is only for the local backend")
+        if (
+            self.local_token is None
+            or len(self.local_token.get_secret_value()) < MIN_PRODUCTION_KEY_LENGTH
+        ):
+            raise ValueError(
+                f"NODO_LOCAL_TOKEN must be at least {MIN_PRODUCTION_KEY_LENGTH} characters"
+            )
+        if not self.local_public_url.startswith("http://127.0.0.1:"):
+            raise ValueError("The local engine is only reachable on 127.0.0.1")
 
     def _validate_oidc(self) -> None:
         if not self.oidc_issuer or not self.oidc_audience:

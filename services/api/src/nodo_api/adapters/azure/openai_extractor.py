@@ -155,9 +155,10 @@ def parse_extraction(content: str | None, segments: tuple[TranscriptSegment, ...
 
 
 class AzureOpenAiExtractor:
-    def __init__(self, client: Any, deployment: str) -> None:
+    def __init__(self, client: Any, deployment: str, options: dict[str, Any] | None = None) -> None:
         self._client = client
         self._deployment = deployment
+        self._options = options or {}
 
     def extract(
         self,
@@ -183,6 +184,7 @@ class AzureOpenAiExtractor:
                     "schema": EXTRACTION_SCHEMA,
                 },
             },
+            **self._options,
         )
         return parse_extraction(response.choices[0].message.content, segments)
 

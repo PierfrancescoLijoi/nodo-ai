@@ -245,3 +245,10 @@ def test_http_rejects_unsafe_names_and_foreign_meetings(app, client, auth_header
         json={"name": "Sara"},
     )
     assert other.status_code == 404
+
+
+def test_renaming_back_to_an_earlier_name_still_rebuilds_the_graph(app, attestation) -> None:
+    container, meeting, _ = _processed(app, attestation)
+    for name in ("Sara", "Sofia", "Sara"):
+        container.meeting_service.name_speaker(WORKSPACE, USER, meeting.id, "S1", name)
+    assert len([k for k in container.jobs._jobs if k[2] == "reanalyze"]) == 3

@@ -26,6 +26,7 @@ class Adapters:
     audit: Any
     speech: Any
     extractor: Any
+    runtime: Any = None  # the local backend's moving parts (worker thread, model server)
 
 
 @dataclass(slots=True)
@@ -158,7 +159,13 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
 
 
 def build_adapters(settings: Settings) -> Adapters:
-    return azure_adapters(settings) if settings.backend == "azure" else memory_adapters(settings)
+    if settings.backend == "azure":
+        return azure_adapters(settings)
+    if settings.backend == "local":
+        from nodo_api.adapters.local.bootstrap import local_adapters
+
+        return local_adapters(settings)
+    return memory_adapters(settings)
 
 
 def build_worker_runtime(settings: Settings) -> WorkerRuntime:

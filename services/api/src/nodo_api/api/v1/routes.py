@@ -34,9 +34,10 @@ from nodo_api.api.v1.schemas import (
     UploadSessionOutput,
     VoiceQueryInput,
 )
+from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
-from nodo_api.errors import AuthenticationError
+from nodo_api.errors import AuthenticationError, ValidationFailed
 from nodo_api.services.query import QueryFilters, QueryRequest
 
 router = APIRouter(prefix="/v1")
@@ -272,3 +273,13 @@ def delete_meeting(meeting_id: str, actor: PrincipalDep, request: Request) -> Re
 def _query_request(question, locale, filters: QueryFiltersInput | None) -> QueryRequest:
     service_filters = QueryFilters(**filters.model_dump()) if filters else None
     return QueryRequest(question, locale, service_filters)
+
+
+@router.put("/sync/meetings/{meeting_id}", response_model=SyncResult)
+def import_meeting(meeting_id: str, package: SyncPackage, actor: PrincipalDep, request: Request):
+    """Copy a meeting from a local engine (ADR-015). Safe to repeat."""
+    if package.meeting_id != meeting_id:
+        raise ValidationFailed
+    return request.app.state.container.sync_import.import_meeting(
+        actor.workspace_id, actor.user_id, package
+    )

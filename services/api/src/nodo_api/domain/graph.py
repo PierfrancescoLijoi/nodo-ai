@@ -8,6 +8,7 @@ duplicate), and what the model proposes is cleaned by `validate_extraction` befo
 
 from __future__ import annotations
 
+import re
 import unicodedata
 import uuid
 from dataclasses import dataclass, field, replace
@@ -136,6 +137,42 @@ class Subgraph:
 
 
 @dataclass(frozen=True, slots=True)
+class ExportedRef:
+    """An endpoint by what it is, not by id: ids differ between workspaces, labels do not.
+    type and label both None means the meeting itself."""
+
+    type: EntityType | None = None
+    label: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExportedEntity:
+    type: EntityType
+    label: str
+    evidence: tuple[str, ...]
+    due_at: datetime | None = None
+    effective_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExportedRelation:
+    source: ExportedRef
+    kind: RelationKind
+    target: ExportedRef
+    confidence: float
+    status: ReviewStatus
+    evidence: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GraphExport:
+    """What one meeting contributed to the graph, including the review decisions on it (ADR-015)."""
+
+    entities: tuple[ExportedEntity, ...] = ()
+    relations: tuple[ExportedRelation, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class MeetingRef:
     id: str
     title: str
@@ -194,6 +231,9 @@ class Change:
     at: datetime | None
 
 
+ANONYMOUS_SPEAKER = re.compile(r"s[0-9]+")
+
+
 def validate_extraction(
     raw: Extraction,
     valid_segment_ids: frozenset[str],
@@ -223,6 +263,8 @@ def _clean_entities(
         evidence = tuple(dict.fromkeys(s for s in item.evidence if s in valid))
         if item.type is EntityType.MEETING or not normalized or not evidence:
             continue
+        if item.type is EntityType.PERSON and ANONYMOUS_SPEAKER.fullmatch(normalized):
+            continue  # "S1" is a diarization label, not someone's name (ADR-004, ADR-013)
         identity = (item.type, normalized)
         if identity in seen or any(e.key == item.key for e in kept):
             continue

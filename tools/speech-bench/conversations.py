@@ -49,3 +49,14 @@ CONVERSATIONS: dict[str, dict] = {
         ],
     },
 }
+
+
+# The same scripts with two genuinely different voices (the English voice reads the Italian
+# script and the other way round). The text is badly pronounced, so this set is only for
+# separating speakers, never for transcription accuracy.
+TWO_VOICES: dict[str, dict] = {
+    "en": {**CONVERSATIONS["en"], "voices": {"A": "Microsoft Zira Desktop", "B": "Microsoft Elsa Desktop"}},
+    "it": {**CONVERSATIONS["it"], "voices": {"A": "Microsoft Elsa Desktop", "B": "Microsoft Zira Desktop"}},
+}
+for _conv in TWO_VOICES.values():
+    _conv.pop("b_pitch", None)
