@@ -12,6 +12,17 @@ updates:
     directory: /apps/mobile
     schedule:
       interval: weekly
+    ignore:
+      # Expo pins matching versions of these per SDK; upgrade them together with `npx expo install --fix`.
+      - dependency-name: expo
+      - dependency-name: expo-*
+      - dependency-name: react
+      - dependency-name: react-dom
+      - dependency-name: react-native
+      - dependency-name: react-native-*
+      # Majors need a deliberate migration (toolchain breaks), not an automatic PR.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker-compose
     directory: /infra/compose
     schedule:
