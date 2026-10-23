@@ -52,6 +52,7 @@ locals {
       NODO_AZURE_SPEECH_ENDPOINT            = local.endpoints[k].speech
       NODO_AZURE_DB_ROLES                   = join(",", [azurerm_user_assigned_identity.workload["api"].name, azurerm_user_assigned_identity.workload["worker"].name])
       NODO_AZURE_RETENTION_ROLES            = azurerm_user_assigned_identity.workload["retention"].name
+      NODO_AZURE_MAINTENANCE_ROLES          = azurerm_user_assigned_identity.workload["maintenance"].name
       NODO_OPENAI_CHAT_DEPLOYMENT           = var.openai_chat_deployment
       NODO_OPENAI_EMBEDDING_DEPLOYMENT      = var.openai_embedding_deployment
       NODO_OPENAI_EMBEDDING_DIMENSIONS      = tostring(var.embedding_dimensions)
@@ -445,6 +446,141 @@ resource "azurerm_container_app_job" "retention" {
           AZURE_CLIENT_ID          = azurerm_user_assigned_identity.workload["retention"].client_id
           NODO_AZURE_POSTGRES_USER = azurerm_user_assigned_identity.workload["retention"].name
         })
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+      env {
+        name        = "NODO_ATTESTATION_HMAC_KEY"
+        secret_name = "attestation-hmac-key"
+      }
+    }
+  }
+
+  depends_on = [azurerm_role_assignment.identity]
+
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+}
+
+# Index maintenance (ADR-021). The weekly run only reads: it compares the search index and the graph
+# with the database and fails when they differ, which raises an alert. The reindex job is started by
+# hand (after an outage, a restore, or in the standby region after a failover; RUNBOOKS.md) with the
+# repair command; its default command is the read-only one, so a stray start changes nothing.
+locals {
+  maintenance_env = {
+    for k in keys(local.stacks) : k => merge(local.common_env[k], {
+      AZURE_CLIENT_ID          = azurerm_user_assigned_identity.workload["maintenance"].client_id
+      NODO_AZURE_POSTGRES_USER = azurerm_user_assigned_identity.workload["maintenance"].name
+    })
+  }
+}
+
+resource "azurerm_container_app_job" "index_verify" {
+  name                         = "caj-${local.name}-index-verify"
+  location                     = azurerm_resource_group.main.location
+  resource_group_name          = azurerm_resource_group.main.name
+  container_app_environment_id = azurerm_container_app_environment.main["primary"].id
+  workload_profile_name        = local.pro ? "Consumption" : null
+  replica_timeout_in_seconds   = 3600
+  replica_retry_limit          = 0
+  tags                         = local.tags
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.workload["maintenance"].id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.workload["maintenance"].id
+  }
+
+  secret {
+    name                = "attestation-hmac-key"
+    key_vault_secret_id = azurerm_key_vault_secret.attestation_key.versionless_id
+    identity            = azurerm_user_assigned_identity.workload["maintenance"].id
+  }
+
+  schedule_trigger_config {
+    cron_expression          = "30 3 * * 0"
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  template {
+    container {
+      name    = "index-verify"
+      image   = var.api_image
+      command = ["python", "-m", "nodo_api.admin", "verify-index"]
+      cpu     = 0.5
+      memory  = "1Gi"
+
+      dynamic "env" {
+        for_each = local.maintenance_env["primary"]
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+      env {
+        name        = "NODO_ATTESTATION_HMAC_KEY"
+        secret_name = "attestation-hmac-key"
+      }
+    }
+  }
+
+  depends_on = [azurerm_role_assignment.identity]
+
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+}
+
+resource "azurerm_container_app_job" "reindex" {
+  for_each                     = local.stacks
+  name                         = "caj-${local.name}-reindex-${each.key}"
+  location                     = each.value.location
+  resource_group_name          = local.rg_names[each.key]
+  container_app_environment_id = azurerm_container_app_environment.main[each.key].id
+  workload_profile_name        = local.pro ? "Consumption" : null
+  replica_timeout_in_seconds   = 14400
+  replica_retry_limit          = 0
+  tags                         = local.tags
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.workload["maintenance"].id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.workload["maintenance"].id
+  }
+
+  secret {
+    name                = "attestation-hmac-key"
+    key_vault_secret_id = azurerm_key_vault_secret.attestation_key.versionless_id
+    identity            = azurerm_user_assigned_identity.workload["maintenance"].id
+  }
+
+  manual_trigger_config {
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  template {
+    container {
+      name    = "reindex"
+      image   = var.api_image
+      command = ["python", "-m", "nodo_api.admin", "verify-index"]
+      cpu     = 1
+      memory  = "2Gi"
+
+      dynamic "env" {
+        for_each = local.maintenance_env[each.key]
         content {
           name  = env.key
           value = env.value

@@ -174,3 +174,27 @@ run "plan_edge_and_gateway_properties" {
     error_message = "both networks can reach the standby queue namespace"
   }
 }
+
+run "plan_index_maintenance" {
+  command = plan
+
+  assert {
+    condition     = contains(keys(azurerm_container_app_job.reindex), "primary") && contains(keys(azurerm_container_app_job.reindex), "dr")
+    error_message = "the standby region can rebuild its own search index after a failover"
+  }
+
+  assert {
+    condition     = azurerm_container_app_job.reindex["dr"].template[0].container[0].command[3] == "verify-index"
+    error_message = "a reindex job started by mistake must only read"
+  }
+
+  assert {
+    condition     = length(azurerm_monitor_scheduled_query_rules_alert_v2.index) == 1
+    error_message = "a drifting index raises an alert"
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.identity["maintenance_search_primary"].role_definition_name == "Search Index Data Contributor"
+    error_message = "maintenance writes to the index it repairs, in each region"
+  }
+}

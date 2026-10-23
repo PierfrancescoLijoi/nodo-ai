@@ -518,3 +518,75 @@ def test_speech_jobs_are_scoped_counted_and_forgotten(db) -> None:
     store.clear(A, "m-speech")
     store.clear(A, "m-speech")  # forgetting twice is fine
     assert store.get(A, "m-speech") is None
+
+
+def test_the_maintenance_role_lists_every_meeting_but_reads_other_data_only_per_workspace(
+    admin_db, db
+) -> None:
+    """Migration 0007: index maintenance may look across workspaces for meeting ids, and for the
+    rest of what it reads it is bound to one workspace at a time like everybody else."""
+    from nodo_api.adapters.azure.maintenance_pg import PgMaintenanceStore
+    from nodo_api.domain.models import MeetingState
+
+    repo = PgMeetingRepository(db)
+    repo.add(A, _meeting("mnt-a1", workspace=A), "mnt-k-1", "h")
+    repo.add(B, _meeting("mnt-b1", workspace=B), "mnt-k-2", "h")
+    gone = repo.add(A, _meeting("mnt-a2", workspace=A), "mnt-k-3", "h")
+    repo.save(A, replace(gone, tombstoned_at=datetime.now(UTC)))
+
+    with admin_db.admin() as conn:
+        conn.execute("DROP ROLE IF EXISTS mnt_login")
+        conn.execute("CREATE ROLE mnt_login LOGIN PASSWORD 'mnt-password' IN ROLE nodo_maintenance")
+        conn.execute("GRANT USAGE ON SCHEMA public TO mnt_login")
+    params = conninfo_to_dict(DSN)
+    params.update(user="mnt_login", password="mnt-password")
+    maintenance_db = PostgresDatabase.from_dsn(make_conninfo(**params))
+    try:
+        store = PgMaintenanceStore(maintenance_db)
+        everyone = store.list_meetings(None, 1000)
+        by_id = {m.meeting_id: m for m in everyone}
+        assert {"mnt-a1", "mnt-b1", "mnt-a2"} <= set(by_id)
+        assert by_id["mnt-a2"].tombstoned and not by_id["mnt-a1"].tombstoned
+        assert by_id["mnt-b1"].workspace_id == B and by_id["mnt-a1"].state is MeetingState.UPLOADING
+        ordered = [(m.workspace_id, m.meeting_id) for m in everyone]
+        assert len(set(ordered)) == len(ordered)  # the database's collation decides the order
+        first = store.list_meetings(None, 2)
+        assert len(first) == 2
+        nxt = store.list_meetings((first[-1].workspace_id, first[-1].meeting_id), 1000)
+        assert [m.meeting_id for m in first + nxt] == [m.meeting_id for m in everyone]
+
+        # transcripts and graph rows are visible only inside a workspace, as for any other role
+        with maintenance_db.workspace(A) as conn:
+            assert (
+                conn.execute("SELECT count(*) AS n FROM transcript_segments").fetchone()["n"] >= 0
+            )
+        with maintenance_db.admin() as conn:
+            assert (
+                conn.execute("SELECT count(*) AS n FROM transcript_segments").fetchone()["n"] == 0
+            )
+        for forbidden in (
+            "UPDATE meetings SET title = 'changed'",
+            "DELETE FROM meetings",
+            "INSERT INTO transcript_segments (workspace_id) VALUES ('x')",
+            "SELECT title FROM meetings",
+        ):
+            with (
+                pytest.raises(psycopg.errors.InsufficientPrivilege),
+                maintenance_db.admin() as conn,
+            ):
+                conn.execute(forbidden)
+    finally:
+        maintenance_db.close()
+
+
+def test_the_graph_lists_the_segments_a_meeting_cites_on_postgres_too(db) -> None:
+    from nodo_api.adapters.azure.graph_pg import PgGraphStore
+    from tests.graph_contract import OWNER, meeting, queue_story
+
+    store, workspace = PgGraphStore(db), "ws-evidence"
+    first, _ = queue_story()
+    store.upsert_extraction(workspace, OWNER, meeting(1), first)
+    assert store.evidence_segment_ids(workspace, OWNER, "m1")
+    assert store.evidence_segment_ids(workspace, OWNER, "m2") == frozenset()
+    store.erase(workspace, "m1")
+    assert store.evidence_segment_ids(workspace, OWNER, "m1") == frozenset()

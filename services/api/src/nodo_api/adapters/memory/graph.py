@@ -240,6 +240,19 @@ class MemoryGraphStore:
             ):
                 part.entities[eid] = replace(entity, status="active")
 
+    def evidence_segment_ids(
+        self, workspace_id: str, owner_id: str, meeting_id: str
+    ) -> frozenset[str]:
+        part = self._parts.get((workspace_id, owner_id))
+        if part is None:
+            return frozenset()
+        return frozenset(
+            e.segment_id
+            for row in part.relations.values()
+            for e in row.relation.evidence
+            if e.meeting_id == meeting_id
+        )
+
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         for (ws, _), part in self._parts.items():
             if ws != workspace_id:

@@ -407,3 +407,16 @@ class GraphContract:
         approved = next(e for e in walk(store, ws, [action.id]).edges if e.kind is K.ASSIGNED_TO)
         store.review_relation(ws, OWNER, approved.id, ReviewStatus.APPROVED)
         assert store.meeting_digests(ws, OWNER, ["m1"])["m1"].review[action.id] == "approved"
+
+    # ------------------------------------------------------- what index maintenance relies on
+
+    def test_the_segments_a_meeting_cites_are_listed_for_that_owner_only(self, store, ws) -> None:
+        first, _ = queue_story()
+        store.upsert_extraction(ws, OWNER, meeting(1), first)
+        cited = store.evidence_segment_ids(ws, OWNER, "m1")
+        assert cited and all(isinstance(segment, str) for segment in cited)
+        assert store.evidence_segment_ids(ws, OWNER, "m2") == frozenset()
+        assert store.evidence_segment_ids(ws, "mallory", "m1") == frozenset()
+        assert store.evidence_segment_ids(f"{ws}-other", OWNER, "m1") == frozenset()
+        store.erase(ws, "m1")
+        assert store.evidence_segment_ids(ws, OWNER, "m1") == frozenset()

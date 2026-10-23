@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from nodo_api.domain.exports import EXPORT_TTL_HOURS, Export, ExportState
 from nodo_api.domain.graph import EntityType, Subgraph
+from nodo_api.domain.maintenance import MaintenanceMeeting
 from nodo_api.domain.models import (
     Answerability,
     Citation,
@@ -203,6 +204,9 @@ class MemoryJobQueue:
         self._jobs: dict[tuple[str, str, str], str] = {}
         self.scheduled: list[ScheduledJob] = []
 
+    def job_keys(self) -> list[tuple[str, str, str]]:
+        return list(self._jobs)
+
     def publish_later(
         self,
         workspace_id: str,
@@ -260,11 +264,37 @@ class MockRetriever:
                 results.append(segment)
         return tuple(results[:limit])
 
+    def count(self, workspace_id: str, meeting_id: str) -> int:
+        return sum(1 for (w, m, _) in self._segments if (w, m) == (workspace_id, meeting_id))
+
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         self._owners.pop((workspace_id, meeting_id), None)
         for key in list(self._segments):
             if key[:2] == (workspace_id, meeting_id):
                 del self._segments[key]
+
+
+class MemoryMaintenanceStore:
+    """Every meeting, deleted ones included, for index maintenance over the in-memory repository."""
+
+    def __init__(self, meetings: MemoryMeetingRepository) -> None:
+        self._meetings = meetings
+
+    def list_meetings(
+        self, after: tuple[str, str] | None, limit: int
+    ) -> tuple[MaintenanceMeeting, ...]:
+        keys = sorted(k for k in self._meetings._meetings if after is None or k > after)
+        return tuple(
+            MaintenanceMeeting(
+                m.workspace_id if hasattr(m, "workspace_id") else k[0],
+                m.id,
+                m.owner_id,
+                m.state,
+                m.tombstoned_at is not None,
+            )
+            for k in keys[:limit]
+            for m in [self._meetings._meetings[k]]
+        )
 
 
 class MemoryExportStore:

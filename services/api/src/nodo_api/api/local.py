@@ -6,6 +6,7 @@ meeting, one use, short life), exactly like an Azure blob SAS link. The rest nee
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import Field
@@ -41,6 +42,31 @@ def _progress(report) -> SyncProgress:
     return SyncProgress(**{**report.__dict__, "failed": tuple(report.failed)})
 
 
+class IndexStart(FrozenModel):
+    mode: Literal["verify", "repair"]
+
+
+class IndexProgressOut(FrozenModel):
+    state: str
+    mode: str
+    checked: int
+    skipped: int
+    repaired: int
+    findings: tuple[dict[str, str], ...]
+    failed: tuple[dict[str, str], ...]
+    message: str
+
+
+def _index_progress(progress) -> IndexProgressOut:
+    return IndexProgressOut(
+        **{
+            **progress.__dict__,
+            "findings": tuple(progress.findings),
+            "failed": tuple(progress.failed),
+        }
+    )
+
+
 class LocalStatus(FrozenModel):
     backend: str
     missing: tuple[str, ...]
@@ -74,6 +100,20 @@ def start_sync(body: SyncStart, _: PrincipalDep, request: Request) -> SyncProgre
 @router.get("/sync", response_model=SyncProgress)
 def sync_progress(_: PrincipalDep, request: Request) -> SyncProgress:
     return _progress(request.app.state.container.runtime.sync.report())
+
+
+@router.post("/index", response_model=IndexProgressOut, status_code=status.HTTP_202_ACCEPTED)
+def start_index_run(body: IndexStart, _: PrincipalDep, request: Request) -> IndexProgressOut:
+    """Compare the search index and the graph with the archive (ADR-021). `verify` reports and
+    changes nothing; `repair` rebuilds what is missing or stale. Runs in the background."""
+    index = request.app.state.container.runtime.index
+    index.start(body.mode)
+    return _index_progress(index.progress())
+
+
+@router.get("/index", response_model=IndexProgressOut)
+def index_progress(_: PrincipalDep, request: Request) -> IndexProgressOut:
+    return _index_progress(request.app.state.container.runtime.index.progress())
 
 
 @router.get("/status", response_model=LocalStatus)

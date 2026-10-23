@@ -17,6 +17,7 @@ from nodo_api.domain.graph import (
     ReviewStatus,
     Subgraph,
 )
+from nodo_api.domain.maintenance import MaintenanceMeeting
 from nodo_api.domain.models import (
     Locale,
     Meeting,
@@ -138,6 +139,11 @@ class Retriever(Protocol):
         document, so the access check costs the same however many meetings there are."""
         ...
 
+    def count(self, workspace_id: str, meeting_id: str) -> int:
+        """How many documents the index holds for the meeting (index maintenance compares it with
+        the transcript)."""
+        ...
+
     def erase(self, workspace_id: str, meeting_id: str) -> None: ...
 
 
@@ -194,6 +200,13 @@ class GraphStore(Protocol):
         self, workspace_id: str, owner_id: str, limit: int
     ) -> tuple[Change, ...]: ...
 
+    def evidence_segment_ids(
+        self, workspace_id: str, owner_id: str, meeting_id: str
+    ) -> frozenset[str]:
+        """The transcript segments the meeting's relations cite. Empty when the meeting left no
+        evidence (or was erased); index maintenance checks that each one still exists."""
+        ...
+
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         """Remove everything derived from the meeting; relations lose their evidence first."""
         ...
@@ -249,6 +262,17 @@ class RetentionStore(Protocol):
         ...
 
     def mark_audio_erased(self, workspace_id: str, meeting_id: str, when: datetime) -> None: ...
+
+
+class MaintenanceStore(Protocol):
+    """The second place that looks across workspaces, for the one job that must (ADR-021)."""
+
+    def list_meetings(
+        self, after: tuple[str, str] | None, limit: int
+    ) -> tuple[MaintenanceMeeting, ...]:
+        """Every meeting, deleted ones included, ordered by (workspace id, meeting id). Pass the
+        last pair of the previous page as `after`."""
+        ...
 
 
 class AuditLog(Protocol):

@@ -71,6 +71,21 @@ def grant_roles(conn: Any, roles: tuple[str, ...], database: str) -> None:
         )
 
 
+def grant_maintenance_roles(conn: Any, roles: tuple[str, ...], database: str) -> None:
+    """The index maintenance identity gets the role of migration 0007 and nothing else: it lists
+    meetings across workspaces, and reads or repairs the rest one workspace at a time."""
+    for role in roles:
+        exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
+        if not exists:
+            conn.execute("SELECT * FROM pgaadauth_create_principal(%s, false, false)", (role,))
+        ident = sql.Identifier(role)
+        conn.execute(
+            sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(database), ident)
+        )
+        conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(ident))
+        conn.execute(sql.SQL("GRANT nodo_maintenance TO {}").format(ident))
+
+
 def grant_retention_roles(conn: Any, roles: tuple[str, ...], database: str) -> None:
     """The retention job's identity gets the cross-workspace role of migration 0004 and the right to
     append audit events, and no other table rights (it never touches transcripts or the graph)."""

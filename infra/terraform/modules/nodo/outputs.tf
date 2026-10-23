@@ -18,6 +18,15 @@ output "retention_job_name" {
   value = azurerm_container_app_job.retention.name
 }
 
+output "index_verify_job_name" {
+  value = azurerm_container_app_job.index_verify.name
+}
+
+output "reindex_job_names" {
+  description = "Manual reindex job per region stamp."
+  value       = { for k, v in azurerm_container_app_job.reindex : k => v.name }
+}
+
 output "acr_name" {
   value = azurerm_container_registry.main.name
 }

@@ -5,6 +5,11 @@ python -m nodo_api.admin roles          create and grant database roles for the 
 python -m nodo_api.admin ensure-index   create or update the search index
 python -m nodo_api.admin bootstrap      all three, idempotent (what the deploy pipeline runs)
 python -m nodo_api.admin retention      erase audio whose retention period ended (daily job)
+python -m nodo_api.admin verify-index   compare the search index and the graph with the store;
+                                        exit 1 if they differ (weekly job, read only)
+python -m nodo_api.admin reindex        repair the difference (after an outage or a failover)
+
+The index commands also run against the local engine with NODO_BACKEND=local.
 """
 
 from __future__ import annotations
@@ -15,12 +20,17 @@ import sys
 from nodo_api.config import Settings
 
 logger = logging.getLogger("nodo_admin")
-COMMANDS = ("migrate", "roles", "ensure-index", "bootstrap", "retention")
+COMMANDS = ("migrate", "roles", "ensure-index", "bootstrap", "retention", "verify-index", "reindex")
 
 
 def run(command: str, settings: Settings) -> None:
     if command not in COMMANDS:
         raise SystemExit(f"Unknown command {command!r}. Use one of: {', '.join(COMMANDS)}")
+    if command in ("verify-index", "reindex"):
+        if settings.backend not in ("azure", "local"):
+            raise SystemExit("The index commands need NODO_BACKEND=azure or local")
+        _index(settings, repair=command == "reindex")
+        return
     if settings.backend != "azure":
         raise SystemExit("The admin commands need NODO_BACKEND=azure")
     if command == "retention":
@@ -33,6 +43,7 @@ def run(command: str, settings: Settings) -> None:
 
         from nodo_api.adapters.azure.migrate import (
             apply_migrations,
+            grant_maintenance_roles,
             grant_retention_roles,
             grant_roles,
         )
@@ -50,6 +61,9 @@ def run(command: str, settings: Settings) -> None:
                     grant_retention_roles(
                         conn, settings.azure_retention_roles, settings.azure_postgres_database
                     )
+                    grant_maintenance_roles(
+                        conn, settings.azure_maintenance_roles, settings.azure_postgres_database
+                    )
         finally:
             db.close()
     if "ensure-index" in wanted:
@@ -63,6 +77,21 @@ def run(command: str, settings: Settings) -> None:
         )
         ensure_index(client, settings.search_index_name, settings.openai_embedding_dimensions)
         logger.info("search index ready: %s", settings.search_index_name)
+
+
+def _index(settings: Settings, *, repair: bool) -> None:
+    """Weekly verify and on-demand reindex. Exits 1 when the index and the store still differ
+    or when a meeting could not be repaired (reindex), so a failed job is the alert."""
+    from nodo_api.bootstrap import build_adapters
+    from nodo_api.services.index_maintenance import IndexMaintenanceService
+
+    a = build_adapters(settings)
+    service = IndexMaintenanceService(
+        a.maintenance, a.transcripts, a.retriever, a.graph, a.jobs, a.audit
+    )
+    report = service.repair() if repair else service.verify()
+    if report.failed or (not repair and not report.clean):
+        raise SystemExit(1)
 
 
 def _retention(settings: Settings) -> None:

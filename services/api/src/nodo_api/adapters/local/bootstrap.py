@@ -14,6 +14,7 @@ from nodo_api.adapters.local.embedder import LocalEmbedder
 from nodo_api.adapters.local.exports import SqliteExportStore
 from nodo_api.adapters.local.graph import SqliteGraphStore
 from nodo_api.adapters.local.llm import LocalExtractor, LocalLlm
+from nodo_api.adapters.local.maintenance import LocalIndexService, SqliteMaintenanceStore
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer, LocalModelPaths, data_dir
 from nodo_api.adapters.local.queue import LocalWorkerLoop, SqliteJobQueue
 from nodo_api.adapters.local.repos import (
@@ -31,6 +32,7 @@ from nodo_api.config import Settings
 from nodo_api.errors import ModelUnavailable
 from nodo_api.services.exports import ExportService
 from nodo_api.services.extraction import ChunkedExtractor
+from nodo_api.services.index_maintenance import IndexMaintenanceService
 from nodo_api.services.ingestion import IngestionService
 from nodo_api.services.retention import RetentionService
 from nodo_api.worker import Worker
@@ -69,6 +71,7 @@ class LocalRuntime:
     sync: LocalSyncService
     embedder: LocalEmbedder
     retention: RetentionService
+    index: LocalIndexService
     warm_up: bool = False
     _stop: threading.Event = field(default_factory=threading.Event)
 
@@ -142,6 +145,7 @@ def local_adapters(settings: Settings):
     transcripts = SqliteTranscriptRepository(db)
     audit = SqliteAuditLog(db)
     exports = SqliteExportStore(db)
+    maintenance = SqliteMaintenanceStore(db)
     ingestion = IngestionService(
         meetings,
         transcripts,
@@ -174,6 +178,9 @@ def local_adapters(settings: Settings):
         sync,
         embedder,
         RetentionService(SqliteRetentionStore(db), blobs, SqliteAuditLog(db)),
+        LocalIndexService(
+            IndexMaintenanceService(maintenance, transcripts, retriever, graph, queue, audit)
+        ),
         settings.local_warm_up,
     )
     return Adapters(
@@ -190,4 +197,5 @@ def local_adapters(settings: Settings):
         runtime,
         retention=SqliteRetentionStore(db),
         exports=exports,
+        maintenance=maintenance,
     )

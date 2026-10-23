@@ -50,6 +50,10 @@ jobs:
           WORKER_JOB_NAME: ${{ vars.WORKER_JOB_NAME }}
           MIGRATE_JOB_NAME: ${{ vars.MIGRATE_JOB_NAME }}
           RETENTION_JOB_NAME: ${{ vars.RETENTION_JOB_NAME }}
+          # Professional tier: the jobs that check and rebuild the search index, kept on the same image.
+          INDEX_VERIFY_JOB_NAME: ${{ vars.INDEX_VERIFY_JOB_NAME }}
+          REINDEX_JOB_NAME: ${{ vars.REINDEX_JOB_NAME }}
+          REINDEX_JOB_NAME_DR: ${{ vars.REINDEX_JOB_NAME_DR }}
           # Professional tier: the standby API (kept on the same image, or a failover would start an
           # old one), its resource group, and the public host the smoke test goes through.
           API_APP_NAME_DR: ${{ vars.API_APP_NAME_DR }}
@@ -64,7 +68,7 @@ jobs:
             fi
             printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
           done
-          for name in RETENTION_JOB_NAME API_APP_NAME_DR RESOURCE_GROUP_DR PUBLIC_HOST; do
+          for name in RETENTION_JOB_NAME INDEX_VERIFY_JOB_NAME REINDEX_JOB_NAME REINDEX_JOB_NAME_DR API_APP_NAME_DR RESOURCE_GROUP_DR PUBLIC_HOST; do
             printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
           done
           printf 'IMAGE=%s.azurecr.io/nodo-api:%s\n' "$ACR_NAME" "$GITHUB_SHA" >> "$GITHUB_ENV"
@@ -148,6 +152,17 @@ jobs:
             az containerapp job update \
               --name "$RETENTION_JOB_NAME" \
               --resource-group "$RESOURCE_GROUP" \
+              --image "$IMAGE"
+          fi
+          for job in "$INDEX_VERIFY_JOB_NAME" "$REINDEX_JOB_NAME"; do
+            if [ -n "$job" ]; then
+              az containerapp job update --name "$job" --resource-group "$RESOURCE_GROUP" --image "$IMAGE"
+            fi
+          done
+          if [ -n "${REINDEX_JOB_NAME_DR}" ]; then
+            az containerapp job update \
+              --name "$REINDEX_JOB_NAME_DR" \
+              --resource-group "${RESOURCE_GROUP_DR:-$RESOURCE_GROUP}" \
               --image "$IMAGE"
           fi
           az containerapp update \

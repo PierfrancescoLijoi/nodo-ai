@@ -86,7 +86,7 @@ Each layer assumes the one in front of it may have been misconfigured; none is t
 | Blob: audio account | GZRS, customer-managed key (RSA-HSM, auto-rotated), infrastructure encryption, **no** versioning or change feed (a version would keep an erased recording alive), 7 day soft delete as the only copy after an erasure, SAS lifetime capped, no shared key, malware scan | the only public data endpoint, with compensating controls (ADR-016) |
 | Blob: audit account | GZRS, private, time-based retention (WORM) | evidence that cannot be altered; archive job not yet built |
 | Service Bus Premium | one messaging unit, private, geo-DR alias to the standby namespace, duplicate detection 1 h, 5 deliveries then dead-letter | shock absorber between the app and slow work |
-| AI Search Standard | three replicas, partitions from the capacity model, private, RBAC only | derived: rebuilt from PostgreSQL in the standby region |
+| AI Search Standard | three replicas, partitions from the capacity model, private, RBAC only | derived: checked weekly against PostgreSQL and rebuilt by the reindex job, also in the standby region (ADR-021) |
 | Key Vault Premium | purge protection, 90 day soft delete, firewall, RBAC | secrets and the storage key |
 
 The database role design is part of the architecture: the api and worker identities each get a login role named after the identity, with data rights but no DDL, under forced row level security, and with the audit table append-only for them. The retention identity gets only the `nodo_retention` role (it can see which meetings are due, across workspaces) and the right to append audit events; it never reads transcripts or the graph. The migrate identity is the Entra administrator and owns the schema.
@@ -110,6 +110,7 @@ Identities (user-assigned, one per job of work): `api`, `worker`, `migrate`, `re
 | worker | Service Bus (each region) | Azure Service Bus Data Receiver |
 | api, worker | Search (each region) | Search Index Data Contributor |
 | migrate | Search | Search Service Contributor |
+| maintenance | Search (each region), queue (each region), OpenAI (each region), registry, Key Vault | Search Index Data Contributor, Azure Service Bus Data Sender, Cognitive Services OpenAI User, AcrPull, Key Vault Secrets User |
 | api, worker | OpenAI (each region) | Cognitive Services OpenAI User (kept as a fallback path; the gateway is the normal one) |
 | worker | Speech (each region) | Cognitive Services Speech User |
 | gateway (system identity) | OpenAI (each region) | Cognitive Services OpenAI User |
@@ -175,7 +176,6 @@ Things to check at the first deployment, in order: `pgaadauth_create_principal` 
 
 1. A stuck-meeting sweep: a meeting that waits for speech and has neither a stored handle nor a scheduled poll (a lost message) is not found by anything yet.
 2. Audit archive job from the database to the immutable account, with a watermark and a dedicated role.
-3. A search re-index command that rebuilds the index from PostgreSQL (needed for the standby region and for index loss; it needs a cross-workspace read role like the retention one).
 4. A sweep that re-publishes outbox rows after a queue failover.
 5. Approval UI for decisions and actions (ADR-004).
 6. Per-class queues (ingest, analyze, reanalyze) when the capacity model says interactive reanalysis competes with ingestion.

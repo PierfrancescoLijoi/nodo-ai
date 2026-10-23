@@ -182,3 +182,47 @@ def test_requests_for_a_foreign_host_name_are_refused(client) -> None:
     reply = client.get("/healthz", headers={"Host": "evil.example.com:8765"})
     assert reply.status_code == 421
     assert client.get("/healthz", headers={"Host": "127.0.0.1:8765"}).status_code == 200
+
+
+def _wait_for_index_run(client, timeout: float = 10.0) -> dict:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while True:
+        progress = client.get("/v1/local/index", headers=HEADERS).json()
+        if progress["state"] != "running" or time.monotonic() > deadline:
+            return progress
+        time.sleep(0.02)
+
+
+def test_the_archive_can_check_and_rebuild_its_own_search_index(app, client) -> None:
+    meeting_id = _record(client)
+    app.state.container.runtime.loop.run_pending()
+    retriever = app.state.container.retriever
+    idle = client.get("/v1/local/index", headers=HEADERS).json()
+    assert idle["state"] == "idle"
+
+    assert (
+        client.post("/v1/local/index", headers=HEADERS, json={"mode": "verify"}).status_code == 202
+    )
+    clean = _wait_for_index_run(client)
+    assert (clean["state"], clean["findings"], clean["failed"]) == ("done", [], [])
+    assert clean["checked"] == 1
+
+    retriever.erase("local", meeting_id)  # the index is lost; the archive is not
+    client.post("/v1/local/index", headers=HEADERS, json={"mode": "verify"})
+    found = _wait_for_index_run(client)
+    assert found["findings"] == [{"kind": "missing_from_index", "meeting_id": meeting_id}]
+    assert retriever.count("local", meeting_id) == 0  # verify changes nothing
+
+    client.post("/v1/local/index", headers=HEADERS, json={"mode": "repair"})
+    repaired = _wait_for_index_run(client)
+    assert (repaired["state"], repaired["repaired"], repaired["failed"]) == ("done", 1, [])
+    assert retriever.count("local", meeting_id) == 3
+    assert retriever.search("local", "local-user", "ingestion queue", None, 5)
+
+
+def test_the_index_routes_need_the_token_and_a_known_mode(client) -> None:
+    assert client.post("/v1/local/index", json={"mode": "verify"}).status_code == 401
+    assert client.get("/v1/local/index").status_code == 401
+    assert client.post("/v1/local/index", headers=HEADERS, json={"mode": "nuke"}).status_code == 422

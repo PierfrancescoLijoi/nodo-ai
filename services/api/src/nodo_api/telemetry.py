@@ -128,6 +128,9 @@ class Instruments:
             "nodo.retention.deleted", description="Meetings erased because their retention ended"
         )
         self.exports = meter.create_counter("nodo.exports", description="Data exports built")
+        self.index_findings = meter.create_counter(
+            "nodo.index.findings", description="Differences found between store, index and graph"
+        )
         self._built = True
 
     def __getattr__(self, name: str) -> Any:

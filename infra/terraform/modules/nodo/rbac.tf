@@ -18,10 +18,12 @@ locals {
     worker_acr_pull    = { principal = "worker", scope = azurerm_container_registry.main.id, role = "AcrPull" }
     migrate_acr_pull   = { principal = "migrate", scope = azurerm_container_registry.main.id, role = "AcrPull" }
     retention_acr_pull = { principal = "retention", scope = azurerm_container_registry.main.id, role = "AcrPull" }
+    maintenance_acr    = { principal = "maintenance", scope = azurerm_container_registry.main.id, role = "AcrPull" }
     api_kv_secrets     = { principal = "api", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
     worker_kv_secrets  = { principal = "worker", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
     migrate_kv_secrets = { principal = "migrate", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
     retention_kv       = { principal = "retention", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
+    maintenance_kv     = { principal = "maintenance", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
     api_blob           = { principal = "api", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
     worker_blob        = { principal = "worker", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
     # The retention job lists and deletes audio. The role also allows reading: Azure has no role that
@@ -31,8 +33,13 @@ locals {
 
   # Grants repeated for every stamp: principal, service, role.
   regional_grants = {
-    api_sb_send       = { principal = "api", service = "servicebus", role = "Azure Service Bus Data Sender" }
-    worker_sb_receive = { principal = "worker", service = "servicebus", role = "Azure Service Bus Data Receiver" }
+    api_sb_send = { principal = "api", service = "servicebus", role = "Azure Service Bus Data Sender" }
+    # Index maintenance asks for a re-analysis through the queue, re-embeds text for the index
+    # and writes to it; it reads no audio and no speech results.
+    maintenance_sb_send = { principal = "maintenance", service = "servicebus", role = "Azure Service Bus Data Sender" }
+    maintenance_search  = { principal = "maintenance", service = "search", role = "Search Index Data Contributor" }
+    maintenance_openai  = { principal = "maintenance", service = "openai", role = "Cognitive Services OpenAI User" }
+    worker_sb_receive   = { principal = "worker", service = "servicebus", role = "Azure Service Bus Data Receiver" }
     # The API also re-indexes on transcript correction and removes documents on erasure.
     api_search_write    = { principal = "api", service = "search", role = "Search Index Data Contributor" }
     worker_search_write = { principal = "worker", service = "search", role = "Search Index Data Contributor" }

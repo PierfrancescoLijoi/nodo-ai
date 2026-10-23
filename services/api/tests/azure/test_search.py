@@ -140,3 +140,21 @@ def test_erase_removes_every_page_of_the_meeting() -> None:
     AzureSearchRetriever(client, FakeEmbedder()).erase("ws-a", "m1")
     assert [d["id"] for d in client.deleted] == ["a", "b", "c"]
     assert "meeting_id eq 'm1'" in client.searches[0]["filter"]
+
+
+def test_count_asks_for_the_total_of_one_meeting_and_fetches_no_documents() -> None:
+    class CountingClient(FakeSearchClient):
+        def search(self, **kwargs):
+            self.searches.append(kwargs)
+
+            class Results:
+                def get_count(self_inner) -> int:
+                    return 42
+
+            return Results()
+
+    client = CountingClient()
+    assert AzureSearchRetriever(client, FakeEmbedder()).count("ws-a", "it's") == 42
+    (call,) = client.searches
+    assert call["include_total_count"] is True and call["top"] == 0
+    assert call["filter"] == "workspace_id eq 'ws-a' and meeting_id eq 'it''s'"

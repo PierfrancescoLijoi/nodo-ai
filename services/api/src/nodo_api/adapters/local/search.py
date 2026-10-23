@@ -140,6 +140,14 @@ class SqliteRetriever:
             "INSERT INTO search_fts (rowid, text) VALUES (?, ?)", (row["rowid"], segment.text)
         )
 
+    def count(self, workspace_id: str, meeting_id: str) -> int:
+        with self._db.transaction(write=False) as conn:
+            row = conn.execute(
+                "SELECT count(*) AS n FROM search_segments WHERE workspace_id = ? AND meeting_id = ?",
+                (workspace_id, meeting_id),
+            ).fetchone()
+        return int(row["n"])
+
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         with self._db.transaction() as conn:
             rows = conn.execute(

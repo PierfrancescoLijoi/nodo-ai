@@ -312,6 +312,17 @@ class PgGraphStore:
             (workspace_id, owner_id, decision_ids),
         )
 
+    def evidence_segment_ids(
+        self, workspace_id: str, owner_id: str, meeting_id: str
+    ) -> frozenset[str]:
+        with self._db.workspace(workspace_id) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT segment_id FROM relation_evidence"
+                " WHERE workspace_id = %s AND owner_id = %s AND meeting_id = %s",
+                (workspace_id, owner_id, meeting_id),
+            ).fetchall()
+        return frozenset(row["segment_id"] for row in rows)
+
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         with self._db.workspace(workspace_id) as conn:
             rows = conn.execute(

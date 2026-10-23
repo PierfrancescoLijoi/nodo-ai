@@ -27,7 +27,7 @@ When: the primary region is down or unusable, the alert evidence shows it is not
    (the primary region's resources cannot be refreshed while it is down; use `-refresh=false` if the plan hangs on them). This scales the standby API to three replicas and creates the standby worker.
 3. Fail over the queue alias: `az servicebus georecovery-alias fail-over --alias sbdr-<suffix> -g rg-nodo-prod-dr --namespace-name sb-<suffix>-dr`. The alias name in the application does not change.
 4. Promote the database (**irreversible**). With the primary region down, promote from the CLI, because only a forced promotion works without the source: `az postgres flexible-server replica promote --resource-group rg-nodo-prod-dr --name psql-<suffix>-dr --promote-mode standalone --promote-option forced`. Wait for `Ready`. Then reconcile Terraform with `dr_promote_database = true` (this also gives the promoted server its Entra administrator); high availability and the maintenance window are added to it by a later apply once the primary is gone from the configuration. Writes work from the CLI step on.
-5. Rebuild search in the standby region: run the migrate job (`python -m nodo_api.admin bootstrap`) to create the index, then re-index every transcript from PostgreSQL. **The re-index command does not exist yet** (AZURE-ARCHITECTURE.md section 15, item 3): it needs a cross-workspace read role like the retention one. Until it is built and rehearsed, this step is the weakest in the runbook, and until it completes questions return `503` while lists and details work.
+5. Rebuild search in the standby region: run the migrate job (`python -m nodo_api.admin bootstrap`) to create the index, then start the standby region's reindex job with the repair command (section 5b). Until it completes, questions find nothing or little while lists and details work; the job reports progress in its log (`index_repair checked=... repaired=...`) and can be started again safely.
 6. Storage: if the audio account's primary region is also unavailable, initiate the account failover (`az storage account failover`). It is also irreversible in the sense that the account becomes locally redundant until re-geo-enabled.
 7. Smoke test through the public door: sign in, list meetings, ask a question, upload a short recording, see it reach `review`.
 8. Tell users (status page, in-app message). Record the recovery point (the last replicated transaction time) and the recovery time.
@@ -50,6 +50,16 @@ The origin group probes `/readyz` through the gateway. One of the two regions is
 - **CPU or storage alert:** move the SKU up one step or raise storage (online). Look at the slow-statement log (statements over one second are logged).
 - **Replica lag alert (SEV2):** the recovery point objective is at risk. Check for a long transaction or a bulk write on the primary; if it persists, the standby needs attention before the next incident.
 - **Restore a point in time** (data damage, not a region failure): `az postgres flexible-server restore --source-server psql-<suffix> --restore-time <UTC> --name psql-<suffix>-restore` into a new server in the same network; verify; copy the rows needed back, or re-point the app after review. Never restore over the live server.
+
+## 5b. Search index or graph out of step with the database
+
+The weekly `index-verify` job failed or the alert "Search index out of step with the database" fired. Questions may miss recordings that are plainly in the archive, or find text of deleted ones.
+
+1. Read what it found: the job log has one summary line (`index_verify checked=N skipped=N findings=N ...`) and the audit trail names meetings and finding kinds, never text. `missing_from_index`, `partial_index` and `stale_index` are index damage; `leftover_*` is a delete whose cascade stopped; `dangling_evidence` is graph evidence pointing at text that is not there.
+2. Repair: `az containerapp job start -n caj-nodo-prod-reindex-primary -g rg-nodo-prod --command python --args "-m nodo_api.admin reindex"` (the standby region has its own job, `...-reindex-dr`). It is safe to repeat and to run while users work; a meeting it can not repair is listed by id and the job exits 1.
+3. Verify: start the same job without overriding the command (read only) and expect `findings=0`.
+4. If it keeps finding the same thing, the cause is upstream: search outages (the guard metrics), or a defect in a delete path. Open the incident with the meeting ids from the audit events.
+5. On a computer: the app calls `POST /v1/local/index {"mode":"repair"}`, or `NODO_BACKEND=local python -m nodo_api.admin reindex`. Re-embedding a large archive takes a while; the first question afterwards may be slow while the model loads.
 
 ## 6. Queue: dead letters or backlog (SEV2/SEV3)
 

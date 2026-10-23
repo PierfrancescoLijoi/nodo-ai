@@ -234,6 +234,45 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "retention" {
   }
 }
 
+# The weekly verify logs one summary line and exits 1 when the index or the graph differs from the
+# database; a reindex that could not repair a meeting does the same.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "index" {
+  count                 = local.pro ? 1 : 0
+  name                  = "alert-${local.name}-index"
+  resource_group_name   = azurerm_resource_group.main.name
+  location              = azurerm_resource_group.main.location
+  scopes                = [azurerm_log_analytics_workspace.main.id]
+  description           = "The search index or the graph differs from the database: questions may miss recordings. Run the reindex job (RUNBOOKS.md section 5)."
+  display_name          = "Search index out of step with the database"
+  severity              = 2
+  evaluation_frequency  = "PT1H"
+  window_duration       = "P1D"
+  skip_query_validation = true
+  tags                  = local.tags
+
+  criteria {
+    query = <<-KQL
+      ContainerAppConsoleLogs_CL
+      | where TimeGenerated > ago(1d)
+      | where Log_s has 'index_verify' or Log_s has 'index_repair'
+      | where Log_s matches regex '(findings|failed)=[1-9]'
+    KQL
+
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.oncall[0].id]
+  }
+}
+
 # --- are we running out of something? ---------------------------------------------------------
 
 locals {

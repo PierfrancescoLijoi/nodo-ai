@@ -404,3 +404,16 @@ def test_a_later_job_waits_for_its_time_and_then_runs(db) -> None:
     assert loop.run_pending() == 1 and recorder.seen == [("transcribe", "m1")]
     queue.publish_later(WS, "m1:poll:1", "transcribe", {"meeting_id": "m1"}, 0)
     assert loop.run_pending() == 1  # a different key is a different message
+
+
+def test_the_index_can_say_how_many_documents_a_meeting_has(db) -> None:
+    retriever, _ = _retriever(db)
+    retriever.index(
+        WS,
+        ALICE,
+        (_segment("m1", "s1", "one"), _segment("m1", "s2", "two"), _segment("m2", "s1", "x")),
+    )
+    assert retriever.count(WS, "m1") == 2 and retriever.count(WS, "m2") == 1
+    assert retriever.count(WS, "nobody") == 0 and retriever.count("elsewhere", "m1") == 0
+    retriever.erase(WS, "m1")
+    assert retriever.count(WS, "m1") == 0

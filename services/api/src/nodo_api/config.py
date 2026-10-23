@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     azure_postgres_password: SecretStr | None = Field(default=None, repr=False)
     azure_db_roles: Annotated[tuple[str, ...], NoDecode] = ()
     azure_retention_roles: Annotated[tuple[str, ...], NoDecode] = ()
+    azure_maintenance_roles: Annotated[tuple[str, ...], NoDecode] = ()
     azure_search_endpoint: str | None = None
     search_index_name: str = "segments"
     azure_openai_endpoint: str | None = None
@@ -105,6 +106,7 @@ class Settings(BaseSettings):
     @field_validator(
         "azure_db_roles",
         "azure_retention_roles",
+        "azure_maintenance_roles",
         "speech_candidate_locales",
         "oidc_allowed_client_ids",
         mode="before",

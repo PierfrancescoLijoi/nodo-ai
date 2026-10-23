@@ -186,6 +186,19 @@ class AzureSearchRetriever:
         )
         return tuple(_segment(doc) for doc in results)
 
+    def count(self, workspace_id: str, meeting_id: str) -> int:
+        results = self._client.search(
+            search_text="*",
+            filter=(
+                f"workspace_id eq {odata_string(workspace_id)}"
+                f" and meeting_id eq {odata_string(meeting_id)}"
+            ),
+            include_total_count=True,
+            select=["id"],
+            top=0,
+        )
+        return int(results.get_count())
+
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         flt = (
             f"workspace_id eq {odata_string(workspace_id)}"

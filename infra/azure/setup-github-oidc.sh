@@ -82,7 +82,10 @@ gh variable set API_APP_NAME --repo ${REPO} --body 'ca-nodo-${ENV_NAME}-api-prim
 gh variable set WORKER_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-worker-primary'
 gh variable set MIGRATE_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-migrate'
 gh variable set RETENTION_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-retention'
+gh variable set INDEX_VERIFY_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-index-verify'
+gh variable set REINDEX_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-reindex-primary'
 # Professional tier only (terraform output api_url is its public address):
 #   gh variable set API_APP_NAME_DR --repo ${REPO} --body 'ca-nodo-${ENV_NAME}-api-dr'  (and the resource group of the standby region)
+#   gh variable set REINDEX_JOB_NAME_DR --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-reindex-dr'
 #   gh variable set PUBLIC_HOST --repo ${REPO} --body '<host of terraform output api_url>'
 EOF

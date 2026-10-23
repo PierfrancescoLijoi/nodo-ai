@@ -91,6 +91,9 @@ The app is served by the engine and receives the secret in the address fragment 
 - `POST /v1/local/sync` body `{ cloud_url, access_token, force? }` starts copying the archive to an Azure deployment (ADR-015) and answers `202` with the progress object. `cloud_url` is the cloud API address (`https://...`); `access_token` is an Entra access token for that API; `force` sends every meeting again. `422` if the address is not a plain https address.
 - `GET /v1/local/sync` returns `{ state: "idle"|"running"|"done"|"failed", total, done, pushed, unchanged, deleted, failed: { meeting_id, reason }[], message }`. Poll every 2 seconds while `running`.
 
+- `POST /v1/local/index` body `{ mode: "verify" | "repair" }` starts a comparison of the search index and the graph with the archive (ADR-021) in the background and answers `202` with the progress object; `422` for another mode. `verify` changes nothing; `repair` rebuilds what is missing or stale and removes what belongs to deleted meetings.
+- `GET /v1/local/index` returns `{ state: "idle"|"running"|"done"|"failed", mode, checked, skipped, repaired, findings: { kind, meeting_id }[], failed: { meeting_id, reason }[], message }`. Poll every 2 seconds while `running`. `kind` is one of `missing_from_index`, `partial_index`, `stale_index`, `leftover_index`, `leftover_graph`, `dangling_evidence`.
+
 ## Cloud only
 
 `PUT /v1/sync/meetings/{id}` receives one meeting from a local engine (ADR-015). Used by the engine, not by the app.

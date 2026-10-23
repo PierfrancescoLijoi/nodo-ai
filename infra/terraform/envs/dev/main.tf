@@ -113,3 +113,11 @@ output "migrate_job_name" {
 output "retention_job_name" {
   value = module.nodo.retention_job_name
 }
+
+output "index_verify_job_name" {
+  value = module.nodo.index_verify_job_name
+}
+
+output "reindex_job_names" {
+  value = module.nodo.reindex_job_names
+}

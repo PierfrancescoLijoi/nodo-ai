@@ -278,6 +278,7 @@ resource "azurerm_api_management_api_policy" "ai" {
     caller_client_ids = [
       azurerm_user_assigned_identity.workload["api"].client_id,
       azurerm_user_assigned_identity.workload["worker"].client_id,
+      azurerm_user_assigned_identity.workload["maintenance"].client_id,
     ]
   })
 

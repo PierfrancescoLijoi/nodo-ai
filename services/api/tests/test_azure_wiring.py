@@ -79,3 +79,12 @@ def test_the_worker_transcribes_in_stages_and_the_guards_cover_every_stage(monke
     runtime = bootstrap.build_worker_runtime(SETTINGS)
     assert runtime.ingestion._staged is not None  # not the waiting path
     assert runtime.ingestion._poll_seconds == SETTINGS.speech_poll_seconds
+
+
+def test_index_maintenance_is_wired_with_a_guarded_count_and_its_own_store(monkeypatch) -> None:
+    from nodo_api.adapters.azure.maintenance_pg import PgMaintenanceStore
+
+    monkeypatch.setattr(bootstrap, "postgres_database", lambda settings, credential=None: object())
+    adapters = bootstrap.build_adapters(SETTINGS)
+    assert isinstance(adapters.maintenance, PgMaintenanceStore)
+    assert adapters.retriever.count.__name__ == "call"  # a bulkhead and a breaker like search

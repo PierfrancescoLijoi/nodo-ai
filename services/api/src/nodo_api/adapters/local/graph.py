@@ -325,6 +325,17 @@ class SqliteGraphStore:
                 (now_text(), workspace_id, owner_id, *part),
             )
 
+    def evidence_segment_ids(
+        self, workspace_id: str, owner_id: str, meeting_id: str
+    ) -> frozenset[str]:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT segment_id FROM relation_evidence"
+                " WHERE workspace_id = ? AND owner_id = ? AND meeting_id = ?",
+                (workspace_id, owner_id, meeting_id),
+            ).fetchall()
+        return frozenset(row["segment_id"] for row in rows)
+
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         with self._db.transaction() as conn:
             rows = conn.execute(

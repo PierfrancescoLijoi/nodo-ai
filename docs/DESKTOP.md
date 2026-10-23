@@ -56,6 +56,15 @@ Measured numbers are in [PERFORMANCE.md](PERFORMANCE.md). In short: transcriptio
 
 Speakers are separated by voice inside one recording and labelled S1, S2; you give them names (the app never recognises a person by voice across meetings).
 
+## Checking and rebuilding the search index
+
+The search index lives in the same file as the archive and can be rebuilt from it. If a question does not find a recording that is plainly there, or finds text of one you deleted, the app (or a script) can compare the index with the archive:
+
+- `POST /v1/local/index {"mode": "verify"}` reports what differs and changes nothing; `{"mode": "repair"}` fixes it. `GET /v1/local/index` shows progress (`state`, `checked`, `repaired`, `findings`, `failed`).
+- From a terminal: `NODO_BACKEND=local python -m nodo_api.admin verify-index` or `reindex` (see ADR-021).
+
+Repair re-reads the transcripts and embeds them again, so a large archive takes a while. Your recordings, transcripts and reviewed decisions are never touched.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |

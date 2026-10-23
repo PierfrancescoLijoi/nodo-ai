@@ -36,6 +36,7 @@ class Adapters:
     retention: Any = None  # the audio-retention store, for the sweep job
     exports: Any = None  # export requests (ADR-019)
     speech_jobs: Any = None  # the speech job a meeting waits for (staged transcription)
+    maintenance: Any = None  # the cross-workspace meeting listing for index maintenance
 
 
 @dataclass(slots=True)
@@ -52,6 +53,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemoryExportStore,
         MemoryGraphStore,
         MemoryJobQueue,
+        MemoryMaintenanceStore,
         MemoryMeetingRepository,
         MemoryRetentionStore,
         MemorySpeech,
@@ -81,6 +83,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         KeywordExtractor(),
         retention=MemoryRetentionStore(meetings),
         exports=MemoryExportStore(),
+        maintenance=MemoryMaintenanceStore(meetings),
     )
 
 
@@ -145,6 +148,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
     from nodo_api.adapters.azure.blob import AzureBlobStore
     from nodo_api.adapters.azure.exports_pg import PgExportStore
     from nodo_api.adapters.azure.graph_pg import PgGraphStore
+    from nodo_api.adapters.azure.maintenance_pg import PgMaintenanceStore
     from nodo_api.adapters.azure.openai_extractor import AzureOpenAiExtractor
     from nodo_api.adapters.azure.openai_llm import AzureOpenAiEmbedder, AzureOpenAiLlm
     from nodo_api.adapters.azure.postgres import (
@@ -197,7 +201,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
         retriever=Guarded(
             AzureSearchRetriever(c["search"], embedder),
             make_guard("search", limit=settings.bulkhead_search, retry=INTERACTIVE_RETRY),
-            ("index", "search", "erase"),
+            ("index", "search", "count", "erase"),
         ),
         graph=PgGraphStore(db),
         llm=Guarded(
@@ -221,6 +225,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
         retention=PgRetentionStore(db),
         exports=PgExportStore(db),
         speech_jobs=PgSpeechJobStore(db),
+        maintenance=PgMaintenanceStore(db),
     )
 
 
