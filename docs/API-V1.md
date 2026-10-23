@@ -38,7 +38,7 @@ MeetingOutput {
 
 ## Questions
 
-`POST /v1/query` body `{ question, ui_locale, filters? }` returns `{ answer, answerability: "supported"|"partial"|"unanswerable", citations: { meeting_id, segment_id, speaker_id, start_ms, end_ms, quote }[], related_entities: string[], query_trace_id, model_version, retrieval_version }`.
+`POST /v1/query` body `{ question, ui_locale, filters? }` returns `{ answer, answerability: "supported"|"partial"|"unanswerable", citations: { meeting_id, segment_id, speaker_id, start_ms, end_ms, quote }[], related_entities: string[], query_trace_id, model_version, retrieval_version }`, degraded }`. `degraded: true` means the language model could not be reached: `answer` then says so, `citations` still hold the retrieved sources, and the app should show them as sources, not as an answer (ADR-017). A later request may succeed.
 
 ## Graph
 
@@ -70,6 +70,18 @@ An edge reads `source KIND target`, for example `decision-queue DECIDED_IN meeti
 3. Send the audio to `upload_url` with `PUT`. **Local engine:** one request, raw bytes, no `Authorization` header (the link is the credential), answered `204`; a link works once. **Azure:** the link is a blob SAS URL: add header `x-ms-blob-type: BlockBlob` for one request up to 256 MiB, or stage blocks of 4 MiB with `PUT <url>&comp=block&blockid=<base64>` and finish with `PUT <url>&comp=blocklist` (body: `<BlockList><Latest>id</Latest>...</BlockList>`).
 4. `POST /v1/meetings/{id}/complete` starts processing (state `transcribing`, then `extracting`, then `review`). Poll `GET /v1/meetings/{id}` every 3 seconds until the state is `review`, `ready` or `failed`.
 5. `DELETE /v1/meetings/{id}` (204) erases audio, transcript, search rows and graph contribution.
+
+## Your data
+
+1. `POST /v1/export` body `{ meeting_id?: string }` (omit it for everything the user owns) returns `202` with `{ job_id, status: "queued", expires_at, download_path: null }`.
+2. Poll `GET /v1/export/{job_id}` (every 5 seconds) until `status` is `ready` or `failed`. `download_path` is set when ready.
+3. `GET /v1/export/{job_id}/download` returns one JSON document (`Content-Disposition: attachment`) with every meeting, all transcript versions, speaker names, the recording attestation and the graph insights. It answers `409` if the export is not ready and `404` if it is unknown, someone else's, or older than 24 hours.
+
+Requests and downloads are recorded in the audit log by export id (GDPR articles 15 and 20, ADR-019).
+
+## Overload and outages
+
+Any route can answer `429` (a dependency is saturated or the caller is rate limited) or `503` (a dependency is unavailable, or the instance is shedding load). Both carry a `Retry-After` header in seconds and a body `{ "error": { "code", "message"?, "request_id"? } }` (`request_id` is present when the application produced the response; a response shed or refused earlier still has the `X-Request-Id` header). Clients wait at least `Retry-After`, add jitter, and retry reads; they retry a write only with the same `Idempotency-Key`. `413` means the body was larger than the route allows. During a regional failover writes may answer `503` for a while (RUNBOOKS.md section 2). Every response carries `X-Request-Id`; quote it in a bug report.
 
 ## Local engine only (`/v1/local/...`)
 

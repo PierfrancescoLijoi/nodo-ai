@@ -73,6 +73,7 @@ module "nodo" {
   api_target_port       = var.api_target_port
   budget_contact_emails = var.budget_contact_emails
   openai_deployments    = var.openai_deployments
+  tier                  = "basic"
   search_sku            = "free"
   api_min_replicas      = 1
 }
@@ -107,4 +108,8 @@ output "worker_job_name" {
 
 output "migrate_job_name" {
   value = module.nodo.migrate_job_name
+}
+
+output "retention_job_name" {
+  value = module.nodo.retention_job_name
 }

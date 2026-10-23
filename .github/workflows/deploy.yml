@@ -47,6 +47,12 @@ jobs:
           API_APP_NAME: ${{ vars.API_APP_NAME }}
           WORKER_JOB_NAME: ${{ vars.WORKER_JOB_NAME }}
           MIGRATE_JOB_NAME: ${{ vars.MIGRATE_JOB_NAME }}
+          RETENTION_JOB_NAME: ${{ vars.RETENTION_JOB_NAME }}
+          # Professional tier: the standby API (kept on the same image, or a failover would start an
+          # old one), its resource group, and the public host the smoke test goes through.
+          API_APP_NAME_DR: ${{ vars.API_APP_NAME_DR }}
+          RESOURCE_GROUP_DR: ${{ vars.AZURE_RESOURCE_GROUP_DR }}
+          PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
         run: |
           set -euo pipefail
           for name in RESOURCE_GROUP ACR_NAME API_APP_NAME WORKER_JOB_NAME MIGRATE_JOB_NAME; do
@@ -54,6 +60,9 @@ jobs:
               echo "Missing repository or environment variable: ${name}" >&2
               exit 1
             fi
+            printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
+          done
+          for name in RETENTION_JOB_NAME API_APP_NAME_DR RESOURCE_GROUP_DR PUBLIC_HOST; do
             printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
           done
           printf 'IMAGE=%s.azurecr.io/nodo-api:%s\n' "$ACR_NAME" "$GITHUB_SHA" >> "$GITHUB_ENV"
@@ -70,6 +79,19 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+
+      # The professional tier firewalls the registry. This runner's address is allowed for the
+      # length of the job and removed again at the end, whatever happens.
+      - name: Allow this runner through the registry firewall
+        run: |
+          set -euo pipefail
+          runner_ip="$(curl --fail --silent --show-error https://api.ipify.org)"
+          echo "RUNNER_IP=${runner_ip}" >> "$GITHUB_ENV"
+          if [ "$(az acr show --name "$ACR_NAME" --query networkRuleSet.defaultAction --output tsv)" = "Deny" ]; then
+            az acr network-rule add --name "$ACR_NAME" --ip-address "$runner_ip"
+            echo "RUNNER_RULE_ADDED=true" >> "$GITHUB_ENV"
+            sleep 30
+          fi
 
       - name: Push API image
         run: |
@@ -120,22 +142,45 @@ jobs:
             --name "$WORKER_JOB_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --image "$IMAGE"
+          if [ -n "${RETENTION_JOB_NAME}" ]; then
+            az containerapp job update \
+              --name "$RETENTION_JOB_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --image "$IMAGE"
+          fi
           az containerapp update \
             --name "$API_APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --image "$IMAGE"
+          if [ -n "${API_APP_NAME_DR}" ]; then
+            az containerapp update \
+              --name "$API_APP_NAME_DR" \
+              --resource-group "${RESOURCE_GROUP_DR:-$RESOURCE_GROUP}" \
+              --image "$IMAGE"
+          fi
 
+      # Through the public door when there is one (edge, gateway, then the app), so a broken
+      # gateway policy fails the deploy; the container app's own address otherwise.
       - name: Smoke test API
         run: |
           set -euo pipefail
-          fqdn="$(az containerapp show \
-            --name "$API_APP_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --query properties.configuration.ingress.fqdn \
-            --output tsv)"
+          if [ -n "${PUBLIC_HOST}" ]; then
+            url="https://${PUBLIC_HOST}/readyz"
+          else
+            fqdn="$(az containerapp show \
+              --name "$API_APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query properties.configuration.ingress.fqdn \
+              --output tsv)"
+            url="https://${fqdn}/healthz"
+          fi
           curl --fail --show-error --silent \
             --retry 12 \
             --retry-delay 10 \
             --retry-all-errors \
             --max-time 20 \
-            "https://${fqdn}/healthz"
+            "$url"
+
+      - name: Remove this runner from the registry firewall
+        if: always() && env.RUNNER_RULE_ADDED == 'true'
+        run: az acr network-rule remove --name "$ACR_NAME" --ip-address "$RUNNER_IP"

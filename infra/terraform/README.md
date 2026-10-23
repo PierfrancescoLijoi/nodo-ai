@@ -1,15 +1,36 @@
 # NODO AI - Azure infrastructure (Terraform)
 
-Design: [docs/AZURE-ARCHITECTURE.md](../../docs/AZURE-ARCHITECTURE.md), ADR-010 and ADR-011. Status: the configuration passes `terraform validate`; it has never been planned or applied against a real subscription.
+Design: [docs/AZURE-ARCHITECTURE.md](../../docs/AZURE-ARCHITECTURE.md), ADR-010, ADR-011 and ADR-016 to ADR-019. Status: the configuration passes `terraform validate` and `terraform test` (plan-time assertions with mocked providers); it has never been planned or applied against a real subscription.
 
 ```text
-modules/nodo/   one module: resource group, identities, registry, Key Vault, Storage, Service Bus,
-                PostgreSQL, AI Search, Speech and OpenAI accounts, Container Apps (api + worker job),
-                monitoring, budget, role assignments
-envs/dev/       root for one environment (staging and prod are copies with their own state and sizes)
+modules/nodo/        one module, two tiers (variable `tier`)
+  main.tf            resource groups, identities, registry, Key Vault and keys, storage, queue, database, search, models
+  network.tf         virtual networks per region, subnets, NSG, private DNS, private endpoints   (professional)
+  edge.tf            Front Door Premium, WAF, origin group with failover                        (professional)
+  gateway.tf         API Management (two regions), policies, backends, AI gateway               (professional)
+  apps.tf            Container Apps environments, API, worker, migrate and retention jobs
+  dr.tf              standby region: replica, queue pairing, search, models
+  monitoring.tf      diagnostics, availability test, SLO burn-rate and resource alerts, workbook (professional)
+  security.tf        policy (residency, benchmark), Defender, activity log, locks               (professional)
+  rbac.tf            least-privilege role assignments
+  policies/          API Management policy templates
+  tests/             terraform test: what each tier must create and never regress
+envs/dev/            basic tier: cheap, one region, public endpoints guarded by Entra
+envs/prod/           professional tier, launch size from docs/CAPACITY-MODEL.md
 bootstrap-state.sh   one-time creation of the state Storage account
 ../azure/setup-github-oidc.sh   owner-run GitHub Actions OIDC and RBAC setup
 ```
+
+Check without an Azure account (this is what CI does):
+
+```bash
+cd infra/terraform
+terraform fmt -check -recursive
+terraform -chdir=envs/prod init -backend=false && terraform -chdir=envs/prod validate
+terraform -chdir=modules/nodo init -backend=false && terraform -chdir=modules/nodo test
+```
+
+The professional tier costs real money (Front Door Premium, a Premium gateway unit per region, Premium Service Bus, General Purpose database with HA and a replica, Search Standard with three replicas). Price it in the Azure calculator from the resources in `envs/prod` before the first apply, and set the budget in `cost_budget_amount`.
 
 ## What you need first
 

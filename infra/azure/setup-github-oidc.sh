@@ -78,7 +78,11 @@ gh variable set AZURE_TENANT_ID --repo ${REPO} --body '${tenant_id}'
 gh variable set AZURE_SUBSCRIPTION_ID --repo ${REPO} --body '${subscription_id}'
 gh variable set AZURE_RESOURCE_GROUP --repo ${REPO} --body '${RG}'
 gh variable set ACR_NAME --repo ${REPO} --body '${ACR}'
-gh variable set API_APP_NAME --repo ${REPO} --body 'ca-nodo-${ENV_NAME}-api'
-gh variable set WORKER_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-worker'
+gh variable set API_APP_NAME --repo ${REPO} --body 'ca-nodo-${ENV_NAME}-api-primary'
+gh variable set WORKER_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-worker-primary'
 gh variable set MIGRATE_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-migrate'
+gh variable set RETENTION_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-retention'
+# Professional tier only (terraform output api_url is its public address):
+#   gh variable set API_APP_NAME_DR --repo ${REPO} --body 'ca-nodo-${ENV_NAME}-api-dr'  (and the resource group of the standby region)
+#   gh variable set PUBLIC_HOST --repo ${REPO} --body '<host of terraform output api_url>'
 EOF

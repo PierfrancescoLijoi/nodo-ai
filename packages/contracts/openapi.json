@@ -241,13 +241,41 @@
       },
       "ExportOutput": {
         "properties": {
+          "download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Path"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
           "job_id": {
             "title": "Job Id",
             "type": "string"
           },
           "status": {
-            "const": "queued",
             "default": "queued",
+            "enum": [
+              "queued",
+              "running",
+              "ready",
+              "failed"
+            ],
             "title": "Status",
             "type": "string"
           }
@@ -922,6 +950,11 @@
             "title": "Citations",
             "type": "array"
           },
+          "degraded": {
+            "default": false,
+            "title": "Degraded",
+            "type": "boolean"
+          },
           "model_version": {
             "title": "Model Version",
             "type": "string"
@@ -1161,6 +1194,44 @@
         "title": "SubgraphOutput",
         "type": "object"
       },
+      "SyncResult": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "entities": {
+            "title": "Entities",
+            "type": "integer"
+          },
+          "meeting_id": {
+            "title": "Meeting Id",
+            "type": "string"
+          },
+          "relations": {
+            "title": "Relations",
+            "type": "integer"
+          },
+          "segments_indexed": {
+            "title": "Segments Indexed",
+            "type": "integer"
+          },
+          "versions_added": {
+            "title": "Versions Added",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "meeting_id",
+          "created",
+          "versions_added",
+          "segments_indexed",
+          "entities",
+          "relations"
+        ],
+        "title": "SyncResult",
+        "type": "object"
+      },
       "TranscriptPage": {
         "properties": {
           "items": {
@@ -1338,6 +1409,82 @@
           }
         },
         "summary": "Export Data"
+      }
+    },
+    "/v1/export/{export_id}": {
+      "get": {
+        "operationId": "export_status_v1_export__export_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Status"
+      }
+    },
+    "/v1/export/{export_id}/download": {
+      "get": {
+        "operationId": "export_download_v1_export__export_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Download"
       }
     },
     "/v1/graph/changes": {
@@ -2009,6 +2156,46 @@
           }
         },
         "summary": "Query"
+      }
+    },
+    "/v1/sync/meetings/{meeting_id}": {
+      "put": {
+        "description": "Copy a meeting from a local engine (ADR-015). Safe to repeat.",
+        "operationId": "import_meeting_v1_sync_meetings__meeting_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "meeting_id",
+            "required": true,
+            "schema": {
+              "title": "Meeting Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Meeting"
       }
     },
     "/v1/voice-query": {

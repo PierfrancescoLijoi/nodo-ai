@@ -1,165 +1,184 @@
 # NODO AI - Azure architecture
 
-Status: v0.1 design, nothing deployed. Extends [ARCHITECTURE.md](ARCHITECTURE.md) section 12. Decisions: [ADR-010](adr/010-azure-target-and-iac.md), [ADR-011](adr/011-retrieval-and-graph-staging.md).
+Status: v2 design, 23 October 2026. Nothing is deployed; the Azure side has never run against a subscription. Extends [ARCHITECTURE.md](ARCHITECTURE.md) section 12. Decisions: [ADR-010](adr/010-azure-target-and-iac.md), [ADR-011](adr/011-retrieval-and-graph-staging.md), [ADR-016](adr/016-edge-and-api-gateway.md) (edge and gateway), [ADR-017](adr/017-resilience-and-disaster-recovery.md) (resilience), [ADR-018](adr/018-observability-and-slos.md) (observability), [ADR-019](adr/019-compliance-and-data-governance.md) (compliance). Sizing: [CAPACITY-MODEL.md](CAPACITY-MODEL.md). Operations: [RUNBOOKS.md](RUNBOOKS.md). Controls: [COMPLIANCE.md](COMPLIANCE.md).
 
-The mobile app talks to **one** public endpoint, the NODO API. Everything else is private to the API and its workers and is reached with managed identities. The app never holds an Azure key.
+The module has two tiers, chosen by `tier`:
 
-## 1. Topology
+| | `basic` | `professional` |
+|---|---|---|
+| For | a personal or demo deployment | a service people depend on |
+| Region | one | two (primary plus standby) |
+| Network | public endpoints, Entra-only auth | virtual network, private endpoints, no public data endpoint except audio uploads |
+| Entrance | the Container App | Front Door Premium + WAF, then API Management |
+| Models | direct | through the AI gateway, two regions |
+| Availability | single replica, no zones | three zones, HA database, three replicas minimum |
+| Recovery | restore from backup | replica, geo-redundant storage, scaled-to-zero standby |
+| Operations | logs, budget | SLO alerts, availability test, diagnostics everywhere, workbook, policy, Defender, locks |
+
+Everything below describes the **professional** tier unless it says otherwise.
+
+## 1. Principles
+
+1. **One way in.** Users and the models are reached through gateways; no service has a second public door.
+2. **Identity, not secrets.** Managed identities and Entra tokens everywhere; the only secrets are the attestation key, the telemetry salt and the break-glass database password, in Key Vault.
+3. **Fail small.** Every dependency has a limit, a timeout and a breaker; a failing model degrades answers, it does not fail requests (ADR-017).
+4. **Derived data is rebuildable.** The search index and graph projections come from PostgreSQL; only PostgreSQL and audio are irreplaceable (ADR-007).
+5. **Capacity from the workload.** Sizes are read off a model of what the application does, not chosen by habit (CAPACITY-MODEL.md).
+6. **Symptoms before causes.** Alerts follow what people feel (ADR-018).
+7. **Compliance as configuration.** Residency, retention, immutability, locks and encryption are code with a test, not a document.
+8. **Same code on both tiers.** The application reads its environment; the tier changes what it is connected to, not how it behaves.
+
+## 2. Topology
 
 ```mermaid
 flowchart TD
-  APP[Android app] -->|OIDC PKCE| EID[Microsoft Entra External ID]
-  APP -->|HTTPS + access token| API[Container App: api]
-  APP -->|short-lived SAS, resumable chunks| BLOB[(Storage: audio)]
-  API --> PG[(PostgreSQL Flexible Server)]
-  API --> SB[[Service Bus: ingest queue]]
-  API --> SRCH[(Azure AI Search)]
-  API --> AOAI[Foundry: LLM deployment]
-  API --> KV[Key Vault]
-  BLOB -->|BlobCreated via API complete call| SB
-  SB -->|KEDA scale rule| WRK[Container Apps Job: ingestion worker]
-  WRK --> SPEECH[Foundry: Speech]
-  WRK --> AOAI
+  APP[Apps: Android, desktop] -->|OIDC PKCE| EID[Microsoft Entra External ID]
+  APP -->|HTTPS + access token| AFD[Front Door Premium + WAF]
+  APP -->|write-only SAS, 15 min, blocks| BLOB[(Storage: audio, RA-GZRS)]
+  AFD -->|priority 1| APIMP[API Management, primary region]
+  AFD -.->|priority 2, on probe failure| APIMS[API Management, standby region]
+  APIMP -->|internal| APIP[Container Apps: api x3 zones]
+  APIMS -.-> APIS[Container Apps: api, scaled to zero]
+  APIP --> PG[(PostgreSQL, zone-redundant HA)]
+  PG -.->|replica, seconds| PGS[(PostgreSQL replica, standby)]
+  APIP --> SB[[Service Bus Premium]]
+  SB -.->|geo-DR alias| SBS[[Service Bus standby]]
+  APIP --> SRCH[(AI Search, 3 replicas)]
+  APIP -->|AI gateway| APIMP
+  WRK[Worker jobs, KEDA on queue] -->|AI gateway| APIMP
+  APIMP --> AOAI[Azure OpenAI, primary]
+  APIMP -.->|retry on 429 / 5xx| AOAS[Azure OpenAI, standby]
+  SB --> WRK
+  WRK --> SPEECH[Speech]
   WRK --> PG
   WRK --> SRCH
-  API & WRK --> AI[Application Insights + Log Analytics]
-  GH[GitHub Actions] -->|OIDC federation, no secrets| ACR[Container Registry]
-  GH -->|terraform apply, deploy revision| RG[Resource group per environment]
+  RET[Retention job, every 6 h] --> PG
+  RET --> BLOB
+  APIP & WRK & APIMP & AFD --> LAW[Log Analytics + Application Insights]
+  LAW --> ALERT[SLO burn-rate and resource alerts]
 ```
 
-## 2. Services and why
+Request path: Front Door -> API Management -> Container Apps. Async path: API -> Service Bus -> worker -> PostgreSQL, Search, models, Speech. Model path: caller -> AI gateway -> account in the nearest healthy region. Data path for audio: client -> blob directly, by short-lived SAS.
 
-| Concern | Azure service | Beta SKU (private use) | Production direction | Notes |
-|---|---|---|---|---|
-| API and workers | Container Apps (Consumption) | api min 1 replica, worker job scales to zero | workload profiles, zone redundancy | KEDA scales the worker on Service Bus queue length; scaling to zero costs nothing |
-| Container images | Container Registry | Basic | Standard or Premium (geo, private link) | GitHub pushes with OIDC, Container Apps pulls with managed identity |
-| Identity for users | Microsoft Entra External ID | free tier | custom domain, MFA policy | Separate external tenant, created by hand (not Terraform); tokens carry `sub` and a `workspace_id` claim minted by a custom claims provider |
-| Identity for services | User-assigned managed identities | one for api, one for worker | one per module | No connection strings, no keys; Terraform grants least-privilege roles |
-| Relational store | PostgreSQL Flexible Server | Burstable B1ms, 32 GB, PITR 7 days | General Purpose, zone-redundant HA, read replica | Source of truth; extensions `vector`, `pg_trgm`; row level security keyed on `app.workspace_id` |
-| Audio and exports | Blob Storage (StorageV2, LRS) | LRS, versioning off for audio, lifecycle delete at retention | ZRS or GZRS, immutability policies for audit exports | Shared-key access disabled, Entra only; lifecycle rule enforces the audio retention default (30 days) |
-| Queue | Service Bus | Standard (duplicate detection, topics later); a Basic queue would work for one queue, check the feature table before choosing | Premium when throughput or private link requires | Queue `ingest`, dead-letter on, max delivery count 5 |
-| Search | Azure AI Search | Free for dev, Basic for beta | Standard with partitions per scale | One index, one analyzer field per content language (`text_en`, `text_pl`, `text_it`, `text_da`), filter on `workspace_id` and `meeting_id` |
-| Speech to text | Foundry resource for Speech | pay per audio hour | same, region per data policy | Batch transcription with diarization; see section 5 |
-| LLM | Foundry resource, Azure OpenAI deployment | one chat deployment, one embedding deployment | regional deployment types chosen by data policy | Provider adapter keeps the model replaceable |
-| Secrets | Key Vault (RBAC mode) | Standard | Premium or managed HSM for customer-managed keys | Only for what cannot be identity-based (attestation HMAC key, third-party tokens) |
-| Observability | Log Analytics + Application Insights | workspace-based, 30 day retention | longer retention, alerts, workbooks | OpenTelemetry with transcript text and tokens redacted |
+## 3. The entrance (ADR-016)
 
-Neo4j is **not** in the Azure beta: the graph is a rebuildable projection (ADR-007) served from Postgres tables behind the `GraphStore` port (ADR-011).
+| Layer | Enforces | Does not do |
+|---|---|---|
+| Front Door Premium | TLS, WAF (default rule set 2.1, bot manager 1.1), per-address rate limit, region failover on probe failure | caching, authentication |
+| API Management | only-Front-Door (network tag and `X-Azure-FDID`), token validation, per-user rate limit, backend per region, circuit breaker, request id and `traceparent`, header hygiene | retries of the public API, business rules |
+| API (in the container) | token verification again (JWKS cache with rotation), `azp` pinning, workspace tenancy, body limits, load shedding, idempotency | transport security |
 
-## 3. Identity and access
+Each layer assumes the one in front of it may have been misconfigured; none is the only protection for anything.
 
-1. The app signs the user in with Authorization Code + PKCE against Entra External ID and receives an access token for the NODO API (`aud` = API app id, `iss` = the external tenant).
-2. The API validates the token (RS256, JWKS cached, issuer and audience pinned, `workspace_id` claim format checked, token lifetime capped). The code is already written and tested; only the JWKS fetch and cache remain (SECURITY-BACKLOG).
-3. The API calls Azure services as its managed identity. No user token is forwarded.
-4. Audio upload: the API mints a user-delegation SAS limited to one blob path, write-only, 15 minutes. The app uploads chunks directly to Blob, then calls `complete`.
+## 4. Compute
 
-Role assignments (Terraform):
+- **Container Apps environment** per region, workload-profile mode, zone redundant, internal load balancer, in the `snet-aca` subnet. Ingress restricted to the gateway subnet.
+- **API**: three replicas minimum (one per zone) and a concurrent-request scale rule. `WEB_CONCURRENCY` follows vCPU (one process each). Startup, liveness (`/healthz`) and readiness (`/readyz`, database only) probes; 30 s termination grace with a 25 s graceful shutdown in `serve.py`, so a rolled replica finishes its requests.
+- **Worker**: a job triggered by KEDA on the queue length with the worker identity, 15 s polling, one message per execution, 1 hour timeout, one retry.
+- **Migrate** (manual, before a rollout) and **retention** (cron every six hours) jobs, each with its own identity and database role.
+- **Revisions**: single revision mode with readiness gates; rollback is activating the previous revision. The deploy pipeline owns the image; Terraform ignores it.
+
+## 5. Data
+
+| Store | Configuration | Why |
+|---|---|---|
+| PostgreSQL 16 Flexible Server | General Purpose, zone-redundant HA, 35 day point-in-time restore, geo-redundant backup, cross-region replica, delegated subnet (no public endpoint), `track_io_timing`, slow statements logged at 1 s, weekly maintenance window | irreplaceable source of truth; row level security; Entra-only roles |
+| Blob: audio account | RA-GZRS, customer-managed key (RSA-HSM, auto-rotated), infrastructure encryption, versioning and change feed, 14 day soft delete, SAS lifetime capped, no shared key, malware scan | the only public data endpoint, with compensating controls (ADR-016) |
+| Blob: audit account | RA-GZRS, private, time-based retention (WORM) | evidence that cannot be altered; archive job not yet built |
+| Service Bus Premium | one messaging unit, private, geo-DR alias to the standby namespace, duplicate detection 1 h, 5 deliveries then dead-letter | shock absorber between the app and slow work |
+| AI Search Standard | three replicas, partitions from the capacity model, private, RBAC only | derived: rebuilt from PostgreSQL in the standby region |
+| Key Vault Premium | purge protection, 90 day soft delete, firewall, RBAC | secrets and the storage key |
+
+The database role design is part of the architecture: the api and worker identities each get a login role named after the identity, with data rights but no DDL, under forced row level security, and with the audit table append-only for them. The retention identity gets only the `nodo_retention` role (it can see which meetings are due, across workspaces) and the right to append audit events; it never reads transcripts or the graph. The migrate identity is the Entra administrator and owns the schema.
+
+## 6. AI services
+
+- **Models.** Azure OpenAI accounts in both regions with the same deployments (EU data-zone deployment type), reached only through the AI gateway. Each caller identity has its own token-per-minute budget; a 429 or a server error retries once or twice in the other region. The long-lead item is the token quota (CAPACITY-MODEL.md section 4).
+- **Speech.** Batch transcription with diarization and language identification; see section 12 for the open decision and the staged-pipeline gap. Results are read by the worker, never by the client.
+- **Embeddings.** 512 dimensions, int8; the choice stands only if retrieval quality on the golden set holds.
+
+## 7. Identity and access
+
+Identities (user-assigned, one per job of work): `api`, `worker`, `migrate`, `retention`, `storage` (used only so the audio account can read its key). Users sign in with PKCE against Entra External ID; the API accepts only the configured client application ids (`NODO_OIDC_ALLOWED_CLIENT_IDS`, the `azp` claim).
 
 | Principal | Scope | Role |
 |---|---|---|
-| api identity | storage account | Storage Blob Data Contributor (to mint user-delegation SAS and read exports) |
-| api identity | Service Bus | Azure Service Bus Data Sender |
-| api identity | Foundry resources | Cognitive Services User (OpenAI inference) |
-| api identity | AI Search | Search Index Data Reader |
-| worker identity | storage | Storage Blob Data Reader (audio), Contributor (transcripts) |
-| worker identity | Service Bus | Azure Service Bus Data Receiver |
-| worker identity | Foundry resources | Cognitive Services User, Cognitive Services Speech User |
-| worker identity | AI Search | Search Index Data Contributor |
-| both | Key Vault | Key Vault Secrets User |
-| both | ACR | AcrPull |
-| GitHub deploy identity | resource group | Contributor (plan) and a narrower role for revisions; federated credential per environment |
+| api, worker, migrate, retention | registry | AcrPull |
+| api, worker, migrate, retention | Key Vault | Key Vault Secrets User |
+| api, worker, retention | audio account | Storage Blob Data Contributor (retention erases, never reads) |
+| api | Service Bus (each region) | Azure Service Bus Data Sender |
+| worker | Service Bus (each region) | Azure Service Bus Data Receiver |
+| api, worker | Search (each region) | Search Index Data Contributor |
+| migrate | Search | Search Service Contributor |
+| api, worker | OpenAI (each region) | Cognitive Services OpenAI User (kept as a fallback path; the gateway is the normal one) |
+| worker | Speech (each region) | Cognitive Services Speech User |
+| gateway (system identity) | OpenAI (each region) | Cognitive Services OpenAI User |
+| storage identity | Key Vault | Key Vault Crypto Service Encryption User |
+| the principal running Terraform | Key Vault | Key Vault Administrator (writes the secrets and the key) |
 
-PostgreSQL uses Entra authentication for the two identities (no password in config); the admin password lives only in Key Vault for break-glass.
+## 8. Network
 
-## 4. Networking by stage
+Per region (a /16): `0.0/23` container apps (delegated), `2.0/24` private endpoints, `3.0/24` PostgreSQL (delegated), `4.0/24` gateway with a network security group that admits Front Door, the virtual network, Azure's management plane and the load balancer, and nothing else. Private DNS zones exist per region (not shared) so each region resolves its own endpoints and a failover depends on nothing in the failed region. The gateway's own name resolves to its private address inside each network (the AI gateway path).
 
-| Stage | Network | Why |
+Public surfaces, complete list: Front Door; the audio blob endpoint (SAS-only); Key Vault and the registry, firewalled to `operator_cidrs`. Application Insights ingestion uses the public endpoint with the connection string (a private link scope is the upgrade).
+
+## 9. Failure behavior
+
+| What fails | What users see | What recovers it | Time |
+|---|---|---|---|
+| One API replica | nothing (readiness removes it) | platform replaces it | seconds |
+| A zone | nothing to a brief latency rise | zone-redundant database fails over; replicas in other zones carry traffic | about a minute |
+| Language model throttled or down | answers become "here are the sources" (`degraded`) | gateway retries in the other region; breaker stops hammering | seconds |
+| Search down | questions answered with 503, lists and detail unaffected | platform; rebuild from PostgreSQL if the index is lost | minutes to hours |
+| Speech slow or down | recordings wait in `processing`; queue grows | queue absorbs; alert on backlog | hours without data loss |
+| A worker crash mid-job | the recording is retried (up to five times) then dead-lettered and alerted | idempotent job | minutes |
+| Dependency flapping | requests refused fast with `Retry-After`, not slow | bulkhead and breaker | seconds |
+| Traffic spike | some requests answered `429`/`503` with `Retry-After` | scale rule, load shedding | seconds to a minute |
+| Primary region down | reads from the standby within a minute; writes after the promotion | RUNBOOKS.md failover | 30 to 60 minutes (target, unrehearsed) |
+| Bad deploy | errors or latency rise, burn-rate alert | activate the previous revision | minutes |
+| Bad WAF rule | blocked legitimate requests | switch to Detection, review log | minutes |
+| Accidental deletion of a data service | nothing yet | `CanNotDelete` lock refuses it | n/a |
+
+## 10. Observability and objectives (ADR-018)
+
+Objectives: 99.9% availability of the API over 30 days, read p95 under 800 ms, erasure 100% on time. Alerts: availability test from five places; fast and slow burn rate; read latency; Front Door origin health; audio retention failure; PostgreSQL CPU, storage and replica lag; dead letters; queue backlog; gateway capacity; budget actual and forecast. Every service ships diagnostics to one workspace; the application ships traces (W3C context through the queue), metrics and JSON logs with pseudonymised ids and no content. One workbook gives the overview.
+
+## 11. Compliance and governance (ADR-019)
+
+Residency by policy; storage limitation by job plus lifecycle backstop; access and portability by export job; immutable audit account; customer-managed key on the audio account; benchmark initiative in audit mode; Defender plans; locks; activity log in the workspace. COMPLIANCE.md maps each control to its evidence and to what remains for legal and audit.
+
+## 12. Speech, and the staged pipeline
+
+Documented facts (Microsoft Learn, checked 22 October 2026): batch transcription supports diarization on mono audio with a 240 minute limit per file, and language identification with 2 to 10 candidate locales; identification is not available together with a custom model in batch; fast transcription lists `pl-PL`, `da-DK`, `it-IT` and `en-*`; newer models list Polish, Danish and Italian with diarization and language identification. Per-locale diarization quality for Polish and Danish is not documented. The `SpeechToText` port has two candidate adapters to compare on real recordings in each language before one is fixed; the golden set gets a speech slice for that.
+
+**Known gap.** Today the transcription step submits the batch job and waits for it inside the worker, so a worker is occupied for the whole duration and a crash resubmits (and re-pays for) the job. The fix is stages: submit and persist the provider job id, schedule a poll message, finish when ready. It needs a scheduled-delivery operation on the `JobQueue` port. The capacity model puts a number on it: nine times the worker executions at peak.
+
+## 13. Delivery
+
+- One Terraform state per environment in a Storage account with Entra-only access; pull requests run format check, `validate` and `terraform test` (plan-time assertions with mocked providers); `trivy config` scans the module.
+- GitHub Actions authenticate with OIDC federation. Images are built once, scanned and promoted by digest; a revision rollout follows a migrate job; smoke test after rollout.
+- The deploying runner's address must be in `operator_cidrs` for the registry and Key Vault in the professional tier (or the runner must be inside the network).
+
+## 14. Verification, honestly
+
+| Layer | Verified how | Not verified |
 |---|---|---|
-| Beta | Public endpoints, every data service with Entra-only auth, shared keys off, firewall allowing Azure services and the Container Apps environment egress | Private endpoints add cost and setup that a one-person beta does not need |
-| Team and enterprise | Container Apps environment in a VNet, private endpoints for Postgres, Storage, Key Vault, Search, Service Bus, Foundry; public access disabled; WAF in front of the API | The ARCHITECTURE.md trust boundaries are enforced by the network too |
+| Application (resilience, telemetry, retention, export, JWKS, edge) | unit and integration tests, including real PostgreSQL for the role and RLS behavior | behavior under real Azure latency and throttling |
+| Terraform syntax and schema | `terraform validate` against azurerm 4.81 | n/a |
+| Terraform composition (which resources exist per tier, which properties are set, no unknown `for_each` keys) | `terraform test`: 5 plan-time runs with mocked providers (basic, professional, without standby, failover) asserting the properties that must not regress | that Azure accepts it; quotas; name availability; cost |
+| API Management policies | XML written to the documented schema | accepted by the service (validated at the first apply) |
+| Everything that runs on Azure | not applied | all of it. The first apply goes to a throwaway subscription, then a rehearsal of the failover |
 
-Terraform keeps this behind one variable, `private_networking`, so the move is a plan, not a rewrite.
+Things to check at the first deployment, in order: `pgaadauth_create_principal` accepts the identity name; the Speech request and result shapes; Search index creation and filters; the embedding deployment size equals `NODO_OPENAI_EMBEDDING_DIMENSIONS`; a Container Apps job starts from the queue rule with the worker identity; the gateway accepts the policies and `llm-token-limit`; Front Door reaches the gateway through the network rule; the availability test and burn-rate queries return rows.
 
-## 5. Speech: decision needed after a spike
+## 15. Open items
 
-Documented facts (Microsoft Learn, checked 22 October 2026):
-
-- Batch transcription supports diarization on mono audio (`diarizationEnabled`, and `diarization` min and max speakers for three or more, up to 35), with a 240 minute limit per file, and language identification with 2 to 10 candidate locales.
-- Language identification is not available together with a custom model in batch.
-- Fast transcription lists `pl-PL`, `da-DK`, `it-IT`, `en-US` and `en-GB`.
-- MAI-Transcribe and LLM Speech are newer options that list Polish, Danish and Italian with diarization and language identification, called through the fast transcription endpoint.
-- The per-locale diarization quality for Polish and Danish is not documented.
-
-So the ingestion worker has a `SpeechToText` port with two adapters to try on real recordings in each language: batch with diarization, and the newer fast path. The golden set gets a speech slice (word error rate and speaker confusion per language) before one is chosen. Speaker labels stay anonymous either way.
-
-## 6. Ingestion and query flows
-
-Ingestion: app uploads chunks to Blob, calls `POST /v1/meetings/{id}/complete`, the API verifies the chunk manifest and publishes one message `{meeting_id, workspace_id, source_hash, pipeline_version, event_id}` (no audio, no text). The worker job starts when the queue is non-empty, transcribes, diarizes, extracts claims with the LLM, writes versioned segments to Postgres, indexes segments in Search, rebuilds graph rows, and moves the meeting to `review`. Retries use the dead-letter queue after 5 deliveries; every step is idempotent on `source_hash + pipeline_version + event_id`.
-
-Query: the API authenticates, loads the caller's allowed meeting ids from Postgres, runs hybrid search with a filter on workspace and those ids, reads the graph slice from Postgres, calls the LLM with delimited evidence, validates citations against Postgres, and returns the answer in the user's UI language.
-
-## 7. Search index design (4 languages)
-
-One analyzer per field, so each segment is indexed into the field of its own language:
-
-| Field | Analyzer |
-|---|---|
-| `text_en` | `en.microsoft` |
-| `text_pl` | `pl.microsoft` |
-| `text_it` | `it.microsoft` |
-| `text_da` | `da.microsoft` |
-| `vector` | multilingual embedding deployment, same dimension for all |
-| `workspace_id`, `meeting_id`, `segment_id`, `started_at_ms`, `version` | filterable, retrievable |
-
-Queries run against all four text fields plus the vector; a Danish question finds an English segment through the vector side. Analyzer names are from the Microsoft Learn list of supported analyzers.
-
-## 8. Environments and delivery
-
-- One subscription (or at minimum one resource group) per environment: `dev`, `staging`, `prod`. Terraform state in a Storage account with versioning and Entra-only access, one state file per environment.
-- GitHub Actions authenticate with OIDC federated credentials, no client secrets. Pull requests run `terraform plan` and comment the result; `main` applies to dev; staging and prod need an approval.
-- Images are built once, signed, scanned, and promoted by digest. Container Apps revisions give canary traffic splitting and instant rollback.
-- Database migrations run as a job before the new revision receives traffic.
-
-## 9. Cost control (to be measured, not promised)
-
-Fixed monthly drivers in a beta: Search Basic, Service Bus Standard, Postgres B1ms, the api at one replica, Log Analytics ingestion. Variable: Speech audio hours and LLM tokens. Controls: a subscription budget with alerts at 50, 80 and 100 percent, scale-to-zero worker, Free Search tier in dev, log sampling, per-meeting cost recorded in telemetry so EUR per audio hour is a dashboard number. Prices change; read them from the Azure pricing calculator when sizing.
-
-## 10. Backup, recovery and deletion
-
-- Postgres point-in-time restore (7 days beta, longer in prod); restore drill before any real user.
-- Blob soft delete for accidental loss only on exports; audio follows the retention policy and is not recoverable after its lifecycle delete.
-- Erasure cascade stays ADR-007: tombstone in Postgres, then Search documents, graph rows, blobs; a reconciliation job finds tombstoned meetings that still have derived data.
-- Region loss: infrastructure is code, data restore from backups; no active-active in beta.
-
-## 11. Things to verify before the first apply
-
-1. Region: pick one EU region where Container Apps, Foundry Speech, an OpenAI chat and embedding model, AI Search and Postgres Flexible Server are all available. Default in code is `swedencentral`; confirm with `az` and the model availability pages.
-2. Foundry data-processing terms and whether abuse monitoring applies to the chosen deployment type, for the legal review in ADR-005.
-3. Entra External ID tenant creation and the custom claims provider that adds `workspace_id`.
-4. Quotas: Container Apps cores, OpenAI tokens-per-minute, Speech concurrent batch jobs.
-5. Name uniqueness: Storage, Key Vault, ACR, Search and Postgres names are global or regional.
-
-## 12. Implementation status (22 October 2026)
-
-| Port | Azure adapter | Verified how |
-|---|---|---|
-| MeetingRepository (with keyset list), TranscriptRepository, AuditLog, job outbox | `adapters/azure/postgres.py` plus `migrations/0001_init.sql` | 12 integration tests on a real PostgreSQL 16: ownership, per-user idempotency under concurrency, row level security as a non-superuser, append-only audit, an HTTP flow end to end |
-| GraphStore | `adapters/azure/graph_pg.py` plus `migrations/0002_graph.sql` (ADR-012) | one contract suite (60 tests) run on the memory store and on real PostgreSQL; benchmark on 1M relations in ADR-012 |
-| Extractor | `adapters/azure/openai_extractor.py` (strict JSON schema, numbered evidence, validated afterwards) | fakes: parsing, bad output, tag neutralisation |
-| BlobStore | `adapters/azure/blob.py` (user-delegation SAS, one blob per meeting, write-only upload, read-only link) | SAS generated offline with a constructed delegation key and its query string inspected |
-| JobQueue | `adapters/azure/servicebus.py` (outbox row first, then send, message id = job identity) | fakes: single send, retry after a failed send |
-| Retriever | `adapters/azure/search.py` (index with four analyzer fields and a vector field, hybrid query, access filter inside the query) | fakes: filter text, document shape, paging erase; the index definition builds with the real SDK models |
-| LlmClient, Embedder | `adapters/azure/openai_llm.py` (the model points at numbered evidence, citations are built from the retrieved segments) | fakes: fabricated references dropped, malformed output is unanswerable, injection tags neutralised |
-| SpeechToText | `adapters/azure/speech.py` (batch transcription, diarization, language identification) | `httpx.MockTransport` against the documented request and response shapes |
-| Worker | `worker.py` and `services/ingestion.py` (transcribe, index, move to review; retries, dead letter at the last delivery, marks the meeting failed) | in-memory adapters |
-| Bootstrap job | `admin.py` (`bootstrap` = migrate + roles + index) | migrations and role grants run on real PostgreSQL; `pgaadauth_create_principal` is Azure-only |
-
-Not yet verified against a live Azure account, and therefore the first things to check after the first deployment:
-
-1. `pgaadauth_create_principal` accepts the identity name as the role name, and the Entra token works as the password.
-2. The Speech batch request and result shapes (`languageIdentification.mode`, `recognizedPhrases` fields) match the API version in use.
-3. Search index creation (vector profile, analyzer names) and the `owner_id eq` filter on a real service.
-4. The embedding deployment size equals `NODO_OPENAI_EMBEDDING_DIMENSIONS`.
-5. A Container Apps job starts from the Service Bus rule with the worker identity and finishes within its replica timeout.
-
-Not built yet: spoken-language selection per meeting and the export job runner. Extraction, the graph, the review flow and the meetings list endpoint are built (see `docs/API-V1.md`).
+1. Speech staged pipeline (section 12).
+2. Audit archive job from the database to the immutable account, with a watermark and a dedicated role.
+3. A search re-index command that rebuilds the index from PostgreSQL (needed for the standby region and for index loss; it needs a cross-workspace read role like the retention one).
+4. A sweep that re-publishes outbox rows after a queue failover.
+5. Approval UI for decisions and actions (ADR-004).
+6. Per-class queues (ingest, analyze, reanalyze) when the capacity model says interactive reanalysis competes with ingestion.
+7. Private link scope for Application Insights.
+8. First apply, load test against the real SKU, and a failover rehearsal; then replace the assumed inputs in CAPACITY-MODEL.md.
+9. Region and model availability, token quota, Entra External ID tenant and its custom claim, and name uniqueness (unchanged from v0.1).

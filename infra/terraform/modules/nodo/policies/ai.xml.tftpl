@@ -1,0 +1,42 @@
+<policies>
+  <inbound>
+    <base />
+    <!-- Callers are the API and the worker, by Entra identity. Nobody else gets near the models. -->
+    <validate-azure-ad-token tenant-id="{{tenant-id}}" header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized">
+      <audiences>
+        <audience>https://cognitiveservices.azure.com</audience>
+      </audiences>
+      <client-application-ids>
+%{ for id in caller_client_ids ~}
+        <application-id>${id}</application-id>
+%{ endfor ~}
+      </client-application-ids>
+    </validate-azure-ad-token>
+    <!-- One caller cannot starve the other: each identity has its own token budget per minute. -->
+    <llm-token-limit counter-key='@(context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Claims.GetValueOrDefault("appid", "unknown"))' tokens-per-minute="${tokens_per_minute}" estimate-prompt-tokens="true" remaining-tokens-header-name="x-ratelimit-remaining-tokens" />
+    <!-- The gateway signs in to the model accounts with its own identity (role: Cognitive Services OpenAI User). -->
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+    <set-backend-service backend-id="openai-primary" />
+  </inbound>
+  <backend>
+%{ if has_secondary ~}
+    <!-- Model calls are idempotent: on throttling or a server error, one more try, in the other region. -->
+    <retry condition='@(context.Response == null ? false : (context.Response.StatusCode == 429 || context.Response.StatusCode >= 500))' count="2" interval="1" first-fast-retry="true">
+      <choose>
+        <when condition='@(context.Response == null ? false : (context.Response.StatusCode == 429 || context.Response.StatusCode >= 500))'>
+          <set-backend-service backend-id="openai-secondary" />
+        </when>
+      </choose>
+      <forward-request buffer-request-body="true" timeout="90" />
+    </retry>
+%{ else ~}
+    <forward-request buffer-request-body="true" timeout="90" />
+%{ endif ~}
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

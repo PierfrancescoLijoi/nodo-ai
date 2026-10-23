@@ -1,0 +1,20 @@
+<policies>
+  <inbound>
+    <base />
+    <!-- The health probe of Front Door and of the availability tests: no token, but no free ride either. -->
+    <check-header name="X-Azure-FDID" failed-check-httpcode="403" failed-check-error-message="Forbidden" ignore-case="true">
+      <value>{{front-door-id}}</value>
+    </check-header>
+    <rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
+    <set-backend-service backend-id='@(context.Deployment.Region == "${primary_region_display}" ? "api-primary" : "api-dr")' />
+  </inbound>
+  <backend>
+    <forward-request timeout="10" />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

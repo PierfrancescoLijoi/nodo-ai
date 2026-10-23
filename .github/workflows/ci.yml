@@ -124,6 +124,32 @@ jobs:
       - run: terraform fmt -check -recursive
       - run: terraform -chdir=envs/dev init -backend=false
       - run: terraform -chdir=envs/dev validate
+      - run: terraform -chdir=envs/prod init -backend=false
+      - run: terraform -chdir=envs/prod validate
+      # Plan-time assertions with mocked providers: which resources each tier creates and the
+      # properties that must not regress (private data services, zones, firewall mode, standby).
+      - run: terraform -chdir=modules/nodo init -backend=false
+      - run: terraform -chdir=modules/nodo test
+      - name: Scan Terraform for misconfigurations
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra/terraform
+          severity: HIGH,CRITICAL
+          # Report only until the first baseline has been read: the public audio endpoint and the
+          # operator-firewalled Key Vault are deliberate (ADR-016) and need explicit ignores.
+          exit-code: "0"
+          skip-dirs: "**/.terraform"
+
+  capacity-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install pytest
+      - run: python -m pytest -q tools/capacity
 
   secrets:
     runs-on: ubuntu-latest

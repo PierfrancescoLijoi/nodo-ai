@@ -1,37 +1,62 @@
 # Least privilege per identity (AZURE-ARCHITECTURE.md section 3). No keys, no connection strings.
+# The same grant covers the standby region: its services are listed next to the primary's.
 
 locals {
-  identities = {
-    api     = azurerm_user_assigned_identity.api.principal_id
-    worker  = azurerm_user_assigned_identity.worker.principal_id
-    migrate = azurerm_user_assigned_identity.migrate.principal_id
+  principal = { for k, v in azurerm_user_assigned_identity.workload : k => v.principal_id }
+
+  # Services that exist once per region, by stamp.
+  regional = {
+    servicebus = merge({ primary = azurerm_servicebus_namespace.main.id }, local.dr ? { dr = azurerm_servicebus_namespace.dr[0].id } : {})
+    search     = merge({ primary = azurerm_search_service.main.id }, local.dr ? { dr = azurerm_search_service.dr[0].id } : {})
+    openai     = merge({ primary = azurerm_cognitive_account.openai.id }, local.dr ? { dr = azurerm_cognitive_account.openai_dr[0].id } : {})
+    speech     = merge({ primary = azurerm_cognitive_account.speech.id }, local.dr ? { dr = azurerm_cognitive_account.speech_dr[0].id } : {})
   }
 
-  role_assignments = {
-    api_acr_pull      = { principal = "api", scope = azurerm_container_registry.main.id, role = "AcrPull" }
-    worker_acr_pull   = { principal = "worker", scope = azurerm_container_registry.main.id, role = "AcrPull" }
-    api_kv_secrets    = { principal = "api", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
-    worker_kv_secrets = { principal = "worker", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
-    api_blob          = { principal = "api", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
-    worker_blob       = { principal = "worker", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
-    api_sb_send       = { principal = "api", scope = azurerm_servicebus_namespace.main.id, role = "Azure Service Bus Data Sender" }
-    worker_sb_receive = { principal = "worker", scope = azurerm_servicebus_namespace.main.id, role = "Azure Service Bus Data Receiver" }
-    # The API also re-indexes on transcript correction and removes documents on erasure.
-    api_search_write    = { principal = "api", scope = azurerm_search_service.main.id, role = "Search Index Data Contributor" }
-    worker_search_write = { principal = "worker", scope = azurerm_search_service.main.id, role = "Search Index Data Contributor" }
-    api_openai          = { principal = "api", scope = azurerm_cognitive_account.openai.id, role = "Cognitive Services OpenAI User" }
-    worker_openai       = { principal = "worker", scope = azurerm_cognitive_account.openai.id, role = "Cognitive Services OpenAI User" }
-    worker_speech       = { principal = "worker", scope = azurerm_cognitive_account.speech.id, role = "Cognitive Services Speech User" }
-    migrate_acr_pull    = { principal = "migrate", scope = azurerm_container_registry.main.id, role = "AcrPull" }
-    migrate_kv_secrets  = { principal = "migrate", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
-    migrate_search      = { principal = "migrate", scope = azurerm_search_service.main.id, role = "Search Service Contributor" }
+  # Grants on services that exist once: who, on what, which role.
+  single_grants = {
+    api_acr_pull       = { principal = "api", scope = azurerm_container_registry.main.id, role = "AcrPull" }
+    worker_acr_pull    = { principal = "worker", scope = azurerm_container_registry.main.id, role = "AcrPull" }
+    migrate_acr_pull   = { principal = "migrate", scope = azurerm_container_registry.main.id, role = "AcrPull" }
+    retention_acr_pull = { principal = "retention", scope = azurerm_container_registry.main.id, role = "AcrPull" }
+    api_kv_secrets     = { principal = "api", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
+    worker_kv_secrets  = { principal = "worker", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
+    migrate_kv_secrets = { principal = "migrate", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
+    retention_kv       = { principal = "retention", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
+    api_blob           = { principal = "api", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
+    worker_blob        = { principal = "worker", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
+    # The retention job erases audio; it never reads it.
+    retention_blob = { principal = "retention", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
   }
+
+  # Grants repeated for every stamp: principal, service, role.
+  regional_grants = {
+    api_sb_send       = { principal = "api", service = "servicebus", role = "Azure Service Bus Data Sender" }
+    worker_sb_receive = { principal = "worker", service = "servicebus", role = "Azure Service Bus Data Receiver" }
+    # The API also re-indexes on transcript correction and removes documents on erasure.
+    api_search_write    = { principal = "api", service = "search", role = "Search Index Data Contributor" }
+    worker_search_write = { principal = "worker", service = "search", role = "Search Index Data Contributor" }
+    migrate_search      = { principal = "migrate", service = "search", role = "Search Service Contributor" }
+    # The models are reached through the gateway in the professional tier; direct grants stay for
+    # the basic tier and as the gateway's own fallback path.
+    api_openai    = { principal = "api", service = "openai", role = "Cognitive Services OpenAI User" }
+    worker_openai = { principal = "worker", service = "openai", role = "Cognitive Services OpenAI User" }
+    worker_speech = { principal = "worker", service = "speech", role = "Cognitive Services Speech User" }
+  }
+
+  regional_role_assignments = merge([
+    for name, grant in local.regional_grants : {
+      for stamp, scope in local.regional[grant.service] :
+      "${name}_${stamp}" => { principal = grant.principal, scope = scope, role = grant.role }
+    }
+  ]...)
+
+  role_assignments = merge(local.single_grants, local.regional_role_assignments)
 }
 
 resource "azurerm_role_assignment" "identity" {
   for_each             = local.role_assignments
   scope                = each.value.scope
   role_definition_name = each.value.role
-  principal_id         = local.identities[each.value.principal]
+  principal_id         = local.principal[each.value.principal]
   principal_type       = "ServicePrincipal"
 }

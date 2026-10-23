@@ -3,15 +3,19 @@ output "resource_group_name" {
 }
 
 output "api_app_name" {
-  value = azurerm_container_app.api.name
+  value = azurerm_container_app.api["primary"].name
 }
 
 output "worker_job_name" {
-  value = azurerm_container_app_job.worker.name
+  value = azurerm_container_app_job.worker["primary"].name
 }
 
 output "migrate_job_name" {
   value = azurerm_container_app_job.migrate.name
+}
+
+output "retention_job_name" {
+  value = azurerm_container_app_job.retention.name
 }
 
 output "acr_name" {
@@ -19,8 +23,8 @@ output "acr_name" {
 }
 
 output "api_url" {
-  description = "Base URL the mobile app calls (EXPO_PUBLIC_API_BASE_URL)."
-  value       = "https://${azurerm_container_app.api.ingress[0].fqdn}"
+  description = "Base URL the apps call (EXPO_PUBLIC_API_BASE_URL): the edge in the professional tier, the container app in the basic one."
+  value       = local.pro ? "https://${local.public_host}" : "https://${azurerm_container_app.api["primary"].ingress[0].fqdn}"
 }
 
 output "container_registry" {
@@ -47,11 +51,26 @@ output "speech_endpoint" {
   value = azurerm_cognitive_account.speech.endpoint
 }
 
+output "front_door_id" {
+  description = "The value the gateway expects in X-Azure-FDID."
+  value       = local.pro ? azurerm_cdn_frontdoor_profile.main[0].resource_guid : null
+}
+
 output "identity_client_ids" {
   description = "Client ids of the managed identities, needed to create their database roles."
-  value = {
-    api     = azurerm_user_assigned_identity.api.client_id
-    worker  = azurerm_user_assigned_identity.worker.client_id
-    migrate = azurerm_user_assigned_identity.migrate.client_id
-  }
+  value       = { for k, v in azurerm_user_assigned_identity.workload : k => v.client_id if k != "storage" }
+}
+
+output "public_host" {
+  description = "Host of the public entrance (professional tier): the smoke test and the apps use it."
+  value       = local.pro ? local.public_host : null
+}
+
+output "api_app_name_dr" {
+  description = "Name of the standby API app (professional tier with a standby region)."
+  value       = local.dr ? azurerm_container_app.api["dr"].name : null
+}
+
+output "resource_group_name_dr" {
+  value = local.dr ? azurerm_resource_group.dr[0].name : null
 }
