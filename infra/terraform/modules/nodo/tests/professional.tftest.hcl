@@ -89,7 +89,7 @@ run "plan_professional" {
   }
 
   assert {
-    condition     = azurerm_storage_account.main.account_replication_type == "RAGZRS" && azurerm_storage_account.audit[0].public_network_access_enabled == false
+    condition     = azurerm_storage_account.main.account_replication_type == "GZRS" && azurerm_storage_account.audit[0].public_network_access_enabled == false
     error_message = "geo-zone redundant audio, private audit archive"
   }
 
@@ -148,5 +148,29 @@ run "plan_failover" {
   assert {
     condition     = azurerm_postgresql_flexible_server.replica[0].replication_role == "None"
     error_message = "the replica is promoted"
+  }
+}
+
+run "plan_edge_and_gateway_properties" {
+  command = plan
+
+  assert {
+    condition     = !contains(azurerm_cdn_frontdoor_route.main[0].patterns_to_match, "/*")
+    error_message = "the AI gateway must not be reachable through the edge"
+  }
+
+  assert {
+    condition     = azurerm_storage_account.main.blob_properties[0].versioning_enabled == null || azurerm_storage_account.main.blob_properties[0].versioning_enabled == false
+    error_message = "versions of an erased recording would keep it alive"
+  }
+
+  assert {
+    condition     = length(azurerm_virtual_network_peering.to_dr) == 1 && length(azurerm_nat_gateway.main) == 2
+    error_message = "the replica needs the peering and the gateway admits the workloads by NAT address"
+  }
+
+  assert {
+    condition     = length([for k, v in azurerm_private_endpoint.main : k if endswith(k, "servicebus-dr")]) == 2
+    error_message = "both networks can reach the standby queue namespace"
   }
 }

@@ -34,7 +34,7 @@ Everything below describes the **professional** tier unless it says otherwise.
 flowchart TD
   APP[Apps: Android, desktop] -->|OIDC PKCE| EID[Microsoft Entra External ID]
   APP -->|HTTPS + access token| AFD[Front Door Premium + WAF]
-  APP -->|write-only SAS, 15 min, blocks| BLOB[(Storage: audio, RA-GZRS)]
+  APP -->|write-only SAS, 15 min, blocks| BLOB[(Storage: audio, GZRS)]
   AFD -->|priority 1| APIMP[API Management, primary region]
   AFD -.->|priority 2, on probe failure| APIMS[API Management, standby region]
   APIMP -->|internal| APIP[Container Apps: api x3 zones]
@@ -83,8 +83,8 @@ Each layer assumes the one in front of it may have been misconfigured; none is t
 | Store | Configuration | Why |
 |---|---|---|
 | PostgreSQL 16 Flexible Server | General Purpose, zone-redundant HA, 35 day point-in-time restore, geo-redundant backup, cross-region replica, delegated subnet (no public endpoint), `track_io_timing`, slow statements logged at 1 s, weekly maintenance window | irreplaceable source of truth; row level security; Entra-only roles |
-| Blob: audio account | RA-GZRS, customer-managed key (RSA-HSM, auto-rotated), infrastructure encryption, versioning and change feed, 14 day soft delete, SAS lifetime capped, no shared key, malware scan | the only public data endpoint, with compensating controls (ADR-016) |
-| Blob: audit account | RA-GZRS, private, time-based retention (WORM) | evidence that cannot be altered; archive job not yet built |
+| Blob: audio account | GZRS, customer-managed key (RSA-HSM, auto-rotated), infrastructure encryption, **no** versioning or change feed (a version would keep an erased recording alive), 7 day soft delete as the only copy after an erasure, SAS lifetime capped, no shared key, malware scan | the only public data endpoint, with compensating controls (ADR-016) |
+| Blob: audit account | GZRS, private, time-based retention (WORM) | evidence that cannot be altered; archive job not yet built |
 | Service Bus Premium | one messaging unit, private, geo-DR alias to the standby namespace, duplicate detection 1 h, 5 deliveries then dead-letter | shock absorber between the app and slow work |
 | AI Search Standard | three replicas, partitions from the capacity model, private, RBAC only | derived: rebuilt from PostgreSQL in the standby region |
 | Key Vault Premium | purge protection, 90 day soft delete, firewall, RBAC | secrets and the storage key |
@@ -118,7 +118,7 @@ Identities (user-assigned, one per job of work): `api`, `worker`, `migrate`, `re
 
 ## 8. Network
 
-Per region (a /16): `0.0/23` container apps (delegated), `2.0/24` private endpoints, `3.0/24` PostgreSQL (delegated), `4.0/24` gateway with a network security group that admits Front Door, the virtual network, Azure's management plane and the load balancer, and nothing else. Private DNS zones exist per region (not shared) so each region resolves its own endpoints and a failover depends on nothing in the failed region. The gateway's own name resolves to its private address inside each network (the AI gateway path).
+Per region (a /16): `0.0/23` container apps (delegated), `2.0/24` private endpoints, `3.0/24` PostgreSQL (delegated), `4.0/24` gateway with a network security group that admits Front Door, Traffic Manager (the multi-region gateway's own probes), Azure's management plane, the load balancer and the NAT addresses of the two container subnets, and nothing else. Private DNS zones exist per region (not shared) so each region resolves its own endpoints. The two networks are peered because database replication needs it; after a failover the standby does not depend on the link. Each region's container subnet leaves through a NAT gateway with a static address; that address is how the API and the worker are admitted to the AI gateway (API Management in external mode has no private address to point them at). Both queue namespaces and both model accounts have private endpoints in both networks, so the queue pairing and the gateway's retry in the other region work. Front Door's origins are the gateways' **regional** addresses, not the global one, which would route by latency and could send the primary origin to the standby region.
 
 Public surfaces, complete list: Front Door; the audio blob endpoint (SAS-only); Key Vault and the registry, firewalled to `operator_cidrs`. Application Insights ingestion uses the public endpoint with the connection string (a private link scope is the upgrade).
 
@@ -181,4 +181,5 @@ Things to check at the first deployment, in order: `pgaadauth_create_principal` 
 6. Per-class queues (ingest, analyze, reanalyze) when the capacity model says interactive reanalysis competes with ingestion.
 7. Private link scope for Application Insights.
 8. First apply, load test against the real SKU, and a failover rehearsal; then replace the assumed inputs in CAPACITY-MODEL.md.
-9. Region and model availability, token quota, Entra External ID tenant and its custom claim, and name uniqueness (unchanged from v0.1).
+9. Review findings still to be proven on a real subscription (an independent review of the Terraform, 23 October 2026, fixed what could be fixed offline): whether Container Apps can read Key Vault secret references when the vault has a firewall and a private endpoint (if not, read them in the application over the private endpoint); whether `llm-token-limit` counts tokens on a hand-made wildcard API (if not, import the Azure OpenAI API definition instead); whether the regional gateway hostname is covered by the default certificate Front Door checks; whether user-assigned identities that live in the primary region keep working for the standby workloads while that region is down (if not, create identities per region); whether Front Door probes pass through Bot Manager (it runs in log mode until read); the audit account has no writer yet because the archive job is not built; Service Bus Geo-DR loses messages in flight; role assignments and policy assignments need the Terraform principal to be Owner or User Access Administrator; the first apply of model deployments should use `-parallelism=1` (parallel deployments on one account can conflict).
+10. Region and model availability, token quota, Entra External ID tenant and its custom claim, and name uniqueness (unchanged from v0.1).

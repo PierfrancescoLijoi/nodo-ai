@@ -24,7 +24,8 @@ locals {
     retention_kv       = { principal = "retention", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
     api_blob           = { principal = "api", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
     worker_blob        = { principal = "worker", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
-    # The retention job erases audio; it never reads it.
+    # The retention job lists and deletes audio. The role also allows reading: Azure has no role that
+    # lists without reading, so the job is trusted not to (its code path never downloads).
     retention_blob = { principal = "retention", scope = azurerm_storage_account.main.id, role = "Storage Blob Data Contributor" }
   }
 

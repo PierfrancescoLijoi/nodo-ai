@@ -93,8 +93,6 @@ resource "azurerm_container_registry" "main" {
   admin_enabled                 = false
   zone_redundancy_enabled       = local.pro
   retention_policy_in_days      = local.pro ? 30 : null
-  quarantine_policy_enabled     = local.pro
-  export_policy_enabled         = !local.pro
   public_network_access_enabled = !local.pro || length(var.operator_cidrs) > 0
   tags                          = local.tags
 
@@ -215,7 +213,7 @@ resource "azurerm_storage_account" "main" {
   location                          = azurerm_resource_group.main.location
   resource_group_name               = azurerm_resource_group.main.name
   account_tier                      = "Standard"
-  account_replication_type          = local.pro ? "RAGZRS" : "LRS"
+  account_replication_type          = local.pro ? "GZRS" : "LRS"
   min_tls_version                   = "TLS1_2"
   https_traffic_only_enabled        = true
   allow_nested_items_to_be_public   = false
@@ -226,14 +224,13 @@ resource "azurerm_storage_account" "main" {
   tags                              = local.tags
 
   blob_properties {
-    versioning_enabled  = local.pro
-    change_feed_enabled = local.pro
-
+    # No versioning and no change feed on the audio account: a version of an erased recording
+    # would keep it alive. Soft delete is the only copy left after an erasure, for 7 days (ADR-019).
     delete_retention_policy {
-      days = local.pro ? 14 : 7
+      days = 7
     }
     container_delete_retention_policy {
-      days = local.pro ? 14 : 7
+      days = 7
     }
   }
 
@@ -295,9 +292,6 @@ resource "azurerm_storage_management_policy" "retention" {
       base_blob {
         delete_after_days_since_creation_greater_than = var.audio_retention_days
       }
-      version {
-        delete_after_days_since_creation = var.audio_retention_days
-      }
     }
   }
 
@@ -314,9 +308,6 @@ resource "azurerm_storage_management_policy" "retention" {
       base_blob {
         delete_after_days_since_creation_greater_than = 7
       }
-      version {
-        delete_after_days_since_creation = 7
-      }
     }
   }
 }
@@ -329,7 +320,7 @@ resource "azurerm_storage_account" "audit" {
   location                          = azurerm_resource_group.main.location
   resource_group_name               = azurerm_resource_group.main.name
   account_tier                      = "Standard"
-  account_replication_type          = "RAGZRS"
+  account_replication_type          = "GZRS"
   min_tls_version                   = "TLS1_2"
   https_traffic_only_enabled        = true
   allow_nested_items_to_be_public   = false

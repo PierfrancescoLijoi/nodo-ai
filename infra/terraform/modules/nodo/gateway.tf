@@ -19,7 +19,12 @@ locals {
   primary_region_display = lookup(local.region_display, var.location, var.location)
   dr_region_display      = var.dr_location == null ? "" : lookup(local.region_display, var.dr_location, var.dr_location)
 
-  gateway_host = local.pro ? replace(azurerm_api_management.main[0].gateway_url, "https://", "") : ""
+  # Regional addresses, not the global one: the global name routes by latency and could send the
+  # "primary" origin of Front Door to the standby region. Each stack also calls the gateway of its own region.
+  gateway_host = {
+    primary = local.pro ? replace(azurerm_api_management.main[0].gateway_regional_url, "https://", "") : ""
+    dr      = local.dr ? replace(azurerm_api_management.main[0].additional_location[0].gateway_regional_url, "https://", "") : ""
+  }
 }
 
 resource "azurerm_public_ip" "apim" {
@@ -42,7 +47,6 @@ resource "azurerm_api_management" "main" {
   publisher_name                = var.project
   publisher_email               = var.apim_publisher_email
   sku_name                      = var.apim_sku_name
-  zones                         = startswith(var.apim_sku_name, "Premium") ? ["1", "2", "3"] : null
   virtual_network_type          = "External"
   public_ip_address_id          = azurerm_public_ip.apim["primary"].id
   public_network_access_enabled = true
@@ -63,7 +67,6 @@ resource "azurerm_api_management" "main" {
     content {
       location             = var.dr_location
       capacity             = 1
-      zones                = startswith(var.apim_sku_name, "Premium") ? ["1", "2", "3"] : null
       public_ip_address_id = azurerm_public_ip.apim["dr"].id
       virtual_network_configuration {
         subnet_id = azurerm_subnet.apim["dr"].id
@@ -92,6 +95,13 @@ resource "azurerm_api_management" "main" {
     triple_des_ciphers_enabled                          = false
   }
 
+  lifecycle {
+    precondition {
+      condition     = var.oidc_issuer != "" && var.oidc_audience != ""
+      error_message = "The gateway validates tokens: set oidc_issuer and oidc_audience first."
+    }
+  }
+
   depends_on = [azurerm_subnet_network_security_group_association.apim]
 }
 
@@ -105,37 +115,6 @@ resource "azurerm_role_assignment" "gateway_openai" {
   role_definition_name = "Cognitive Services OpenAI User"
   principal_id         = azurerm_api_management.main[0].identity[0].principal_id
   principal_type       = "ServicePrincipal"
-}
-
-# Inside the networks the gateway's name resolves to its private address, so the API and the worker
-# reach the AI gateway without leaving the network (the NSG admits only Front Door from outside).
-resource "azurerm_private_dns_zone" "gateway" {
-  for_each            = local.pro ? local.regions : {}
-  name                = local.gateway_host
-  resource_group_name = local.rg_names[each.key]
-  tags                = local.tags
-}
-
-resource "azurerm_private_dns_a_record" "gateway" {
-  for_each            = local.pro ? local.regions : {}
-  name                = "@"
-  zone_name           = azurerm_private_dns_zone.gateway[each.key].name
-  resource_group_name = local.rg_names[each.key]
-  ttl                 = 300
-  records = [
-    each.key == "primary"
-    ? azurerm_api_management.main[0].private_ip_addresses[0]
-    : azurerm_api_management.main[0].additional_location[0].private_ip_addresses[0]
-  ]
-}
-
-resource "azurerm_private_dns_zone_virtual_network_link" "gateway" {
-  for_each              = local.pro ? local.regions : {}
-  name                  = "link-${each.key}"
-  resource_group_name   = local.rg_names[each.key]
-  private_dns_zone_name = azurerm_private_dns_zone.gateway[each.key].name
-  virtual_network_id    = azurerm_virtual_network.main[each.key].id
-  tags                  = local.tags
 }
 
 # --- named values: configuration the policies read -------------------------------------------
@@ -293,8 +272,9 @@ resource "azurerm_api_management_api_policy" "ai" {
   api_management_name = azurerm_api_management.main[0].name
   resource_group_name = azurerm_resource_group.main.name
   xml_content = templatefile("${path.module}/policies/ai.xml.tftpl", {
-    tokens_per_minute = var.ai_tokens_per_minute
-    has_secondary     = local.dr
+    tokens_per_minute      = var.ai_tokens_per_minute
+    primary_region_display = local.primary_region_display
+    has_secondary          = local.dr
     caller_client_ids = [
       azurerm_user_assigned_identity.workload["api"].client_id,
       azurerm_user_assigned_identity.workload["worker"].client_id,

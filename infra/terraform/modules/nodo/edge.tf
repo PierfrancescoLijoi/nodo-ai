@@ -46,8 +46,8 @@ resource "azurerm_cdn_frontdoor_origin" "primary" {
   name                           = "primary"
   cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.gateway[0].id
   enabled                        = true
-  host_name                      = local.gateway_host
-  origin_host_header             = local.gateway_host
+  host_name                      = local.gateway_host["primary"]
+  origin_host_header             = local.gateway_host["primary"]
   https_port                     = 443
   priority                       = 1
   weight                         = 1000
@@ -59,8 +59,8 @@ resource "azurerm_cdn_frontdoor_origin" "standby" {
   name                           = "standby"
   cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.gateway[0].id
   enabled                        = true
-  host_name                      = replace(azurerm_api_management.main[0].additional_location[0].gateway_regional_url, "https://", "")
-  origin_host_header             = replace(azurerm_api_management.main[0].additional_location[0].gateway_regional_url, "https://", "")
+  host_name                      = local.gateway_host["dr"]
+  origin_host_header             = local.gateway_host["dr"]
   https_port                     = 443
   priority                       = 2
   weight                         = 1000
@@ -87,7 +87,7 @@ resource "azurerm_cdn_frontdoor_firewall_policy" "main" {
   managed_rule {
     type    = "Microsoft_BotManagerRuleSet"
     version = "1.1"
-    action  = "Block"
+    action  = "Log" # read what it would block (good bots and our own probes) before it blocks
   }
 
   # A single address cannot hold the API: 600 requests a minute is ten times a busy person.
@@ -133,7 +133,8 @@ resource "azurerm_cdn_frontdoor_route" "main" {
   enabled                = true
   forwarding_protocol    = "HttpsOnly"
   https_redirect_enabled = true
-  patterns_to_match      = ["/*"]
+  # Only the public API and the probe: the AI gateway is not reachable through the edge.
+  patterns_to_match      = ["/v1/*", "/readyz"]
   supported_protocols    = ["Http", "Https"]
   link_to_default_domain = true
 

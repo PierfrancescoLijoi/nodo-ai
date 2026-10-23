@@ -114,8 +114,10 @@ locals {
   request_filter = "AppRequests | where Name !has '/healthz' and Name !has '/readyz'"
 
   burn_rates = {
-    fast = { window = "PT1H", every = "PT5M", burn = 14.4, severity = 1, hours = 1 }
-    slow = { window = "PT6H", every = "PT30M", burn = 6, severity = 2, hours = 6 }
+    # Long window decides that the budget is burning; the short one (a twelfth of it) proves it still is,
+    # so the alert clears soon after the problem does.
+    fast = { window = "PT1H", every = "PT5M", burn = 14.4, severity = 1, long = "1h", short = "5m" }
+    slow = { window = "PT6H", every = "PT30M", burn = 6, severity = 2, long = "6h", short = "30m" }
   }
 }
 
@@ -136,10 +138,11 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "burn" {
   criteria {
     query = <<-KQL
       ${local.request_filter}
-      | where TimeGenerated > ago(${each.value.hours}h)
-      | summarize total = count(), failed = countif(Success == false and toint(ResultCode) >= 500)
-      | extend ratio = iff(total == 0, 0.0, todouble(failed) / total)
-      | where total > 50 and ratio > ${local.error_budget * each.value.burn}
+      | where TimeGenerated > ago(${each.value.long})
+      | extend failed = (Success == false and toint(ResultCode) >= 500), recent = TimeGenerated > ago(${each.value.short})
+      | summarize total = count(), failures = countif(failed), recent_total = countif(recent), recent_failures = countif(recent and failed)
+      | extend ratio = iff(total == 0, 0.0, todouble(failures) / total), recent_ratio = iff(recent_total == 0, 0.0, todouble(recent_failures) / recent_total)
+      | where total > 50 and ratio > ${local.error_budget * each.value.burn} and recent_ratio > ${local.error_budget * each.value.burn}
     KQL
 
     time_aggregation_method = "Count"

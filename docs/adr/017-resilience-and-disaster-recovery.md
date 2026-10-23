@@ -26,7 +26,7 @@ A service that records meetings is used at the worst moments for it to fail (the
 | Layer | Mechanism | Recovery point | Switch |
 |---|---|---|---|
 | PostgreSQL | cross-region read replica | seconds of replication lag (alert at 60 s) | promote (`dr_promote_database`) |
-| Audio, exports, audit | RA-GZRS | minutes (asynchronous geo replication) | account failover |
+| Audio, exports, audit | GZRS | minutes (asynchronous geo replication) | account failover |
 | Queue | Service Bus geo-DR alias (metadata pairing) | messages in flight are not replicated; the outbox row in PostgreSQL still records each job, and a sweep that re-publishes unfinished ones is not built | failover alias |
 | Search index | none: rebuilt from PostgreSQL (ADR-007) | n/a | reindex command (**not built**: it needs a cross-workspace read role) |
 | Models, speech | second account in the standby region behind the AI gateway | stateless | automatic (gateway retry) |

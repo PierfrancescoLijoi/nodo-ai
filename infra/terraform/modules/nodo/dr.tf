@@ -25,6 +25,10 @@ resource "azurerm_servicebus_namespace_disaster_recovery_config" "main" {
   name                 = "sbdr-${local.short_name}"
   primary_namespace_id = azurerm_servicebus_namespace.main.id
   partner_namespace_id = azurerm_servicebus_namespace.dr[0].id
+
+  # Pairing fails if one namespace has a private endpoint and the other has none, and adding an
+  # endpoint to a paired namespace fails: every endpoint exists before the pairing does.
+  depends_on = [azurerm_private_endpoint.main]
 }
 
 # Cross-region read replica. Promoting it (var.dr_promote_database) is the point of no return of a
@@ -52,6 +56,18 @@ resource "azurerm_postgresql_flexible_server" "replica" {
   }
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
+}
+
+# After a promotion the replica becomes a normal server: it needs the same Entra administrator
+# that bootstraps the schema. (HA and the maintenance window are added to it by a later apply.)
+resource "azurerm_postgresql_flexible_server_active_directory_administrator" "replica_migrate" {
+  count               = local.dr && var.dr_promote_database ? 1 : 0
+  server_name         = azurerm_postgresql_flexible_server.replica[0].name
+  resource_group_name = azurerm_resource_group.dr[0].name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  object_id           = azurerm_user_assigned_identity.workload["migrate"].principal_id
+  principal_name      = azurerm_user_assigned_identity.workload["migrate"].name
+  principal_type      = "ServicePrincipal"
 }
 
 # Search in the standby region: sized for a rebuild, resized by the failover runbook.

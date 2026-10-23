@@ -15,7 +15,7 @@
         <issuer>{{oidc-issuer}}</issuer>
       </issuers>
     </validate-jwt>
-    <!-- Fairness per person, counted across every gateway unit. The API has its own load shedding. -->
+    <!-- Fairness per person, counted per regional gateway (the limit roughly doubles while both regions serve). The API sheds load too. -->
     <rate-limit-by-key calls="${calls_per_minute}" renewal-period="60" counter-key='@(context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Subject ?? context.Request.IpAddress)' remaining-calls-header-name="x-ratelimit-remaining" />
     <set-header name="X-Request-Id" exists-action="skip">
       <value>@(context.RequestId.ToString())</value>

@@ -22,13 +22,14 @@ API / worker -> API Management "AI gateway" -> Azure OpenAI in two regions
 | Policy | What it does | Why here |
 |---|---|---|
 | `validate-jwt` | issuer, audience, signature, expiry against the Entra discovery document | an invalid token never reaches a replica |
-| `rate-limit-by-key` | requests per minute per user (`sub`), per address when anonymous | fairness counted across all gateway units |
+| `rate-limit-by-key` | requests per minute per user (`sub`), per address when anonymous | fairness counted at each regional gateway, so the limit roughly doubles while both regions serve |
 | backend per region | the gateway of a region calls the API of the same region | failover without hairpinning |
 | circuit breaker on each backend | five server errors in a minute stops traffic for 30 seconds (or the backend's `Retry-After`) | a failing region is given room to recover |
 | no retry on the public API | the application decides what is safe to repeat (idempotency keys) | a gateway retry of a write is a duplicate |
 | `X-Request-Id`, `traceparent` | seeds the trace if the client sent none | one id from the edge to the database |
+| `/readyz` operation | deliberately does **not** inherit the API policy: probes carry no token, and the response reveals nothing | Front Door and the availability test must be able to ask |
 
-**The AI gateway** is a second API on the same service, reachable only from inside the network (a private DNS zone in each VNet resolves the gateway's name to its private address). The API and the worker keep calling Azure OpenAI with the same SDK and their own Entra identity, but the endpoint is the gateway:
+**The AI gateway** is a second API on the same service. Front Door does not route to it (the route covers `/v1/*` and `/readyz` only); the only sources the gateway subnet admits are Front Door, Azure's management plane and the static NAT addresses of the two container subnets, and the policy rejects any token that is not the API's or the worker's. API Management in external mode has no private address, so the callers reach it over the Microsoft backbone from a fixed address rather than over a private link. The upgrade to a fully private path is internal mode behind Application Gateway (alternatives, below). The API and the worker keep calling Azure OpenAI with the same SDK and their own Entra identity, but the endpoint is the gateway:
 
 - `validate-azure-ad-token` admits only the API's and the worker's client ids;
 - `llm-token-limit` gives each identity its own tokens-per-minute budget, so ingestion cannot starve interactive questions or the reverse;

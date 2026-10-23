@@ -85,7 +85,7 @@ resource "azurerm_network_security_group" "apim" {
   dynamic "security_rule" {
     for_each = {
       front-door      = { priority = 100, port = "443", source = "AzureFrontDoor.Backend" }
-      inside-network  = { priority = 110, port = "443", source = "VirtualNetwork" }
+      traffic-manager = { priority = 105, port = "443", source = "AzureTrafficManager" }
       apim-management = { priority = 120, port = "3443", source = "ApiManagement" }
       load-balancer   = { priority = 130, port = "6390", source = "AzureLoadBalancer" }
     }
@@ -100,6 +100,19 @@ resource "azurerm_network_security_group" "apim" {
       source_address_prefix      = security_rule.value.source
       destination_address_prefix = "VirtualNetwork"
     }
+  }
+
+  # The API and the worker call the AI gateway through the NAT addresses of their subnets.
+  security_rule {
+    name                       = "workloads"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefixes    = [for ip in azurerm_public_ip.nat : ip.ip_address]
+    destination_address_prefix = "VirtualNetwork"
   }
 
   dynamic "security_rule" {
@@ -127,6 +140,64 @@ resource "azurerm_subnet_network_security_group_association" "apim" {
   for_each                  = local.regions
   subnet_id                 = azurerm_subnet.apim[each.key].id
   network_security_group_id = azurerm_network_security_group.apim[each.key].id
+}
+
+# --- outbound identity ------------------------------------------------------------------------
+# A fixed address per region for everything the container apps call outside the network, so the
+# gateway can admit them by address and nothing else.
+
+resource "azurerm_public_ip" "nat" {
+  for_each            = local.regions
+  name                = "pip-${local.name}-nat-${each.key}"
+  location            = each.value.location
+  resource_group_name = local.rg_names[each.key]
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  zones               = ["1", "2", "3"]
+  tags                = local.tags
+}
+
+resource "azurerm_nat_gateway" "main" {
+  for_each            = local.regions
+  name                = "nat-${local.name}-${each.key}"
+  location            = each.value.location
+  resource_group_name = local.rg_names[each.key]
+  sku_name            = "Standard"
+  tags                = local.tags
+}
+
+resource "azurerm_nat_gateway_public_ip_association" "main" {
+  for_each             = local.regions
+  nat_gateway_id       = azurerm_nat_gateway.main[each.key].id
+  public_ip_address_id = azurerm_public_ip.nat[each.key].id
+}
+
+resource "azurerm_subnet_nat_gateway_association" "aca" {
+  for_each       = local.regions
+  subnet_id      = azurerm_subnet.aca[each.key].id
+  nat_gateway_id = azurerm_nat_gateway.main[each.key].id
+}
+
+# Database replication runs between the two networks (port 5432 both ways). After a failover the
+# standby does not depend on this link: it holds its own copy, endpoints and DNS.
+resource "azurerm_virtual_network_peering" "to_dr" {
+  count                        = local.dr ? 1 : 0
+  name                         = "primary-to-dr"
+  resource_group_name          = local.rg_names["primary"]
+  virtual_network_name         = azurerm_virtual_network.main["primary"].name
+  remote_virtual_network_id    = azurerm_virtual_network.main["dr"].id
+  allow_forwarded_traffic      = true
+  allow_virtual_network_access = true
+}
+
+resource "azurerm_virtual_network_peering" "to_primary" {
+  count                        = local.dr ? 1 : 0
+  name                         = "dr-to-primary"
+  resource_group_name          = local.rg_names["dr"]
+  virtual_network_name         = azurerm_virtual_network.main["dr"].name
+  remote_virtual_network_id    = azurerm_virtual_network.main["primary"].id
+  allow_forwarded_traffic      = true
+  allow_virtual_network_access = true
 }
 
 # --- private DNS ------------------------------------------------------------------------------
@@ -191,20 +262,14 @@ locals {
     registry = { sub = "registry", zone = "privatelink.azurecr.io", id = azurerm_container_registry.main.id }
     audio    = { sub = "blob", zone = "privatelink.blob.core.windows.net", id = azurerm_storage_account.main.id }
     audit    = { sub = "blob", zone = "privatelink.blob.core.windows.net", id = try(azurerm_storage_account.audit[0].id, null) }
-    servicebus = {
-      sub  = "namespace"
-      zone = "privatelink.servicebus.windows.net"
-      ids  = { primary = azurerm_servicebus_namespace.main.id, dr = try(azurerm_servicebus_namespace.dr[0].id, null) }
-    }
+    # Both namespaces and both model accounts are reachable from both networks: the queue pairing
+    # and the gateway's retry in the other region need it.
+    servicebus = { sub = "namespace", zone = "privatelink.servicebus.windows.net", id = azurerm_servicebus_namespace.main.id }
+    openai     = { sub = "account", zone = "privatelink.openai.azure.com", id = azurerm_cognitive_account.openai.id }
     search = {
       sub  = "searchService"
       zone = "privatelink.search.windows.net"
       ids  = { primary = azurerm_search_service.main.id, dr = try(azurerm_search_service.dr[0].id, null) }
-    }
-    openai = {
-      sub  = "account"
-      zone = "privatelink.openai.azure.com"
-      ids  = { primary = azurerm_cognitive_account.openai.id, dr = try(azurerm_cognitive_account.openai_dr[0].id, null) }
     }
     speech = {
       sub  = "account"
@@ -215,14 +280,21 @@ locals {
 
   # One endpoint per service per stamp. Existence depends only on the stamps, never on resource
   # attributes, so the keys are known at plan time.
+  pe_targets_dr = local.dr ? {
+    servicebus-dr = { sub = "namespace", zone = "privatelink.servicebus.windows.net", id = azurerm_servicebus_namespace.dr[0].id }
+    openai-dr     = { sub = "account", zone = "privatelink.openai.azure.com", id = azurerm_cognitive_account.openai_dr[0].id }
+  } : {}
+
+  pe_all = merge(local.pe_targets, local.pe_targets_dr)
+
   private_endpoints = {
-    for pair in setproduct(keys(local.regions), keys(local.pe_targets)) :
+    for pair in setproduct(keys(local.regions), keys(local.pe_all)) :
     "${pair[0]}/${pair[1]}" => {
       region      = pair[0]
       name        = pair[1]
-      sub         = local.pe_targets[pair[1]].sub
-      zone        = local.pe_targets[pair[1]].zone
-      resource_id = try(local.pe_targets[pair[1]].ids[pair[0]], try(local.pe_targets[pair[1]].id, null))
+      sub         = local.pe_all[pair[1]].sub
+      zone        = local.pe_all[pair[1]].zone
+      resource_id = try(local.pe_all[pair[1]].ids[pair[0]], try(local.pe_all[pair[1]].id, null))
     }
   }
 }

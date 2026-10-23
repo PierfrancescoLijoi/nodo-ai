@@ -16,15 +16,16 @@
     <llm-token-limit counter-key='@(context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Claims.GetValueOrDefault("appid", "unknown"))' tokens-per-minute="${tokens_per_minute}" estimate-prompt-tokens="true" remaining-tokens-header-name="x-ratelimit-remaining-tokens" />
     <!-- The gateway signs in to the model accounts with its own identity (role: Cognitive Services OpenAI User). -->
     <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
-    <set-backend-service backend-id="openai-primary" />
+    <!-- Each regional gateway starts with the model account of its own region. -->
+    <set-backend-service backend-id='@(context.Deployment.Region == "${primary_region_display}" ? "openai-primary" : "openai-secondary")' />
   </inbound>
   <backend>
 %{ if has_secondary ~}
     <!-- Model calls are idempotent: on throttling or a server error, one more try, in the other region. -->
-    <retry condition='@(context.Response == null ? false : (context.Response.StatusCode == 429 || context.Response.StatusCode >= 500))' count="2" interval="1" first-fast-retry="true">
+    <retry condition='@(context.Response == null || context.Response.StatusCode == 429 || context.Response.StatusCode >= 500)' count="2" interval="1" first-fast-retry="true">
       <choose>
-        <when condition='@(context.Response == null ? false : (context.Response.StatusCode == 429 || context.Response.StatusCode >= 500))'>
-          <set-backend-service backend-id="openai-secondary" />
+        <when condition='@(context.Response == null || context.Response.StatusCode == 429 || context.Response.StatusCode >= 500)'>
+          <set-backend-service backend-id='@(context.Deployment.Region == "${primary_region_display}" ? "openai-secondary" : "openai-primary")' />
         </when>
       </choose>
       <forward-request buffer-request-body="true" timeout="90" />

@@ -28,7 +28,7 @@ locals {
   # In the professional tier the model calls go through the AI gateway (gateway.tf), which spreads
   # them over both regions and enforces the token budget; the callers keep their Entra identity.
   openai_endpoint = {
-    for k in keys(local.stacks) : k => local.pro ? "https://${local.gateway_host}" : local.endpoints[k].openai
+    for k in keys(local.stacks) : k => local.pro ? "https://${local.gateway_host[k]}" : local.endpoints[k].openai
   }
 
   # The Azure environment (dev, staging, prod) differs from NODO_ENVIRONMENT: in Azure the API always

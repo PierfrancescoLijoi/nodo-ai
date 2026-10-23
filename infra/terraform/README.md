@@ -30,6 +30,13 @@ terraform -chdir=envs/prod init -backend=false && terraform -chdir=envs/prod val
 terraform -chdir=modules/nodo init -backend=false && terraform -chdir=modules/nodo test
 ```
 
+Notes for the first apply of the professional tier:
+
+- The principal that runs Terraform needs Owner, or Contributor plus User Access Administrator (role and policy assignments), and must be in `operator_cidrs` (Key Vault and the registry are firewalled). Key Vault rejects `/32` ranges: write a single address as a plain IP.
+- Apply the model deployments with `-parallelism=1` the first time; parallel deployments on one OpenAI account can conflict.
+- Defender plans and the activity-log setting are subscription-wide (`enable_defender`); destroying them downgrades the plans for everything in the subscription.
+- API Management takes a long time to create (an hour is normal).
+
 The professional tier costs real money (Front Door Premium, a Premium gateway unit per region, Premium Service Bus, General Purpose database with HA and a replica, Search Standard with three replicas). Price it in the Azure calculator from the resources in `envs/prod` before the first apply, and set the budget in `cost_budget_amount`.
 
 ## What you need first
