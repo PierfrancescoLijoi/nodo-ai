@@ -22,7 +22,6 @@ Still open; each must be closed before real users:
 | Attestation key id and rotation | a rotated key invalidates the signatures of earlier attestations unless old versions stay readable | key id stored with each attestation, verify against a set of versions |
 | Audit events for reads and queries; failed-auth events with reason codes | volume and privacy trade-off to decide (ids only) | before launch |
 | Roles beyond owner (an admin who can see a workspace's meetings) | there is no admin product yet | when teams exist |
-| Audit archive to the immutable account | the account exists, the job does not | before launch |
 | Penetration test, DPIA, processor agreements | people, not code (COMPLIANCE.md) | before launch |
 
 Design rule that came out of the review: a workspace is a tenant, and inside it a meeting belongs to its owner. Every repository, retriever and graph call takes the user or the set of meeting ids they may see, so access control happens inside the store query.

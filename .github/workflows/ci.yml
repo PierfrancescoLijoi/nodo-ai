@@ -65,6 +65,18 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v4
@@ -77,6 +89,12 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+      # The real image, in Azure mode, against a real PostgreSQL: every migration on an empty
+      # database, two worker processes, probes, security headers, the standard error body.
+      - name: Run the image
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE nodo_verify"
+          bash tools/verify/container-check.sh nodo-api:ci host nodo_verify
 
   mobile:
     runs-on: ubuntu-latest

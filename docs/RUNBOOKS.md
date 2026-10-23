@@ -2,6 +2,8 @@
 
 Status: written before the first deployment, from the design. Every command below is untested against a live subscription; the first rehearsal on a throwaway environment corrects them, and the date and duration of each rehearsal go in section 9. Names such as `rg-nodo-prod` follow the Terraform naming (`rg-<project>-<environment>`).
 
+First deployment and the first-connection checks: FIRST-DEPLOY.md.
+
 Severity: **SEV1** users cannot use the service or data is at risk (page now); **SEV2** degraded, a promise is being missed (within the hour); **SEV3** no user impact yet (working hours).
 
 ## 0. First five minutes of any incident
@@ -60,6 +62,11 @@ The weekly `index-verify` job failed or the alert "Search index out of step with
 3. Verify: start the same job without overriding the command (read only) and expect `findings=0`.
 4. If it keeps finding the same thing, the cause is upstream: search outages (the guard metrics), or a defect in a delete path. Open the incident with the meeting ids from the audit events.
 5. On a computer: the app calls `POST /v1/local/index {"mode":"repair"}`, or `NODO_BACKEND=local python -m nodo_api.admin reindex`. Re-embedding a large archive takes a while; the first question afterwards may be slow while the model loads.
+
+## 5c. Alert: the sweep found lost work (SEV3), or the audit archive is silent (SEV1)
+
+- **Sweep.** `sweep republished=N restarted=N failed=N` in the log of the sweep job. `republished` means a job was recorded and never sent (the process died, or the queue was unreachable for a while); `restarted` means a meeting was stuck in processing for over three hours and has been started again. Both repaired themselves; the question is why. Look for a queue outage, a purge, or a failover just before. `failed` means it could not send: the queue is unreachable or the maintenance identity lost its sender role.
+- **Audit archive silent.** No `audit_archive archived=` line for three hours. Start the job by hand (`az containerapp job start -n caj-nodo-prod-audit-archive ...`) and read its log: a database or storage permission, a private endpoint DNS problem, or the cursor row. The evidence is not leaving the database while it is silent; the archive catches up from its cursor when it works again, nothing is lost. To check what is already archived, read the files in name order and run `verify_chain` from `nodo_api.services.audit_archive`; it reports a removed or altered file.
 
 ## 6. Queue: dead letters or backlog (SEV2/SEV3)
 

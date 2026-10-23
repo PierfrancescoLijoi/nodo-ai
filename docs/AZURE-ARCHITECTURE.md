@@ -162,24 +162,22 @@ Documented facts (Microsoft Learn, checked 22 October 2026): batch transcription
 
 ## 14. Verification, honestly
 
-| Layer | Verified how | Not verified |
+| Layer | Verified how (all of it runs in CI) | Not verified |
 |---|---|---|
-| Application (resilience, telemetry, retention, export, JWKS, edge) | unit and integration tests, including real PostgreSQL for the role and RLS behavior | behavior under real Azure latency and throttling |
+| Application (resilience, telemetry, retention, export, JWKS, edge, staged speech, sweeps, audit archive, index maintenance) | unit and integration tests, including a real PostgreSQL for every database role, its limits and row level security | behavior under real Azure latency and throttling |
+| The container image | built, then started in Azure mode against a real PostgreSQL: nine migrations on an empty database, two worker processes, probes, security headers, standard error body (`tools/verify/container-check.sh`) | anything that needs Azure itself |
+| Model requests | the strict JSON schemas obey the structured-output rules (a test); the adapters send the documented request shapes (fake transports) | that the deployed model accepts them (preflight `model_answer`, `model_extraction`) |
 | Terraform syntax and schema | `terraform validate` against azurerm 4.81 | n/a |
-| Terraform composition (which resources exist per tier, which properties are set, no unknown `for_each` keys) | `terraform test`: 5 plan-time runs with mocked providers (basic, professional, without standby, failover) asserting the properties that must not regress | that Azure accepts it; quotas; name availability; cost |
-| API Management policies | XML written to the documented schema | accepted by the service (validated at the first apply) |
-| Everything that runs on Azure | not applied | all of it. The first apply goes to a throwaway subscription, then a rehearsal of the failover |
+| Terraform composition | `terraform test`, 9 plan-time runs with mocked providers: tiers, standby, failover, edge and gateway, index maintenance, sweeps and audit archive, first-connection jobs and the two switches, and the limits Azure puts on names (this found a real failure: Container Apps names stop at 32 characters) | that Azure accepts it; quotas; name availability; cost |
+| API Management policies | rendered, parsed as XML, only known policy elements, every named value defined, quotes in single-quoted attributes (a test) | that the service accepts the semantics (the first apply), `llm-token-limit` in particular (switch) |
+| Everything that runs on Azure | not applied. The first-connection checks (ADR-023) and the smoke test are written for exactly this: FIRST-DEPLOY.md is the procedure | all of it until the first deployment |
 
-Things to check at the first deployment, in order: `pgaadauth_create_principal` accepts the identity name; the Speech request and result shapes; Search index creation and filters; the embedding deployment size equals `NODO_OPENAI_EMBEDDING_DIMENSIONS`; a Container Apps job starts from the queue rule with the worker identity; the gateway accepts the policies and `llm-token-limit`; Front Door reaches the gateway through the network rule; the availability test and burn-rate queries return rows.
+What to do about the unknowns is in FIRST-DEPLOY.md: a gate after every phase, and a troubleshooting table that maps each failing check to its likely cause and, for the assumptions that could not be settled offline, to a setting (`secrets_from_key_vault`, `ai_token_limit_enabled`).
 
 ## 15. Open items
 
-1. A stuck-meeting sweep: a meeting that waits for speech and has neither a stored handle nor a scheduled poll (a lost message) is not found by anything yet.
-2. Audit archive job from the database to the immutable account, with a watermark and a dedicated role.
-4. A sweep that re-publishes outbox rows after a queue failover.
-5. Approval UI for decisions and actions (ADR-004).
-6. Per-class queues (ingest, analyze, reanalyze) when the capacity model says interactive reanalysis competes with ingestion.
-7. Private link scope for Application Insights.
-8. First apply, load test against the real SKU, and a failover rehearsal; then replace the assumed inputs in CAPACITY-MODEL.md.
-9. Review findings still to be proven on a real subscription (an independent review of the Terraform, 23 October 2026, fixed what could be fixed offline): whether Container Apps can read Key Vault secret references when the vault has a firewall and a private endpoint (if not, read them in the application over the private endpoint); whether `llm-token-limit` counts tokens on a hand-made wildcard API (if not, import the Azure OpenAI API definition instead); whether the regional gateway hostname is covered by the default certificate Front Door checks; whether user-assigned identities that live in the primary region keep working for the standby workloads while that region is down (if not, create identities per region); whether Front Door probes pass through Bot Manager (it runs in log mode until read); the audit account has no writer yet because the archive job is not built; Service Bus Geo-DR loses messages in flight; role assignments and policy assignments need the Terraform principal to be Owner or User Access Administrator; the first apply of model deployments should use `-parallelism=1` (parallel deployments on one account can conflict).
-10. Region and model availability, token quota, Entra External ID tenant and its custom claim, and name uniqueness (unchanged from v0.1).
+1. Per-class queues (ingest, analyze, reanalyze) when the capacity model says interactive reanalysis competes with ingestion.
+2. Private link scope for Application Insights.
+3. First deployment (FIRST-DEPLOY.md), load test against the real SKU, and the recovery rehearsals; then replace the assumed inputs in CAPACITY-MODEL.md.
+4. Review findings still to be proven on a real subscription (each has a check or a switch): Container Apps reading Key Vault references behind a firewall (`secrets_from_key_vault`); `llm-token-limit` on a hand-made model API (`ai_token_limit_enabled`); the regional gateway hostname being covered by the certificate Front Door checks; user-assigned identities that live in the primary region keeping working for the standby while that region is down (if not, create identities per region); Front Door probes passing through Bot Manager (log mode until read); Service Bus Geo-DR losing messages in flight (the sweep restarts the meetings they belonged to); role and policy assignments needing Owner or User Access Administrator; model deployments created in parallel on one account (`-parallelism=1`).
+5. Region and model availability, token quota, the Entra External ID tenant and its custom claim, and name uniqueness (FIRST-DEPLOY.md phase 0).
