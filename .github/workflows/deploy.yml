@@ -28,6 +28,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Nothing to deploy to until the owner has run infra/azure/setup-github-oidc.sh.
+    if: ${{ vars.AZURE_CLIENT_ID != '' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
     steps:
