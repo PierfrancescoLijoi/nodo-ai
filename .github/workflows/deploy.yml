@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
