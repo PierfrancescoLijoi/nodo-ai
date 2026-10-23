@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     bulkhead_embedding: int = Field(default=16, ge=1, le=256)
     bulkhead_search: int = Field(default=32, ge=1, le=256)
     bulkhead_speech: int = Field(default=8, ge=1, le=64)
+    # Speech runs in stages (the worker never waits): the first poll comes after
+    # speech_poll_seconds, each next one half as long again, up to the ceiling. The
+    # budget is the whole time a batch job may take before the meeting is failed.
+    speech_poll_seconds: int = Field(default=60, ge=5, le=600)
+    speech_poll_max_seconds: int = Field(default=300, ge=5, le=1800)
+    speech_timeout_seconds: int = Field(default=7200, ge=300, le=86400)
     bulkhead_servicebus: int = Field(default=16, ge=1, le=256)
     bulkhead_storage: int = Field(default=32, ge=1, le=256)
     azure_postgres_pool_max: int = Field(default=10, ge=1, le=100)

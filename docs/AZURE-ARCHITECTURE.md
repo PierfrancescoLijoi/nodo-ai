@@ -151,7 +151,7 @@ Residency by policy; storage limitation by job plus lifecycle backstop; access a
 
 Documented facts (Microsoft Learn, checked 22 October 2026): batch transcription supports diarization on mono audio with a 240 minute limit per file, and language identification with 2 to 10 candidate locales; identification is not available together with a custom model in batch; fast transcription lists `pl-PL`, `da-DK`, `it-IT` and `en-*`; newer models list Polish, Danish and Italian with diarization and language identification. Per-locale diarization quality for Polish and Danish is not documented. The `SpeechToText` port has two candidate adapters to compare on real recordings in each language before one is fixed; the golden set gets a speech slice for that.
 
-**Known gap.** Today the transcription step submits the batch job and waits for it inside the worker, so a worker is occupied for the whole duration and a crash resubmits (and re-pays for) the job. The fix is stages: submit and persist the provider job id, schedule a poll message, finish when ready. It needs a scheduled-delivery operation on the `JobQueue` port. The capacity model puts a number on it: nine times the worker executions at peak.
+**In stages (ADR-020).** The worker submits the batch job, stores the provider's job handle in PostgreSQL (`speech_jobs`, migration 0006), schedules a poll message and leaves. Each poll asks the provider and either reschedules itself (60, 90, 135, 202, then every 300 seconds) or collects the result, saves the transcript and carries on to indexing and analysis. A crash, a restart or a second replica resumes from the stored handle and never submits the same audio twice. A provider failure, an empty result or a job older than two hours ends the meeting as failed without paying again. Not covered: a crash in the instant between the provider accepting a job and the handle being stored resubmits once (the provider removes the orphan after six hours).
 
 ## 13. Delivery
 
@@ -173,7 +173,7 @@ Things to check at the first deployment, in order: `pgaadauth_create_principal` 
 
 ## 15. Open items
 
-1. Speech staged pipeline (section 12).
+1. A stuck-meeting sweep: a meeting that waits for speech and has neither a stored handle nor a scheduled poll (a lost message) is not found by anything yet.
 2. Audit archive job from the database to the immutable account, with a watermark and a dedicated role.
 3. A search re-index command that rebuilds the index from PostgreSQL (needed for the standby region and for index loss; it needs a cross-workspace read role like the retention one).
 4. A sweep that re-publishes outbox rows after a queue failover.

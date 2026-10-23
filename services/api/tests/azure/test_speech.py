@@ -12,6 +12,7 @@ from nodo_api.adapters.azure.speech import (
     duration_ms,
     parse_phrases,
 )
+from nodo_api.domain.models import SpeechStatus
 
 BASE = "https://speech-test.cognitiveservices.azure.com"
 JOB = f"{BASE}/speechtotext/transcriptions/abc?api-version={API_VERSION}"
@@ -150,3 +151,70 @@ def test_empty_phrases_are_dropped_and_order_is_by_time() -> None:
     phrases = parse_phrases(RESULT)
     assert len(phrases) == 2
     assert [p.start_ms for p in phrases] == sorted(p.start_ms for p in phrases)
+
+
+# --- in stages: submit, poll, cancel (the worker never waits inside one call) -----------------
+
+
+def test_submit_returns_the_job_handle_at_once_and_does_not_poll() -> None:
+    requests: list[httpx.Request] = []
+    speech = _client(["Succeeded"], requests)
+    handle = speech.submit("https://blob/audio?sig=x", ("en-GB", "pl-PL"))
+    assert handle == JOB
+    assert [r.method for r in requests] == ["POST"]
+
+
+def test_poll_reports_running_without_fetching_anything_else() -> None:
+    requests: list[httpx.Request] = []
+    speech = _client(["NotStarted", "Running"], requests)
+    assert speech.poll(JOB).status is SpeechStatus.RUNNING
+    assert speech.poll(JOB).status is SpeechStatus.RUNNING
+    assert {r.method for r in requests} == {"GET"} and len(requests) == 2
+
+
+def test_poll_returns_the_phrases_when_the_job_has_succeeded() -> None:
+    speech = _client(["Succeeded"], [])
+    result = speech.poll(JOB)
+    assert result.status is SpeechStatus.SUCCEEDED
+    assert [(p.speaker, p.text) for p in result.phrases] == [
+        (1, "Partiamo dalla coda."),
+        (2, "Przygotuję benchmark."),
+    ]
+
+
+def test_poll_reports_a_failed_job_instead_of_raising() -> None:
+    result = _client(["Failed"], []).poll(JOB)
+    assert result.status is SpeechStatus.FAILED and result.phrases == ()
+
+
+def test_cancel_deletes_the_job_and_never_raises() -> None:
+    requests: list[httpx.Request] = []
+    _client([], requests).cancel(JOB)
+    assert [r.method for r in requests] == ["DELETE"]
+
+    def broken(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    offline = AzureSpeechToText(
+        BASE, lambda: "t", httpx.Client(transport=httpx.MockTransport(broken))
+    )
+    offline.cancel(JOB)  # best effort: the service removes the job by itself after six hours
+
+
+@pytest.mark.parametrize(
+    "handle",
+    [
+        "https://evil.example/speechtotext/transcriptions/abc",
+        f"{BASE}/other/path",
+        f"{BASE}.evil.example/speechtotext/transcriptions/abc",
+        "file:///etc/passwd",
+    ],
+)
+def test_a_handle_pointing_anywhere_else_is_refused_before_a_token_is_sent(handle) -> None:
+    requests: list[httpx.Request] = []
+    speech = _client(["Succeeded"], requests)
+    with pytest.raises(SpeechError, match="address"):
+        speech.poll(handle)
+    with pytest.raises(SpeechError, match="address"):
+        speech.cancel(handle)
+    assert requests == []

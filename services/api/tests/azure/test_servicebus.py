@@ -66,3 +66,36 @@ def test_a_failed_send_is_retried_on_the_next_call() -> None:
     _queue(healthy, outbox).publish_once("ws-a", "m1", "transcribe", {"meeting_id": "m1"})
     assert len(healthy.sent) == 1
     assert outbox.jobs[("ws-a", "m1", "transcribe")]["published"] is True
+
+
+class SchedulingSender(FakeSender):
+    def __init__(self) -> None:
+        super().__init__()
+        self.scheduled: list[tuple] = []
+
+    def schedule_messages(self, message, schedule_time_utc):
+        self.scheduled.append((message, schedule_time_utc))
+        return [1]
+
+
+def test_a_later_job_is_scheduled_not_sent_and_needs_no_outbox_row() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    sender, outbox = SchedulingSender(), FakeOutbox()
+    before = datetime.now(UTC)
+    _queue(sender, outbox).publish_later(
+        "ws-a", "m1:poll:2", "transcribe", {"meeting_id": "m1"}, 135
+    )
+    assert sender.sent == [] and outbox.jobs == {}
+    ((message, when),) = sender.scheduled
+    assert before + timedelta(seconds=134) <= when <= datetime.now(UTC) + timedelta(seconds=136)
+    assert (
+        message.message_id == "ws-a:m1:poll:2:transcribe"
+    )  # one per poll: never deduplicated away
+    body = json.loads(str(message))
+    assert (body["job_type"], body["meeting_id"], body["workspace_id"]) == (
+        "transcribe",
+        "m1",
+        "ws-a",
+    )
+    assert "trace" in body

@@ -51,4 +51,4 @@ Jobs are idempotent on `source_hash + pipeline_version + event_id`; the outbox r
 - A failover rehearsal is part of the definition of done for production, once a quarter, on the staging environment: restore from backup into a scratch server, promote the replica of staging, run the smoke test, time every step, record it in RUNBOOKS.md.
 - Cost of the standby: a Premium queue, a replica, a gateway unit, a search service sized for a rebuild, idle model and speech accounts, registry replication. Compute is free while scaled to zero.
 - Cross-region private connectivity is by design not shared: each region has its own endpoints and DNS. A failover therefore does not depend on anything in the failed region, except Front Door's control plane, which is global.
-- Known gaps: the speech stage blocks a worker for the length of a batch job and a worker crash resubmits it (a staged pipeline with a persisted job id fixes both); no region-level game day has been run.
+- Known gaps: no region-level game day has been run; a meeting whose scheduled poll message is lost is not found by any sweep yet (ADR-020).

@@ -118,3 +118,26 @@ class SpokenPhrase:
     text: str
     confidence: float
     locale: str
+
+
+class SpeechStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class SpeechPoll:
+    """What the provider says about a submitted job; phrases only when it has succeeded."""
+
+    status: SpeechStatus
+    phrases: tuple[SpokenPhrase, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SpeechJob:
+    """A job submitted to the provider and not yet collected: all a waiting meeting remembers."""
+
+    handle: str
+    submitted_at: datetime
+    polls: int = 0

@@ -55,6 +55,31 @@ class SqliteJobQueue:
         self.wake.set()
         return row["id"]
 
+    def publish_later(
+        self,
+        workspace_id: str,
+        job_key: str,
+        job_type: str,
+        payload: dict[str, Any],
+        delay_seconds: int,
+    ) -> None:
+        now = datetime.now(UTC)
+        with self._db.transaction() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO jobs (workspace_id, job_key, job_type, id, payload, created_at,"
+                " run_after) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    workspace_id,
+                    job_key,
+                    job_type,
+                    str(uuid4()),
+                    json.dumps(payload),
+                    to_text(now),
+                    to_text(now + timedelta(seconds=delay_seconds)),
+                ),
+            )
+        self.wake.set()
+
     def publish_count(self, workspace_id: str, job_key: str, job_type: str) -> int:
         with self._db.transaction(write=False) as conn:
             row = conn.execute(

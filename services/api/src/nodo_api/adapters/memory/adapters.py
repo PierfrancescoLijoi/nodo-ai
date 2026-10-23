@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 from uuid import uuid4
@@ -16,6 +16,7 @@ from nodo_api.domain.models import (
     Meeting,
     MeetingState,
     RecordingAttestation,
+    SpeechJob,
     SpokenPhrase,
     TranscriptSegment,
 )
@@ -188,9 +189,29 @@ class MemoryBlobStore:
             raise NotFoundError from None
 
 
+@dataclass(frozen=True, slots=True)
+class ScheduledJob:
+    workspace_id: str
+    job_key: str
+    job_type: str
+    payload: dict[str, Any]
+    delay_seconds: int
+
+
 class MemoryJobQueue:
     def __init__(self) -> None:
         self._jobs: dict[tuple[str, str, str], str] = {}
+        self.scheduled: list[ScheduledJob] = []
+
+    def publish_later(
+        self,
+        workspace_id: str,
+        job_key: str,
+        job_type: str,
+        payload: dict[str, Any],
+        delay_seconds: int,
+    ) -> None:
+        self.scheduled.append(ScheduledJob(workspace_id, job_key, job_type, payload, delay_seconds))
 
     def publish_once(
         self, workspace_id: str, job_key: str, job_type: str, payload: dict[str, Any]
@@ -515,3 +536,22 @@ class MemorySpeech:
             SpokenPhrase(2, 2500, 5200, "Sara will benchmark the retries.", 0.95, locale),
             SpokenPhrase(1, 5300, 7000, "Agreed, deadline is the twenty-eighth.", 0.96, locale),
         )
+
+
+class MemorySpeechJobStore:
+    def __init__(self) -> None:
+        self._jobs: dict[tuple[str, str], SpeechJob] = {}
+
+    def get(self, workspace_id: str, meeting_id: str) -> SpeechJob | None:
+        return self._jobs.get((workspace_id, meeting_id))
+
+    def start(self, workspace_id: str, meeting_id: str, handle: str, now: datetime) -> None:
+        self._jobs[(workspace_id, meeting_id)] = SpeechJob(handle, now)
+
+    def record_poll(self, workspace_id: str, meeting_id: str) -> int:
+        job = self._jobs[(workspace_id, meeting_id)]
+        self._jobs[(workspace_id, meeting_id)] = replace(job, polls=job.polls + 1)
+        return job.polls + 1
+
+    def clear(self, workspace_id: str, meeting_id: str) -> None:
+        self._jobs.pop((workspace_id, meeting_id), None)

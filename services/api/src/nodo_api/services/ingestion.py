@@ -7,7 +7,10 @@ reviewed (ARCHITECTURE.md section 5.1, ADR-012)."""
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from nodo_api.domain.graph import (
     EntityType,
@@ -17,21 +20,35 @@ from nodo_api.domain.graph import (
     normalize_label,
     validate_extraction,
 )
-from nodo_api.domain.models import Locale, Meeting, MeetingState, SpokenPhrase, TranscriptSegment
+from nodo_api.domain.models import (
+    Locale,
+    Meeting,
+    MeetingState,
+    SpeechStatus,
+    SpokenPhrase,
+    TranscriptSegment,
+)
 from nodo_api.domain.rules import InvalidStateTransition, transition_meeting
 from nodo_api.errors import NotFoundError
 from nodo_api.ports import (
     BlobStore,
     Extractor,
     GraphStore,
+    JobQueue,
     MeetingRepository,
     Retriever,
+    SpeechJobStore,
     SpeechToText,
+    StagedSpeechToText,
     TranscriptRepository,
 )
 from nodo_api.telemetry import instruments, stage
 
+logger = logging.getLogger("nodo_ingestion")
+
 FIRST_VERSION = 1
+TRANSCRIBE = "transcribe"
+POLL_GROWTH = 1.5  # each poll waits half as long again as the one before, up to the ceiling
 KNOWN_DECISIONS = 20
 SPEAKER_EVIDENCE = 3  # segments cited as proof that a named speaker took part
 PROCESSABLE = (MeetingState.TRANSCRIBING, MeetingState.EXTRACTING)
@@ -98,6 +115,14 @@ class IngestionService:
         candidate_locales: tuple[str, ...],
         extractor: Extractor,
         graph: GraphStore,
+        *,
+        staged_speech: StagedSpeechToText | None = None,
+        speech_jobs: SpeechJobStore | None = None,
+        jobs: JobQueue | None = None,
+        poll_seconds: int = 60,
+        poll_max_seconds: int = 300,
+        speech_timeout_seconds: int = 7200,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._meetings = meetings
         self._transcripts = transcripts
@@ -107,17 +132,30 @@ class IngestionService:
         self._locales = candidate_locales
         self._extractor = extractor
         self._graph = graph
+        # Given these three, the worker submits the speech job and leaves; a later message collects.
+        self._staged = staged_speech if speech_jobs is not None and jobs is not None else None
+        self._speech_jobs = speech_jobs
+        self._jobs = jobs
+        self._poll_seconds = poll_seconds
+        self._poll_max_seconds = poll_max_seconds
+        self._speech_timeout = speech_timeout_seconds
+        self._clock = clock
 
     def process(self, workspace_id: str, meeting_id: str) -> bool:
         """True when work was done; False for a stale message or a meeting that is gone."""
         try:
             meeting = self._meetings.get_for_processing(workspace_id, meeting_id)
         except NotFoundError:
-            return False  # deleted while queued: nothing to do, and nothing must be recreated
+            # Deleted while queued: nothing must be recreated, and a job the provider still
+            # holds for the audio is cancelled.
+            self._forget_speech_job(workspace_id, meeting_id)
+            return False
         if meeting.state not in PROCESSABLE:
             return False
         with stage("transcribe", locale=meeting.attestation.locale.value):
             segments = self._existing_or_new_transcript(workspace_id, meeting_id, meeting)
+        if segments is None:
+            return True  # submitted or still running: a scheduled message carries on from here
         audio_seconds = max(s.end_ms for s in segments) / 1000
         instruments.audio_seconds.add(audio_seconds)
         with stage("index", segments=len(segments)):
@@ -168,15 +206,79 @@ class IngestionService:
 
     def _existing_or_new_transcript(self, workspace_id, meeting_id, meeting):
         try:
-            return self._transcripts.get_version(workspace_id, meeting_id, FIRST_VERSION)
+            saved = self._transcripts.get_version(workspace_id, meeting_id, FIRST_VERSION)
         except NotFoundError:
             pass
+        else:
+            self._forget_speech_job(workspace_id, meeting_id)  # a crash left the job behind
+            return saved
+        if self._staged is not None:
+            return self._staged_transcript(workspace_id, meeting_id, meeting)
         audio_url = self._blobs.create_read_url(workspace_id, meeting_id)
         phrases = self._speech.transcribe(audio_url, self._locales)
         segments = build_segments(meeting_id, phrases, meeting.attestation.locale, meeting.project)
         if not segments:
             raise ValueError("The recording produced no speech")
         return self._transcripts.add_version(workspace_id, meeting_id, segments)
+
+    # ------------------------------------------------------------------------ speech in stages
+
+    def _staged_transcript(self, workspace_id, meeting_id, meeting):
+        """The transcript, or None while the provider is still working. Never waits."""
+        assert self._staged is not None and self._speech_jobs is not None
+        job = self._speech_jobs.get(workspace_id, meeting_id)
+        if job is None:
+            audio_url = self._blobs.create_read_url(workspace_id, meeting_id)
+            handle = self._staged.submit(audio_url, self._locales)
+            self._speech_jobs.start(workspace_id, meeting_id, handle, self._clock())
+            self._schedule_poll(workspace_id, meeting_id, polls=0)
+            return None
+        waited = (self._clock() - job.submitted_at).total_seconds()
+        if waited > self._speech_timeout:
+            return self._give_up(workspace_id, meeting_id, "timeout")
+        result = self._staged.poll(job.handle)
+        if result.status is SpeechStatus.RUNNING:
+            polls = self._speech_jobs.record_poll(workspace_id, meeting_id)
+            self._schedule_poll(workspace_id, meeting_id, polls)
+            return None
+        if result.status is SpeechStatus.FAILED:
+            return self._give_up(workspace_id, meeting_id, "provider_failed")
+        segments = build_segments(
+            meeting_id, result.phrases, meeting.attestation.locale, meeting.project
+        )
+        if not segments:
+            return self._give_up(workspace_id, meeting_id, "no_speech")
+        saved = self._transcripts.add_version(workspace_id, meeting_id, segments)
+        self._forget_speech_job(workspace_id, meeting_id)
+        return saved
+
+    def _schedule_poll(self, workspace_id: str, meeting_id: str, polls: int) -> None:
+        assert self._jobs is not None
+        delay = min(int(self._poll_seconds * POLL_GROWTH**polls), self._poll_max_seconds)
+        self._jobs.publish_later(
+            workspace_id,
+            f"{meeting_id}:poll:{polls}",
+            TRANSCRIBE,
+            {"meeting_id": meeting_id},
+            delay,
+        )
+
+    def _forget_speech_job(self, workspace_id: str, meeting_id: str) -> None:
+        if self._staged is None or self._speech_jobs is None:
+            return
+        job = self._speech_jobs.get(workspace_id, meeting_id)
+        if job is None:
+            return
+        self._staged.cancel(job.handle)
+        self._speech_jobs.clear(workspace_id, meeting_id)
+
+    def _give_up(self, workspace_id: str, meeting_id: str, reason: str) -> None:
+        """The provider will not produce a transcript from this audio, and asking again would pay
+        again for the same answer: end the meeting as failed and let the message complete."""
+        logger.error("speech_gave_up reason=%s", reason)
+        self._forget_speech_job(workspace_id, meeting_id)
+        self.mark_failed(workspace_id, meeting_id)
+        return None
 
     def mark_failed(self, workspace_id: str, meeting_id: str) -> None:
         try:

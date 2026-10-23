@@ -17,7 +17,14 @@ from nodo_api.domain.graph import (
     ReviewStatus,
     Subgraph,
 )
-from nodo_api.domain.models import Locale, Meeting, SpokenPhrase, TranscriptSegment
+from nodo_api.domain.models import (
+    Locale,
+    Meeting,
+    SpeechJob,
+    SpeechPoll,
+    SpokenPhrase,
+    TranscriptSegment,
+)
 from nodo_api.domain.retention import AudioDue
 
 # Every method takes workspace_id (and, where data belongs to a person, the user or the set of
@@ -97,6 +104,18 @@ class JobQueue(Protocol):
     def publish_once(
         self, workspace_id: str, job_key: str, job_type: str, payload: dict[str, Any]
     ) -> str: ...
+
+    def publish_later(
+        self,
+        workspace_id: str,
+        job_key: str,
+        job_type: str,
+        payload: dict[str, Any],
+        delay_seconds: int,
+    ) -> None:
+        """Deliver after a delay. Unlike publish_once there is no record to reconcile: whatever
+        schedules a message also keeps the state that tells it what the message is for."""
+        ...
 
 
 class Retriever(Protocol):
@@ -240,6 +259,34 @@ class SpeechToText(Protocol):
     def transcribe(
         self, audio_url: str, candidate_locales: tuple[str, ...]
     ) -> tuple[SpokenPhrase, ...]: ...
+
+
+class StagedSpeechToText(Protocol):
+    """The same service in three calls, so nobody has to wait inside one: submit returns at once
+    with the provider's handle for the job, poll asks how it is going, cancel forgets it."""
+
+    def submit(self, audio_url: str, candidate_locales: tuple[str, ...]) -> str: ...
+
+    def poll(self, handle: str) -> SpeechPoll: ...
+
+    def cancel(self, handle: str) -> None:
+        """Best effort; the provider removes an abandoned job by itself after a few hours."""
+        ...
+
+
+class SpeechJobStore(Protocol):
+    """The handle of the job a meeting is waiting for. Written before the next poll is scheduled,
+    so any worker that receives the next message knows what to ask."""
+
+    def get(self, workspace_id: str, meeting_id: str) -> SpeechJob | None: ...
+
+    def start(self, workspace_id: str, meeting_id: str, handle: str, now: datetime) -> None: ...
+
+    def record_poll(self, workspace_id: str, meeting_id: str) -> int:
+        """Count one more poll and return the new total."""
+        ...
+
+    def clear(self, workspace_id: str, meeting_id: str) -> None: ...
 
 
 class Embedder(Protocol):

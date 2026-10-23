@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from nodo_api.domain.models import SpokenPhrase
+from nodo_api.domain.models import SpeechPoll, SpeechStatus, SpokenPhrase
 
 API_VERSION = "2024-11-15"
 SPEECH_TOKEN_SCOPE = "https://cognitiveservices.azure.com/.default"
@@ -99,6 +99,36 @@ class AzureSpeechToText:
             "displayName": "nodo-ingestion",
             "properties": properties,
         }
+
+    # The same job in three calls, so a worker can submit, leave, and collect later.
+
+    def submit(self, audio_url: str, candidate_locales: tuple[str, ...]) -> str:
+        if not candidate_locales:
+            raise SpeechError("At least one candidate locale is required")
+        return self._submit(audio_url, candidate_locales)
+
+    def poll(self, handle: str) -> SpeechPoll:
+        self._check_handle(handle)
+        response = self._http.get(handle, headers=self._headers())
+        response.raise_for_status()
+        body = response.json()
+        status = body.get("status")
+        if status == "Succeeded":
+            result = self._fetch_result(str(body["links"]["files"]))
+            return SpeechPoll(SpeechStatus.SUCCEEDED, parse_phrases(result))
+        if status == "Failed":
+            return SpeechPoll(SpeechStatus.FAILED)
+        return SpeechPoll(SpeechStatus.RUNNING)
+
+    def cancel(self, handle: str) -> None:
+        self._check_handle(handle)
+        self._delete(handle)
+
+    def _check_handle(self, handle: str) -> None:
+        """The handle comes back from our own database, but it is followed with a bearer token:
+        it must still point at this resource's transcription jobs and nowhere else."""
+        if not handle.startswith(f"{self._base}/speechtotext/transcriptions/"):
+            raise SpeechError("Unexpected speech job address")
 
     def transcribe(
         self, audio_url: str, candidate_locales: tuple[str, ...]

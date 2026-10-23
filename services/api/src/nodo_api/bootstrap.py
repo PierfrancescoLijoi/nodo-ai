@@ -35,6 +35,7 @@ class Adapters:
     readiness: tuple[tuple[str, Callable[[], None]], ...] = ()  # (name, check) for /readyz
     retention: Any = None  # the audio-retention store, for the sweep job
     exports: Any = None  # export requests (ADR-019)
+    speech_jobs: Any = None  # the speech job a meeting waits for (staged transcription)
 
 
 @dataclass(slots=True)
@@ -156,6 +157,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
     from nodo_api.adapters.azure.search import AzureSearchRetriever
     from nodo_api.adapters.azure.servicebus import ServiceBusJobQueue
     from nodo_api.adapters.azure.speech import AzureSpeechToText
+    from nodo_api.adapters.azure.speech_jobs_pg import PgSpeechJobStore
 
     c = clients or azure_clients(settings)
     db = postgres_database(settings, c["credential"])
@@ -190,7 +192,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
                 lambda: c["servicebus"].get_queue_sender(settings.azure_servicebus_queue),
             ),
             make_guard("servicebus", limit=settings.bulkhead_servicebus, retry=INTERACTIVE_RETRY),
-            ("publish_once",),
+            ("publish_once", "publish_later"),
         ),
         retriever=Guarded(
             AzureSearchRetriever(c["search"], embedder),
@@ -205,7 +207,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
         speech=Guarded(
             AzureSpeechToText(settings.azure_speech_endpoint, c["speech_token"]),
             speech,
-            ("transcribe",),
+            ("transcribe", "submit", "poll", "cancel"),
         ),
         extractor=Guarded(
             AzureOpenAiExtractor(c["openai"], settings.openai_chat_deployment),
@@ -218,6 +220,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
         readiness=(("database", db.ping),) if hasattr(db, "ping") else (),
         retention=PgRetentionStore(db),
         exports=PgExportStore(db),
+        speech_jobs=PgSpeechJobStore(db),
     )
 
 
@@ -243,6 +246,12 @@ def build_worker_runtime(settings: Settings) -> WorkerRuntime:
         settings.speech_candidate_locales,
         adapters.extractor,
         adapters.graph,
+        staged_speech=adapters.speech,
+        speech_jobs=adapters.speech_jobs,
+        jobs=adapters.jobs,
+        poll_seconds=settings.speech_poll_seconds,
+        poll_max_seconds=settings.speech_poll_max_seconds,
+        speech_timeout_seconds=settings.speech_timeout_seconds,
     )
     exports = ExportService(
         adapters.exports,

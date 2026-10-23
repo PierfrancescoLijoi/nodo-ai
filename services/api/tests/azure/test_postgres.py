@@ -497,3 +497,24 @@ class TestPgGraph(GraphContract):
     @pytest.fixture
     def ws(self):
         return f"ws-{uuid.uuid4().hex[:8]}"
+
+
+def test_speech_jobs_are_scoped_counted_and_forgotten(db) -> None:
+    from nodo_api.adapters.azure.speech_jobs_pg import PgSpeechJobStore
+
+    store, when = PgSpeechJobStore(db), datetime.now(UTC)
+    assert store.get(A, "m-speech") is None
+    store.start(A, "m-speech", "https://speech/job/1", when)
+    job = store.get(A, "m-speech")
+    assert (job.handle, job.polls) == ("https://speech/job/1", 0)
+    assert job.submitted_at == when
+    assert store.record_poll(A, "m-speech") == 1 and store.record_poll(A, "m-speech") == 2
+    assert store.get(B, "m-speech") is None  # another workspace sees nothing
+    store.start(A, "m-speech", "https://speech/job/2", when)  # a new submission replaces and resets
+    assert (store.get(A, "m-speech").handle, store.get(A, "m-speech").polls) == (
+        "https://speech/job/2",
+        0,
+    )
+    store.clear(A, "m-speech")
+    store.clear(A, "m-speech")  # forgetting twice is fine
+    assert store.get(A, "m-speech") is None

@@ -52,7 +52,7 @@ Recomputed by `tools/capacity/model.py`:
 | Extraction tokens per minute at peak | 12 k | 122 k | 1.2 M |
 | Embedding tokens per minute at peak | 14 k | 139 k | 1.4 M |
 | Worker executions at peak, job waits for speech | 9 | 89 | 889 |
-| Worker executions at peak, staged jobs | 1 | 6 | 56 |
+| Worker executions at peak, staged jobs (polls included) | 2 | 19 | 186 |
 | PostgreSQL after 12 months of transcripts | 0.05 TB | 0.48 TB | 4.8 TB |
 | Search index after 12 months | 48 GB | 479 GB | 4.8 TB |
 | Search partitions / replicas | 1 / 3 | 5 / 3 | 43 / 4 |
@@ -63,7 +63,7 @@ Recomputed by `tools/capacity/model.py`:
 1. **The API is not the bottleneck.** Three small replicas carry 100 000 users of interactive load on this model. The reason for three is availability (one per zone), not throughput. Scaling the API is therefore a rule on concurrent requests, not a capacity plan.
 2. **The model quotas are the first wall.** At 10 000 users the peak needs about 230 k chat and 120 k extraction tokens per minute. Tokens-per-minute quota is granted per deployment and region, and a rate limit is also the user-visible failure. The AI gateway (ADR-016) spreads load over two regions and enforces a budget per caller so one tenant cannot consume the other's; the quota request is the long-lead item before launch.
 3. **The index is the largest stock.** 479 GB at 10 000 users is five partitions. Float32 vectors at 1 536 dimensions would be twelve times that (57 TB at 100 000 users). The 512-dimension int8 choice is what keeps the index affordable, and it must be validated on retrieval quality with the golden set before it is fixed (a quality loss here would make the saving worthless).
-4. **Waiting is the expensive way to process audio.** A worker that sits on a speech job for its whole duration needs 9x the executions of one that computes and goes away (89 against 6 at 10 000 users). The code today waits (`services/ingestion.py` blocks on the batch job); splitting it into stages with a persisted job id and a scheduled poll is the largest single efficiency gain still open and is listed as a known gap in AZURE-ARCHITECTURE.md.
+4. **Waiting is the expensive way to process audio, and it is no longer what the worker does.** A worker that sat on a speech job for its whole duration needed several times the executions of one that computes and goes away. Speech now runs in stages (ADR-020): submit, leave, and a scheduled poll with backoff (60, 90, 135, 202, then 300 seconds) collects the result. Each poll is a short job execution, so the staged figure counts them (about seven polls and twenty seconds each per audio hour, both assumed): see the table. The poll interval is the knob: shorter means faster transcripts and more executions.
 5. **PostgreSQL stays on one server for a long time.** 0.5 TB at 10 000 users is inside one General Purpose server; connections are 30 because the API pools per replica. The point to revisit is about 2 TB or a sustained CPU above 60%, and the first moves are read replicas for the graph and list queries (the standby replica already exists for disaster recovery), then partitioning the segment table by month. PgBouncer is not used: row level security relies on per-transaction settings and the connection count is far below the limit.
 
 ## 5. Launch preset and growth triggers

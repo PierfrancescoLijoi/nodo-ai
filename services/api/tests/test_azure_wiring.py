@@ -64,3 +64,18 @@ def test_the_worker_runtime_opens_a_receiver_on_the_ingest_queue(monkeypatch) ->
     runtime = bootstrap.build_worker_runtime(SETTINGS)
     receiver = runtime.receiver_factory(30)
     assert receiver is not None
+
+
+def test_the_worker_transcribes_in_stages_and_the_guards_cover_every_stage(monkeypatch) -> None:
+    from nodo_api.adapters.azure.speech_jobs_pg import PgSpeechJobStore
+
+    monkeypatch.setattr(bootstrap, "postgres_database", lambda settings, credential=None: object())
+    adapters = bootstrap.build_adapters(SETTINGS)
+    assert isinstance(adapters.speech_jobs, PgSpeechJobStore)
+    # the stage calls and the scheduled poll must go through the guards like every other call
+    for name in ("submit", "poll", "cancel", "transcribe"):
+        assert getattr(adapters.speech, name).__name__ == "call"
+    assert adapters.jobs.publish_later.__name__ == "call"
+    runtime = bootstrap.build_worker_runtime(SETTINGS)
+    assert runtime.ingestion._staged is not None  # not the waiting path
+    assert runtime.ingestion._poll_seconds == SETTINGS.speech_poll_seconds

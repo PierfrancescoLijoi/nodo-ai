@@ -392,3 +392,15 @@ def test_the_installed_embedding_model_embeds_with_unit_length_vectors() -> None
     close = float(np.dot(vectors[0], np.array(embedder.embed_query("una frase"))[0]))
     far = float(np.dot(vectors[1], np.array(embedder.embed_query("una frase"))[0]))
     assert close > far
+
+
+def test_a_later_job_waits_for_its_time_and_then_runs(db) -> None:
+    queue, recorder = SqliteJobQueue(db), Recorder()
+    queue.publish_later(WS, "m1:poll:0", "transcribe", {"meeting_id": "m1"}, 60)
+    loop = LocalWorkerLoop(queue, Worker(recorder))
+    assert loop.run_pending() == 0 and queue.pending() == 1  # not yet
+    with db.transaction() as conn:
+        conn.execute("UPDATE jobs SET run_after = '2000-01-01T00:00:00.000000+00:00'")
+    assert loop.run_pending() == 1 and recorder.seen == [("transcribe", "m1")]
+    queue.publish_later(WS, "m1:poll:1", "transcribe", {"meeting_id": "m1"}, 0)
+    assert loop.run_pending() == 1  # a different key is a different message

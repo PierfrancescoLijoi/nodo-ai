@@ -10,7 +10,9 @@ from nodo_api.ports.protocols import (
     MeetingRepository,
     RetentionStore,
     Retriever,
+    SpeechJobStore,
     SpeechToText,
+    StagedSpeechToText,
     TranscriptRepository,
 )
 
@@ -26,6 +28,8 @@ __all__ = [
     "MeetingRepository",
     "RetentionStore",
     "Retriever",
+    "SpeechJobStore",
     "SpeechToText",
+    "StagedSpeechToText",
     "TranscriptRepository",
 ]

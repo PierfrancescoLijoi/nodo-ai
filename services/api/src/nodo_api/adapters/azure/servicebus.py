@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from azure.servicebus import ServiceBusMessage
@@ -47,3 +48,32 @@ class ServiceBusJobQueue:
                 sender.send_messages(message)
             self._outbox.mark_published(workspace_id, job_key, job_type)
         return job_id
+
+    def publish_later(
+        self,
+        workspace_id: str,
+        job_key: str,
+        job_type: str,
+        payload: dict[str, Any],
+        delay_seconds: int,
+    ) -> None:
+        """A message that becomes visible after a delay. No outbox row: the caller keeps the state
+        that says what the message is for (the speech job store), and the message id is the key, so
+        a repeated schedule of the same poll is absorbed by duplicate detection."""
+        body = {
+            "workspace_id": workspace_id,
+            "job_key": job_key,
+            "job_type": job_type,
+            "trace": inject_context(),
+            **payload,
+        }
+        message = ServiceBusMessage(
+            json.dumps(body),
+            content_type="application/json",
+            message_id=f"{workspace_id}:{job_key}:{job_type}",
+            subject=job_type,
+            application_properties={"workspace_id": workspace_id},
+        )
+        when = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+        with self._sender_factory() as sender:
+            sender.schedule_messages(message, when)

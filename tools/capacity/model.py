@@ -39,6 +39,8 @@ class Assumptions:
     index_overhead: float = 1.3  # HNSW graph and text index on top of the vectors
     speech_wait_hours_per_audio_hour: float = 0.25  # ASSUMED, not measured: needs the subscription
     worker_cpu_seconds_per_hour: float = 60.0  # derived: indexing batches, graph writes, orchestration
+    polls_per_audio_hour: float = 7.0  # assumed: polls at 60, 90, 135, 202, 300 s... for a ~10 minute job
+    poll_execution_seconds: float = 20.0  # assumed: a job execution that starts, asks once and exits
 
     # --- one question
     query_tokens_in: int = 3_000
@@ -100,7 +102,11 @@ def model(users: int, a: Assumptions = Assumptions()) -> Result:
     # A job that waits for the speech service holds a replica for the whole wait (long polling);
     # staged jobs hold one only while they compute, because the wait is a scheduled message.
     long_polling = math.ceil(peak_audio_per_hour * (a.speech_wait_hours_per_audio_hour + a.worker_cpu_seconds_per_hour / 3600))
-    staged = math.ceil(peak_audio_per_hour * a.worker_cpu_seconds_per_hour / 3600)
+    staged = math.ceil(
+        peak_audio_per_hour
+        * (a.worker_cpu_seconds_per_hour + a.polls_per_audio_hour * a.poll_execution_seconds)
+        / 3600
+    )
 
     hours_12m = users * a.audio_hours_per_user_month * a.transcript_months_kept
     pg_tb = hours_12m * a.pg_mb_per_hour / 1_000_000

@@ -28,7 +28,7 @@ Transcript text, audio, prompts, completions and model outputs are never logged 
 | Time to a transcript | p95 under 15 minutes for a 60 minute recording | end of upload to `review` state (to be measured, speech wait is the unknown) |
 | Erasure | 100% of due audio erased within the policy | the retention job reports failures; any failure alerts |
 
-The first two are alerts today. The time-to-transcript objective needs the staged speech pipeline and a metric from real jobs before it can be an alert; it is listed, not claimed.
+The first two are alerts today. The time-to-transcript objective can now be measured (the staged speech pipeline of ADR-020 has a start and an end), but it needs a metric emitted from real jobs before it can be an alert; it is listed, not claimed.
 
 ### Alerts: symptoms page, causes inform
 - **Page (severity 0/1):** the availability test failing from two or more places; fast burn (error budget used at 14.4 times the sustainable rate over one hour); Front Door seeing less than half of its origins healthy; audio retention failing.

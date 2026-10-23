@@ -22,7 +22,12 @@ def test_replicas_follow_the_peak_request_rate() -> None:
 
 def test_staging_the_jobs_needs_far_fewer_workers_than_waiting_in_one() -> None:
     result = model(100_000)
-    assert result.executions_staged * 10 < result.executions_long_polling
+    assert result.executions_staged * 4 < result.executions_long_polling
+
+
+def test_every_poll_costs_an_execution_so_the_stages_are_not_free() -> None:
+    chatty = replace(Assumptions(), polls_per_audio_hour=70.0)
+    assert model(100_000, chatty).executions_staged > model(100_000).executions_staged * 3
 
 
 def test_a_job_that_waits_for_speech_costs_in_proportion_to_the_wait() -> None:
