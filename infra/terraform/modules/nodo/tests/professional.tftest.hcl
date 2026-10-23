@@ -198,3 +198,114 @@ run "plan_index_maintenance" {
     error_message = "maintenance writes to the index it repairs, in each region"
   }
 }
+
+run "plan_sweeps_and_audit_archive" {
+  command = plan
+
+  assert {
+    condition     = azurerm_container_app_job.sweep.schedule_trigger_config[0].cron_expression == "*/30 * * * *"
+    error_message = "lost work is looked for every half hour"
+  }
+
+  assert {
+    condition     = length(azurerm_container_app_job.audit_archive) == 1
+    error_message = "the audit trail leaves the database"
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.identity["audit_blob"].role_definition_name == "Storage Blob Data Contributor"
+    error_message = "the archive writes to the immutable account"
+  }
+
+  assert {
+    condition     = length(azurerm_monitor_scheduled_query_rules_alert_v2.audit_archive_silent) == 1
+    error_message = "a silent archive is an alert"
+  }
+}
+
+run "plan_first_connection_checks_and_the_two_switches" {
+  command = plan
+
+  variables {
+    secrets_from_key_vault = false
+    ai_token_limit_enabled = false
+  }
+
+  assert {
+    condition     = length(azurerm_container_app_job.preflight) == 4
+    error_message = "a first-connection check per region and identity"
+  }
+
+  assert {
+    condition     = azurerm_container_app_job.preflight["primary-worker"].template[0].container[0].command[4] == "worker"
+    error_message = "each check runs as its own identity"
+  }
+}
+
+# Container Apps names stop at 32 characters, and "staging" is the longest environment name.
+run "plan_names_fit_in_the_longest_environment" {
+  command = plan
+
+  # The suffix is random: fix it so the names can be measured at plan time.
+  override_resource {
+    target          = random_string.suffix
+    override_during = plan
+    values = {
+      result = "abcd"
+    }
+  }
+
+  variables {
+    environment = "staging"
+  }
+
+  assert {
+    condition = alltrue(concat(
+      [for k, v in azurerm_container_app.api : length(v.name) <= 32],
+      [for k, v in azurerm_container_app_job.worker : length(v.name) <= 32],
+      [for k, v in azurerm_container_app_job.preflight : length(v.name) <= 32],
+      [for k, v in azurerm_container_app_job.reindex : length(v.name) <= 32],
+      [for v in [
+        azurerm_container_app_job.migrate, azurerm_container_app_job.retention,
+        azurerm_container_app_job.index_verify, azurerm_container_app_job.sweep,
+        azurerm_container_app_job.audit_archive[0],
+      ] : length(v.name) <= 32],
+    ))
+    error_message = "a Container Apps name is longer than 32 characters"
+  }
+
+  assert {
+    condition     = length(azurerm_key_vault.main.name) <= 24
+    error_message = "azurerm_key_vault.main.name is longer than 24 characters"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_account.main.name) <= 24
+    error_message = "azurerm_storage_account.main.name is longer than 24 characters"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_account.audit[0].name) <= 24
+    error_message = "azurerm_storage_account.audit[0].name is longer than 24 characters"
+  }
+
+  assert {
+    condition     = length(azurerm_container_registry.main.name) <= 50
+    error_message = "azurerm_container_registry.main.name is longer than 50 characters"
+  }
+
+  assert {
+    condition     = length(azurerm_servicebus_namespace.main.name) <= 50
+    error_message = "azurerm_servicebus_namespace.main.name is longer than 50 characters"
+  }
+
+  assert {
+    condition     = length(azurerm_servicebus_namespace.dr[0].name) <= 50
+    error_message = "azurerm_servicebus_namespace.dr[0].name is longer than 50 characters"
+  }
+
+  assert {
+    condition     = alltrue([for k, v in azurerm_user_assigned_identity.workload : length(v.name) <= 63])
+    error_message = "an identity name becomes a database role name, which stops at 63 characters"
+  }
+}

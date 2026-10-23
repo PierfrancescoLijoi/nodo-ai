@@ -27,6 +27,19 @@ output "reindex_job_names" {
   value       = { for k, v in azurerm_container_app_job.reindex : k => v.name }
 }
 
+output "sweep_job_name" {
+  value = azurerm_container_app_job.sweep.name
+}
+
+output "audit_archive_job_name" {
+  value = local.pro ? azurerm_container_app_job.audit_archive[0].name : null
+}
+
+output "preflight_job_names" {
+  description = "Manual first-connection checks, one per region stamp and identity."
+  value       = { for k, v in azurerm_container_app_job.preflight : k => v.name }
+}
+
 output "acr_name" {
   value = azurerm_container_registry.main.name
 }

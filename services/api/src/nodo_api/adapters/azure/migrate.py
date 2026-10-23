@@ -63,12 +63,29 @@ def grant_roles(conn: Any, roles: tuple[str, ...], database: str) -> None:
                 "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {}"
             ).format(ident)
         )
+        # The archive cursor belongs to the audit job alone: moving it would hide events.
+        conn.execute(sql.SQL("REVOKE ALL ON audit_archive_state FROM {}").format(ident))
         # The audit trail is append-only for the application roles.
         conn.execute(
             sql.SQL("REVOKE UPDATE, DELETE ON {} FROM {}").format(
                 sql.Identifier(AUDIT_TABLE), ident
             )
         )
+
+
+def grant_audit_roles(conn: Any, roles: tuple[str, ...], database: str) -> None:
+    """The audit archive identity gets the role of migration 0009 and nothing else: it reads audit
+    events across workspaces and keeps its own cursor."""
+    for role in roles:
+        exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
+        if not exists:
+            conn.execute("SELECT * FROM pgaadauth_create_principal(%s, false, false)", (role,))
+        ident = sql.Identifier(role)
+        conn.execute(
+            sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(database), ident)
+        )
+        conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(ident))
+        conn.execute(sql.SQL("GRANT nodo_audit TO {}").format(ident))
 
 
 def grant_maintenance_roles(conn: Any, roles: tuple[str, ...], database: str) -> None:

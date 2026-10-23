@@ -417,3 +417,26 @@ def test_the_index_can_say_how_many_documents_a_meeting_has(db) -> None:
     assert retriever.count(WS, "nobody") == 0 and retriever.count("elsewhere", "m1") == 0
     retriever.erase(WS, "m1")
     assert retriever.count(WS, "m1") == 0
+
+
+def test_a_local_meeting_processing_for_hours_is_found_as_stuck(db) -> None:
+    from dataclasses import replace
+
+    from nodo_api.adapters.local.maintenance import SqliteMaintenanceStore
+
+    repo, queue, store = SqliteMeetingRepository(db), SqliteJobQueue(db), SqliteMaintenanceStore(db)
+    for name in ("old", "fresh", "done"):
+        repo.add(WS, _meeting(name), f"k-{name}", "h")
+        repo.save(WS, replace(repo.get_for_processing(WS, name), state=MeetingState.TRANSCRIBING))
+        queue.publish_once(WS, name, "transcribe", {"meeting_id": name})
+    repo.save(WS, replace(repo.get_for_processing(WS, "done"), state=MeetingState.REVIEW))
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE jobs SET created_at = '2000-01-01T00:00:00.000000+00:00' WHERE job_key = 'old'"
+        )
+        conn.execute(
+            "UPDATE jobs SET created_at = '2000-01-01T00:00:00.000000+00:00' WHERE job_key = 'done'"
+        )
+    cutoff = datetime(2026, 1, 1, tzinfo=UTC)
+    assert [m.meeting_id for m in store.stuck_meetings(cutoff, 10)] == ["old"]
+    assert store.unpublished_jobs(cutoff, 10) == ()

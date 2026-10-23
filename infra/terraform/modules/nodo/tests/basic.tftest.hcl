@@ -52,4 +52,9 @@ run "plan_basic" {
     condition     = azurerm_storage_account.main.shared_access_key_enabled == false
     error_message = "no shared keys on storage, in any tier"
   }
+
+  assert {
+    condition     = length(azurerm_container_app_job.audit_archive) == 0
+    error_message = "the basic tier has no immutable audit account to archive to"
+  }
 }

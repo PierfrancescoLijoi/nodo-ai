@@ -7,9 +7,10 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime
 
-from nodo_api.adapters.local.db import LocalDatabase
-from nodo_api.domain.maintenance import IndexReport, MaintenanceMeeting
+from nodo_api.adapters.local.db import LocalDatabase, to_text
+from nodo_api.domain.maintenance import IndexReport, MaintenanceMeeting, PendingJob
 from nodo_api.domain.models import MeetingState
 from nodo_api.services.index_maintenance import IndexMaintenanceService
 
@@ -19,6 +20,26 @@ logger = logging.getLogger("nodo_local_maintenance")
 class SqliteMaintenanceStore:
     def __init__(self, db: LocalDatabase) -> None:
         self._db = db
+
+    def unpublished_jobs(self, older_than: datetime, limit: int) -> tuple[PendingJob, ...]:
+        return ()  # the queue is the table itself: there is no separate outbox to fall behind
+
+    def stuck_meetings(self, older_than: datetime, limit: int) -> tuple[MaintenanceMeeting, ...]:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                "SELECT m.workspace_id, m.id, m.owner_id, m.state FROM meetings m"
+                " JOIN jobs j ON j.workspace_id = m.workspace_id AND j.job_key = m.id"
+                " AND j.job_type = 'transcribe'"
+                " WHERE m.state IN ('transcribing', 'extracting') AND m.tombstoned_at IS NULL"
+                " AND j.created_at < ? ORDER BY j.created_at LIMIT ?",
+                (to_text(older_than), limit),
+            ).fetchall()
+        return tuple(
+            MaintenanceMeeting(
+                r["workspace_id"], r["id"], r["owner_id"], MeetingState(r["state"]), False
+            )
+            for r in rows
+        )
 
     def list_meetings(
         self, after: tuple[str, str] | None, limit: int

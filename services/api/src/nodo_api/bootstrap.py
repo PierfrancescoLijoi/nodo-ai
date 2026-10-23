@@ -229,6 +229,24 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
     )
 
 
+def build_audit_archive(settings: Settings, credential: Any = None):
+    """The hourly job that copies audit events to the account nobody can change (ADR-022)."""
+    from azure.identity import DefaultAzureCredential
+    from azure.storage.blob import BlobServiceClient
+
+    from nodo_api.adapters.azure.audit_archive_pg import AzureAuditSink, PgAuditSource
+    from nodo_api.services.audit_archive import AuditArchiveService
+
+    if not settings.azure_audit_account:
+        raise SystemExit("NODO_AZURE_AUDIT_ACCOUNT is not set")
+    credential = credential or DefaultAzureCredential()
+    db = postgres_database(settings, credential)
+    blobs = BlobServiceClient(
+        f"https://{settings.azure_audit_account}.blob.core.windows.net", credential=credential
+    )
+    return AuditArchiveService(PgAuditSource(db), AzureAuditSink(blobs))
+
+
 def build_adapters(settings: Settings) -> Adapters:
     if settings.backend == "azure":
         return azure_adapters(settings)

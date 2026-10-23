@@ -590,3 +590,46 @@ def test_the_graph_lists_the_segments_a_meeting_cites_on_postgres_too(db) -> Non
     assert store.evidence_segment_ids(workspace, OWNER, "m2") == frozenset()
     store.erase(workspace, "m1")
     assert store.evidence_segment_ids(workspace, OWNER, "m1") == frozenset()
+
+
+def test_the_maintenance_role_finds_unsent_jobs_and_stuck_meetings_in_every_workspace(
+    admin_db, db
+) -> None:
+    from datetime import timedelta
+
+    from nodo_api.adapters.azure.maintenance_pg import PgMaintenanceStore
+
+    repo, outbox = PgMeetingRepository(db), PgJobOutbox(db)
+    now = datetime.now(UTC)
+    for workspace, name in ((A, "swp-a"), (B, "swp-b")):
+        meeting = repo.add(workspace, _meeting(name, workspace=workspace), f"swp-k-{name}", "h")
+        repo.save(workspace, replace(meeting, state=MeetingState.TRANSCRIBING))
+        outbox.record(workspace, name, "transcribe", {"meeting_id": name})
+    sent = repo.add(A, _meeting("swp-sent", workspace=A), "swp-k-sent", "h")
+    repo.save(A, replace(sent, state=MeetingState.TRANSCRIBING))
+    outbox.record(A, "swp-sent", "transcribe", {"meeting_id": "swp-sent"})
+    outbox.mark_published(A, "swp-sent", "transcribe")
+    with admin_db.admin() as conn:  # a record that is hours old; the fresh one stays fresh
+        conn.execute(
+            "UPDATE jobs SET created_at = now() - interval '5 hours' WHERE job_key LIKE 'swp-%'"
+        )
+        conn.execute("UPDATE jobs SET created_at = now() WHERE job_key = 'swp-b'")
+        conn.execute("DROP ROLE IF EXISTS swp_login")
+        conn.execute("CREATE ROLE swp_login LOGIN PASSWORD 'swp-password' IN ROLE nodo_maintenance")
+        conn.execute("GRANT USAGE ON SCHEMA public TO swp_login")
+    params = conninfo_to_dict(DSN)
+    params.update(user="swp_login", password="swp-password")
+    sweeper = PostgresDatabase.from_dsn(make_conninfo(**params))
+    try:
+        store = PgMaintenanceStore(sweeper)
+        cutoff = now - timedelta(hours=1)
+        unsent = {(j.workspace_id, j.job_key): j for j in store.unpublished_jobs(cutoff, 100)}
+        assert (A, "swp-a") in unsent and (A, "swp-sent") not in unsent
+        assert (B, "swp-b") not in unsent  # recorded a moment ago
+        assert unsent[(A, "swp-a")].payload == {"meeting_id": "swp-a"}
+        stuck = {(m.workspace_id, m.meeting_id) for m in store.stuck_meetings(cutoff, 100)}
+        assert {(A, "swp-a"), (A, "swp-sent")} <= stuck and (B, "swp-b") not in stuck
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), sweeper.admin() as conn:
+            conn.execute("DELETE FROM jobs")
+    finally:
+        sweeper.close()

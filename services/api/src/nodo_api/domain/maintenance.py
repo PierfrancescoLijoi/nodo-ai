@@ -42,6 +42,23 @@ class Failure:
     error: str  # the exception type only: messages may carry text
 
 
+@dataclass(frozen=True, slots=True)
+class PendingJob:
+    """A job the outbox recorded and nobody sent. Identifiers only."""
+
+    workspace_id: str
+    job_key: str
+    job_type: str
+    payload: dict[str, str]
+
+
+@dataclass(slots=True)
+class SweepReport:
+    republished: int = 0  # recorded but unsent jobs sent again
+    restarted: int = 0  # meetings stuck in processing, started again
+    failed: list[Failure] = field(default_factory=list)
+
+
 @dataclass(slots=True)
 class IndexReport:
     checked: int = 0  # meetings looked at

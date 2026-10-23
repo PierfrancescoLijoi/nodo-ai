@@ -78,6 +78,16 @@ variable "dr_promote_database" {
   default = false
 }
 
+variable "secrets_from_key_vault" {
+  type    = bool
+  default = true
+}
+
+variable "ai_token_limit_enabled" {
+  type    = bool
+  default = true
+}
+
 variable "waf_mode" {
   type    = string
   default = "Prevention"
@@ -111,6 +121,8 @@ module "nodo" {
   budget_contact_emails   = var.budget_contact_emails
   api_target_port         = var.api_target_port
   waf_mode                = var.waf_mode
+  secrets_from_key_vault  = var.secrets_from_key_vault
+  ai_token_limit_enabled  = var.ai_token_limit_enabled
   dr_active               = var.dr_active
   dr_promote_database     = var.dr_promote_database
   openai_deployments      = var.openai_deployments
@@ -173,6 +185,10 @@ output "migrate_job_name" {
 
 output "retention_job_name" {
   value = module.nodo.retention_job_name
+}
+
+output "preflight_job_names" {
+  value = module.nodo.preflight_job_names
 }
 
 output "index_verify_job_name" {

@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     azure_db_roles: Annotated[tuple[str, ...], NoDecode] = ()
     azure_retention_roles: Annotated[tuple[str, ...], NoDecode] = ()
     azure_maintenance_roles: Annotated[tuple[str, ...], NoDecode] = ()
+    azure_audit_roles: Annotated[tuple[str, ...], NoDecode] = ()
+    azure_audit_account: str | None = None  # the private account with the retention policy
     azure_search_endpoint: str | None = None
     search_index_name: str = "segments"
     azure_openai_endpoint: str | None = None
@@ -107,6 +109,7 @@ class Settings(BaseSettings):
         "azure_db_roles",
         "azure_retention_roles",
         "azure_maintenance_roles",
+        "azure_audit_roles",
         "speech_candidate_locales",
         "oidc_allowed_client_ids",
         mode="before",

@@ -8,6 +8,12 @@ python -m nodo_api.admin retention      erase audio whose retention period ended
 python -m nodo_api.admin verify-index   compare the search index and the graph with the store;
                                         exit 1 if they differ (weekly job, read only)
 python -m nodo_api.admin reindex        repair the difference (after an outage or a failover)
+python -m nodo_api.admin sweep          send again jobs nobody sent, restart meetings stuck
+                                        in processing (every 30 minutes)
+python -m nodo_api.admin audit-archive  copy audit events to the immutable account (hourly)
+python -m nodo_api.admin preflight api|worker
+                                        check this deployment end to end as that identity
+                                        (after the first deployment and after any change)
 
 The index commands also run against the local engine with NODO_BACKEND=local.
 """
@@ -20,12 +26,40 @@ import sys
 from nodo_api.config import Settings
 
 logger = logging.getLogger("nodo_admin")
-COMMANDS = ("migrate", "roles", "ensure-index", "bootstrap", "retention", "verify-index", "reindex")
+COMMANDS = (
+    "migrate",
+    "roles",
+    "ensure-index",
+    "bootstrap",
+    "retention",
+    "verify-index",
+    "reindex",
+    "sweep",
+    "audit-archive",
+    "preflight",
+)
 
 
-def run(command: str, settings: Settings) -> None:
+def run(command: str, settings: Settings, argument: str | None = None) -> None:
     if command not in COMMANDS:
         raise SystemExit(f"Unknown command {command!r}. Use one of: {', '.join(COMMANDS)}")
+    if command == "preflight":
+        if settings.backend != "azure" or argument not in ("api", "worker"):
+            raise SystemExit(
+                "usage: NODO_BACKEND=azure python -m nodo_api.admin preflight api|worker"
+            )
+        _preflight(settings, argument)
+        return
+    if command == "audit-archive":
+        if settings.backend != "azure":
+            raise SystemExit("The audit archive needs NODO_BACKEND=azure")
+        _audit_archive(settings)
+        return
+    if command == "sweep":
+        if settings.backend not in ("azure", "local"):
+            raise SystemExit("The sweep needs NODO_BACKEND=azure or local")
+        _sweep(settings)
+        return
     if command in ("verify-index", "reindex"):
         if settings.backend not in ("azure", "local"):
             raise SystemExit("The index commands need NODO_BACKEND=azure or local")
@@ -43,6 +77,7 @@ def run(command: str, settings: Settings) -> None:
 
         from nodo_api.adapters.azure.migrate import (
             apply_migrations,
+            grant_audit_roles,
             grant_maintenance_roles,
             grant_retention_roles,
             grant_roles,
@@ -64,6 +99,9 @@ def run(command: str, settings: Settings) -> None:
                     grant_maintenance_roles(
                         conn, settings.azure_maintenance_roles, settings.azure_postgres_database
                     )
+                    grant_audit_roles(
+                        conn, settings.azure_audit_roles, settings.azure_postgres_database
+                    )
         finally:
             db.close()
     if "ensure-index" in wanted:
@@ -77,6 +115,34 @@ def run(command: str, settings: Settings) -> None:
         )
         ensure_index(client, settings.search_index_name, settings.openai_embedding_dimensions)
         logger.info("search index ready: %s", settings.search_index_name)
+
+
+def _preflight(settings: Settings, role: str) -> None:
+    from nodo_api.preflight import Status, build_context, render, run_checks
+
+    results = run_checks(build_context(settings, role))
+    print(render(results))
+    if any(r.status is Status.FAIL for r in results):
+        raise SystemExit(1)
+
+
+def _audit_archive(settings: Settings) -> None:
+    """Hourly. A failure leaves the cursor where it was, so the next run continues; the job failing
+    is the alert."""
+    from nodo_api.bootstrap import build_audit_archive
+
+    build_audit_archive(settings).run()
+
+
+def _sweep(settings: Settings) -> None:
+    """Every 30 minutes. A job it could not send makes the job fail, so an alert fires."""
+    from nodo_api.bootstrap import build_adapters
+    from nodo_api.services.sweep import SweepService
+
+    a = build_adapters(settings)
+    report = SweepService(a.maintenance, a.jobs, a.audit).run()
+    if report.failed:
+        raise SystemExit(1)
 
 
 def _index(settings: Settings, *, repair: bool) -> None:
@@ -109,9 +175,9 @@ def _retention(settings: Settings) -> None:
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO)
     args = argv if argv is not None else sys.argv[1:]
-    if len(args) != 1:
+    if len(args) not in (1, 2) or (len(args) == 2 and args[0] != "preflight"):
         raise SystemExit(__doc__)
-    run(args[0], Settings(service="admin"))
+    run(args[0], Settings(service="admin"), args[1] if len(args) == 2 else None)
 
 
 if __name__ == "__main__":

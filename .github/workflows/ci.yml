@@ -148,8 +148,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest httpx
       - run: python -m pytest -q tools/capacity
+      - run: python -m pytest -q tools/smoke
 
   secrets:
     runs-on: ubuntu-latest

@@ -273,6 +273,82 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "index" {
   }
 }
 
+# A job that failed leaves a line in the log; one that never ran leaves nothing. The audit archive
+# runs hourly, so three hours without its summary line means the evidence is not leaving the database.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "audit_archive_silent" {
+  count                 = local.pro ? 1 : 0
+  name                  = "alert-${local.name}-audit-archive"
+  resource_group_name   = azurerm_resource_group.main.name
+  location              = azurerm_resource_group.main.location
+  scopes                = [azurerm_log_analytics_workspace.main.id]
+  description           = "The audit archive has not reported for three hours: events are not being copied to the immutable account."
+  display_name          = "Audit archive silent"
+  severity              = 1
+  evaluation_frequency  = "PT1H"
+  window_duration       = "PT3H"
+  skip_query_validation = true
+  tags                  = local.tags
+
+  criteria {
+    query = <<-KQL
+      ContainerAppConsoleLogs_CL
+      | where TimeGenerated > ago(3h)
+      | where Log_s has 'audit_archive archived='
+    KQL
+
+    time_aggregation_method = "Count"
+    operator                = "LessThan"
+    threshold               = 1
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.oncall[0].id]
+  }
+}
+
+# The sweep logs `sweep republished=N restarted=N failed=N`; anything restarted means a message was
+# lost somewhere, which deserves a look even though the sweep repaired it.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "sweep" {
+  count                 = local.pro ? 1 : 0
+  name                  = "alert-${local.name}-sweep"
+  resource_group_name   = azurerm_resource_group.main.name
+  location              = azurerm_resource_group.main.location
+  scopes                = [azurerm_log_analytics_workspace.main.id]
+  description           = "The sweep found work a failure left behind (an unsent job or a stuck meeting) or could not send it again."
+  display_name          = "Sweep found lost work"
+  severity              = 3
+  evaluation_frequency  = "PT30M"
+  window_duration       = "PT1H"
+  skip_query_validation = true
+  tags                  = local.tags
+
+  criteria {
+    query = <<-KQL
+      ContainerAppConsoleLogs_CL
+      | where TimeGenerated > ago(1h)
+      | where Log_s has 'sweep republished=' and Log_s matches regex '(republished|restarted|failed)=[1-9]'
+    KQL
+
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.oncall[0].id]
+  }
+}
+
 # --- are we running out of something? ---------------------------------------------------------
 
 locals {

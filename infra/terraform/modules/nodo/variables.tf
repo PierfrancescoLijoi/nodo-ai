@@ -115,6 +115,23 @@ variable "apim_publisher_email" {
   default     = "platform@example.invalid"
 }
 
+variable "secrets_from_key_vault" {
+  description = <<-EOT
+    true: the apps read their secrets from Key Vault by reference (the identity of each app resolves
+    them). false: Terraform hands the same values to Container Apps as inline secrets. Switch to false
+    if the first deployment shows that Container Apps can not resolve references while Key Vault has a
+    firewall and a private endpoint (docs/FIRST-DEPLOY.md, step 5); nothing else changes.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "ai_token_limit_enabled" {
+  description = "Apply the per-caller token budget (llm-token-limit) at the AI gateway. Switch to false if API Management rejects the policy on the hand-made model API (docs/FIRST-DEPLOY.md, step 6); the models are then protected by their own quotas only."
+  type        = bool
+  default     = true
+}
+
 variable "rate_limit_calls_per_minute" {
   description = "Requests per minute per signed-in user at the gateway. The API sheds load on its own as well."
   type        = number

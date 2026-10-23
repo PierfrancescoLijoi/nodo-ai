@@ -58,7 +58,14 @@ locals {
     }
   ]...)
 
-  role_assignments = merge(local.single_grants, local.regional_role_assignments)
+  # The audit archive writes into the private account with the retention policy, and nowhere else.
+  audit_grants = local.pro ? {
+    audit_acr_pull = { principal = "audit", scope = azurerm_container_registry.main.id, role = "AcrPull" }
+    audit_kv       = { principal = "audit", scope = azurerm_key_vault.main.id, role = "Key Vault Secrets User" }
+    audit_blob     = { principal = "audit", scope = azurerm_storage_account.audit[0].id, role = "Storage Blob Data Contributor" }
+  } : {}
+
+  role_assignments = merge(local.single_grants, local.audit_grants, local.regional_role_assignments)
 }
 
 resource "azurerm_role_assignment" "identity" {

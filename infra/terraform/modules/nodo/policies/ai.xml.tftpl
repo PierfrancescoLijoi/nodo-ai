@@ -12,8 +12,10 @@
 %{ endfor ~}
       </client-application-ids>
     </validate-azure-ad-token>
+%{ if token_limit_enabled ~}
     <!-- One caller cannot starve the other: each identity has its own token budget per minute. -->
     <llm-token-limit counter-key='@(context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Claims.GetValueOrDefault("appid", "unknown"))' tokens-per-minute="${tokens_per_minute}" estimate-prompt-tokens="true" remaining-tokens-header-name="x-ratelimit-remaining-tokens" />
+%{ endif ~}
     <!-- The gateway signs in to the model accounts with its own identity (role: Cognitive Services OpenAI User). -->
     <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
     <!-- Each regional gateway starts with the model account of its own region. -->

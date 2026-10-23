@@ -91,4 +91,6 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 "src/nodo_api/adapters/local/*.py" = ["E501"]
 "src/nodo_api/adapters/azure/retention_pg.py" = ["E501"]
 "scripts/bench_*.py" = ["E501", "B023"]
+# Each preflight check carries a one-sentence remedy on one line.
+"src/nodo_api/preflight.py" = ["E501"]
 

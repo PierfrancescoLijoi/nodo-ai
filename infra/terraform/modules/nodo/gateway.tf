@@ -273,6 +273,7 @@ resource "azurerm_api_management_api_policy" "ai" {
   resource_group_name = azurerm_resource_group.main.name
   xml_content = templatefile("${path.module}/policies/ai.xml.tftpl", {
     tokens_per_minute      = var.ai_tokens_per_minute
+    token_limit_enabled    = var.ai_token_limit_enabled
     primary_region_display = local.primary_region_display
     has_secondary          = local.dr
     caller_client_ids = [

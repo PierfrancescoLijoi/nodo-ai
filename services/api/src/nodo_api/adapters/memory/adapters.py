@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from nodo_api.domain.exports import EXPORT_TTL_HOURS, Export, ExportState
 from nodo_api.domain.graph import EntityType, Subgraph
-from nodo_api.domain.maintenance import MaintenanceMeeting
+from nodo_api.domain.maintenance import MaintenanceMeeting, PendingJob
 from nodo_api.domain.models import (
     Answerability,
     Citation,
@@ -203,6 +203,24 @@ class MemoryJobQueue:
     def __init__(self) -> None:
         self._jobs: dict[tuple[str, str, str], str] = {}
         self.scheduled: list[ScheduledJob] = []
+        self._created: dict[tuple[str, str, str], datetime] = {}
+        self.unsent: list[tuple[PendingJob, datetime]] = []
+
+    def backdate(self, workspace_id: str, job_key: str, job_type: str, when: datetime) -> None:
+        self._created[(workspace_id, job_key, job_type)] = when
+
+    def record_unsent(
+        self,
+        workspace_id: str,
+        job_key: str,
+        job_type: str,
+        payload: dict[str, str],
+        when: datetime,
+    ) -> None:
+        self.unsent.append((PendingJob(workspace_id, job_key, job_type, payload), when))
+
+    def created_at(self, workspace_id: str, job_key: str, job_type: str) -> datetime | None:
+        return self._created.get((workspace_id, job_key, job_type))
 
     def job_keys(self) -> list[tuple[str, str, str]]:
         return list(self._jobs)
@@ -222,6 +240,7 @@ class MemoryJobQueue:
     ) -> str:
         key = (workspace_id, job_key, job_type)
         self._jobs.setdefault(key, str(uuid4()))
+        self._created.setdefault(key, datetime.now(UTC))
         return self._jobs[key]
 
     def publish_count(self, workspace_id: str, job_key: str, job_type: str) -> int:
@@ -277,8 +296,31 @@ class MockRetriever:
 class MemoryMaintenanceStore:
     """Every meeting, deleted ones included, for index maintenance over the in-memory repository."""
 
-    def __init__(self, meetings: MemoryMeetingRepository) -> None:
+    def __init__(
+        self, meetings: MemoryMeetingRepository, jobs: MemoryJobQueue | None = None
+    ) -> None:
         self._meetings = meetings
+        self._jobs = jobs
+
+    def unpublished_jobs(self, older_than: datetime, limit: int) -> tuple[PendingJob, ...]:
+        if self._jobs is None:
+            return ()
+        return tuple(job for job, when in self._jobs.unsent if when < older_than)[:limit]
+
+    def stuck_meetings(self, older_than: datetime, limit: int) -> tuple[MaintenanceMeeting, ...]:
+        if self._jobs is None:
+            return ()
+        found = []
+        for (workspace_id, meeting_id), m in self._meetings._meetings.items():
+            started = self._jobs.created_at(workspace_id, meeting_id, "transcribe")
+            if (
+                m.tombstoned_at is None
+                and m.state in (MeetingState.TRANSCRIBING, MeetingState.EXTRACTING)
+                and started is not None
+                and started < older_than
+            ):
+                found.append(MaintenanceMeeting(workspace_id, m.id, m.owner_id, m.state, False))
+        return tuple(found[:limit])
 
     def list_meetings(
         self, after: tuple[str, str] | None, limit: int

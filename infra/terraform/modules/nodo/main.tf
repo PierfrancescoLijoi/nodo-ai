@@ -72,7 +72,7 @@ resource "azurerm_application_insights" "main" {
 # --- identities -------------------------------------------------------------------------------
 
 locals {
-  identity_names = ["api", "worker", "migrate", "retention", "maintenance", "storage"]
+  identity_names = ["api", "worker", "migrate", "retention", "maintenance", "audit", "storage"]
 }
 
 resource "azurerm_user_assigned_identity" "workload" {

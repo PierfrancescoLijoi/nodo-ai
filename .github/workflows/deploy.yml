@@ -54,6 +54,8 @@ jobs:
           INDEX_VERIFY_JOB_NAME: ${{ vars.INDEX_VERIFY_JOB_NAME }}
           REINDEX_JOB_NAME: ${{ vars.REINDEX_JOB_NAME }}
           REINDEX_JOB_NAME_DR: ${{ vars.REINDEX_JOB_NAME_DR }}
+          # Space-separated names of the other scheduled jobs (sweep, audit archive).
+          EXTRA_JOB_NAMES: ${{ vars.EXTRA_JOB_NAMES }}
           # Professional tier: the standby API (kept on the same image, or a failover would start an
           # old one), its resource group, and the public host the smoke test goes through.
           API_APP_NAME_DR: ${{ vars.API_APP_NAME_DR }}
@@ -68,7 +70,7 @@ jobs:
             fi
             printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
           done
-          for name in RETENTION_JOB_NAME INDEX_VERIFY_JOB_NAME REINDEX_JOB_NAME REINDEX_JOB_NAME_DR API_APP_NAME_DR RESOURCE_GROUP_DR PUBLIC_HOST; do
+          for name in RETENTION_JOB_NAME INDEX_VERIFY_JOB_NAME REINDEX_JOB_NAME REINDEX_JOB_NAME_DR EXTRA_JOB_NAMES API_APP_NAME_DR RESOURCE_GROUP_DR PUBLIC_HOST; do
             printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
           done
           printf 'IMAGE=%s.azurecr.io/nodo-api:%s\n' "$ACR_NAME" "$GITHUB_SHA" >> "$GITHUB_ENV"
@@ -154,7 +156,8 @@ jobs:
               --resource-group "$RESOURCE_GROUP" \
               --image "$IMAGE"
           fi
-          for job in "$INDEX_VERIFY_JOB_NAME" "$REINDEX_JOB_NAME"; do
+          # shellcheck disable=SC2086 # the list is meant to split
+          for job in "$INDEX_VERIFY_JOB_NAME" "$REINDEX_JOB_NAME" $EXTRA_JOB_NAMES; do
             if [ -n "$job" ]; then
               az containerapp job update --name "$job" --resource-group "$RESOURCE_GROUP" --image "$IMAGE"
             fi

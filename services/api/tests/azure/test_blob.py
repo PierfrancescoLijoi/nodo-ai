@@ -107,3 +107,33 @@ def test_erase_is_complete_when_nothing_was_uploaded() -> None:
 def test_upload_window_follows_configuration(seconds: int) -> None:
     store, _ = _store(seconds=seconds)
     assert store.create_upload_session("w", "m")["expires_in_seconds"] == seconds
+
+
+def test_the_audit_sink_creates_files_and_never_overwrites() -> None:
+    from azure.core.exceptions import ResourceExistsError
+
+    from nodo_api.adapters.azure.audit_archive_pg import AzureAuditSink
+
+    class Blob:
+        def __init__(self, store, name):
+            self.store, self.name = store, name
+
+        def upload_blob(self, data, overwrite, content_type):
+            assert overwrite is False and content_type == "application/x-ndjson"
+            if self.name in self.store:
+                raise ResourceExistsError("exists")
+            self.store[self.name] = data
+
+    class Service:
+        def __init__(self):
+            self.store = {}
+
+        def get_blob_client(self, container, name):
+            assert container == "audit"
+            return Blob(self.store, name)
+
+    service = Service()
+    sink = AzureAuditSink(service)
+    assert sink.put("2026/10/23/a.jsonl", b"one") is True
+    assert sink.put("2026/10/23/a.jsonl", b"two") is False
+    assert service.store == {"2026/10/23/a.jsonl": b"one"}

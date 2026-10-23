@@ -17,7 +17,7 @@ from nodo_api.domain.graph import (
     ReviewStatus,
     Subgraph,
 )
-from nodo_api.domain.maintenance import MaintenanceMeeting
+from nodo_api.domain.maintenance import MaintenanceMeeting, PendingJob
 from nodo_api.domain.models import (
     Locale,
     Meeting,
@@ -272,6 +272,15 @@ class MaintenanceStore(Protocol):
     ) -> tuple[MaintenanceMeeting, ...]:
         """Every meeting, deleted ones included, ordered by (workspace id, meeting id). Pass the
         last pair of the previous page as `after`."""
+        ...
+
+    def unpublished_jobs(self, older_than: datetime, limit: int) -> tuple[PendingJob, ...]:
+        """Jobs the outbox recorded before `older_than` and never sent."""
+        ...
+
+    def stuck_meetings(self, older_than: datetime, limit: int) -> tuple[MaintenanceMeeting, ...]:
+        """Meetings still transcribing or extracting whose processing job began before
+        `older_than`: longer than any legitimate run."""
         ...
 
 

@@ -114,6 +114,10 @@ output "retention_job_name" {
   value = module.nodo.retention_job_name
 }
 
+output "preflight_job_names" {
+  value = module.nodo.preflight_job_names
+}
+
 output "index_verify_job_name" {
   value = module.nodo.index_verify_job_name
 }

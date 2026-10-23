@@ -84,6 +84,7 @@ gh variable set MIGRATE_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-mig
 gh variable set RETENTION_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-retention'
 gh variable set INDEX_VERIFY_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-index-verify'
 gh variable set REINDEX_JOB_NAME --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-reindex-primary'
+gh variable set EXTRA_JOB_NAMES --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-sweep caj-nodo-${ENV_NAME}-audit-archive caj-nodo-${ENV_NAME}-pf-p-api caj-nodo-${ENV_NAME}-pf-p-worker'
 # Professional tier only (terraform output api_url is its public address):
 #   gh variable set API_APP_NAME_DR --repo ${REPO} --body 'ca-nodo-${ENV_NAME}-api-dr'  (and the resource group of the standby region)
 #   gh variable set REINDEX_JOB_NAME_DR --repo ${REPO} --body 'caj-nodo-${ENV_NAME}-reindex-dr'
