@@ -1,0 +1,159 @@
+terraform {
+  required_version = ">= 1.9"
+
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+
+  # State lives in a Storage account with Entra-only access. Supply it at init time:
+  #   terraform init -backend-config=backend.hcl   (see backend.hcl.example)
+  backend "azurerm" {}
+}
+
+provider "azurerm" {
+  subscription_id     = var.subscription_id
+  storage_use_azuread = true
+
+  features {
+    key_vault {
+      purge_soft_delete_on_destroy = false
+    }
+  }
+}
+
+variable "subscription_id" {
+  description = "Azure subscription that hosts this environment."
+  type        = string
+}
+
+variable "oidc_issuer" {
+  type    = string
+  default = ""
+}
+
+variable "oidc_audience" {
+  type    = string
+  default = ""
+}
+
+variable "web_client_id" {
+  description = "Client id of the single-page-application registration of the web interface. Empty leaves the web interface out."
+  type        = string
+  default     = ""
+}
+
+variable "web_api_scope" {
+  description = "Scope the web interface requests for the API, for example api://<application-id-of-the-api>/access."
+  type        = string
+  default     = ""
+}
+
+variable "web_target_port" {
+  type    = number
+  default = 80
+}
+
+variable "api_target_port" {
+  description = "API ingress and probe port. Use 80 for the placeholder and 8000 for the NODO image."
+  type        = number
+  default     = 8000
+}
+
+variable "budget_contact_emails" {
+  type    = list(string)
+  default = []
+}
+
+variable "openai_deployments" {
+  type = map(object({
+    model_name    = string
+    model_version = string
+    sku_name      = string
+    capacity      = number
+  }))
+  default = {}
+}
+
+module "nodo" {
+  source = "../../modules/nodo"
+
+  environment           = "dev"
+  oidc_issuer           = var.oidc_issuer
+  oidc_audience         = var.oidc_audience
+  api_target_port       = var.api_target_port
+  web_client_id         = var.web_client_id
+  web_api_scope         = var.web_api_scope
+  web_target_port       = var.web_target_port
+  budget_contact_emails = var.budget_contact_emails
+  openai_deployments    = var.openai_deployments
+  tier                  = "basic"
+  search_sku            = "free"
+  api_min_replicas      = 1
+}
+
+output "api_url" {
+  value = module.nodo.api_url
+}
+
+output "identity_client_ids" {
+  value = module.nodo.identity_client_ids
+}
+
+output "container_registry" {
+  value = module.nodo.container_registry
+}
+
+output "resource_group_name" {
+  value = module.nodo.resource_group_name
+}
+
+output "acr_name" {
+  value = module.nodo.acr_name
+}
+
+output "api_app_name" {
+  value = module.nodo.api_app_name
+}
+
+output "worker_job_name" {
+  value = module.nodo.worker_job_name
+}
+
+output "migrate_job_name" {
+  value = module.nodo.migrate_job_name
+}
+
+output "retention_job_name" {
+  value = module.nodo.retention_job_name
+}
+
+output "preflight_job_names" {
+  value = module.nodo.preflight_job_names
+}
+
+output "index_verify_job_name" {
+  value = module.nodo.index_verify_job_name
+}
+
+output "reindex_job_names" {
+  value = module.nodo.reindex_job_names
+}
+
+output "web_url" {
+  value = module.nodo.web_url
+}
+
+output "web_app_name" {
+  value = module.nodo.web_app_name
+}
+
+output "web_app_name_dr" {
+  value = module.nodo.web_app_name_dr
+}

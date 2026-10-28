@@ -1,0 +1,242 @@
+name: CI
+
+on:
+  push:
+    paths:
+      - "apps/mobile/**"
+      - "apps/web/**"
+      - "tools/verify/**"
+      - "services/api/**"
+      - "services/api/Dockerfile"
+      - "eval/**"
+      - "infra/compose/**"
+      - "infra/terraform/**"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/deploy.yml"
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - "apps/web/**"
+      - "tools/verify/**"
+      - "services/api/**"
+      - "services/api/Dockerfile"
+      - "eval/**"
+      - "infra/compose/**"
+      - "infra/terraform/**"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev,azure,local]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest --cov=nodo_api --cov-fail-under=80
+        env:
+          NODO_TEST_POSTGRES_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+
+  docker:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build API image
+        run: docker buildx build --load --tag nodo-api:ci services/api
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: nodo-api:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      # The real image, in Azure mode, against a real PostgreSQL: every migration on an empty
+      # database, two worker processes, probes, security headers, the standard error body.
+      - name: Run the image
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE nodo_verify"
+          bash tools/verify/container-check.sh nodo-api:ci host nodo_verify
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npx vitest run --coverage
+      - run: npm run build
+      # Browser tests against the real local engine (stand-in models) and an Azure look-alike with an
+      # OpenID Connect provider: sign-in with PKCE, renewal, recording, upload, export, accessibility.
+      - run: python -m pip install -e "../../services/api[dev,azure,local]"
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+        env:
+          CI: "true"
+          NODO_PYTHON: python
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
+
+  web-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build web image
+        run: docker buildx build --load --tag nodo-web:ci apps/web
+      - name: Scan web image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: nodo-web:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      # The real image started the way Azure starts it: configuration from the environment, the content
+      # policy and security headers, caching rules, 404 and 405, an unprivileged user.
+      - name: Run the image
+        run: bash tools/verify/web-container-check.sh nodo-web:ci
+
+  eval-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python eval/validate_golden_set.py
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose -f infra/compose/docker-compose.yml --env-file infra/compose/.env.example config -q
+
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.0"
+      - run: terraform fmt -check -recursive
+      - run: terraform -chdir=envs/dev init -backend=false
+      - run: terraform -chdir=envs/dev validate
+      - run: terraform -chdir=envs/prod init -backend=false
+      - run: terraform -chdir=envs/prod validate
+      # Plan-time assertions with mocked providers: which resources each tier creates and the
+      # properties that must not regress (private data services, zones, firewall mode, standby).
+      - run: terraform -chdir=modules/nodo init -backend=false
+      - run: terraform -chdir=modules/nodo test
+      - name: Scan Terraform for misconfigurations
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra/terraform
+          severity: HIGH,CRITICAL
+          # Report only until the first baseline has been read: the public audio endpoint and the
+          # operator-firewalled Key Vault are deliberate (ADR-016) and need explicit ignores.
+          exit-code: "0"
+          skip-dirs: "**/.terraform"
+
+  capacity-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install pytest httpx
+      - run: python -m pytest -q tools/capacity
+      - run: python -m pytest -q tools/smoke
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

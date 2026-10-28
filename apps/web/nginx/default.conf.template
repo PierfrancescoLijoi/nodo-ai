@@ -1,0 +1,65 @@
+# Static files only. Rendered at start (docker-entrypoint templates); only variables that exist in the
+# environment are replaced, so nginx's own $variables are left alone.
+
+log_format nodo '$remote_addr "$request_method $uri" $status $body_bytes_sent $request_time rid=$http_x_request_id';
+
+server {
+  listen 8080;
+  server_name _;
+  server_tokens off;
+
+  # The path only: addresses carry ?id= of a meeting, which does not belong in logs.
+  access_log /dev/stdout nodo;
+
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # Nothing is uploaded here.
+  client_max_body_size 1k;
+  # A redirect (/meetings to /meetings/) must stay on the address the browser used, not name this container.
+  absolute_redirect off;
+
+  gzip on;
+  gzip_min_length 512;
+  gzip_types text/plain text/css text/javascript application/javascript application/json image/svg+xml;
+
+  # The platform's probes and the gateway's. Says nothing.
+  location = /healthz {
+    access_log off;
+    default_type application/json;
+    return 200 '{"status":"ok"}';
+  }
+
+  # Written at start from the environment (docker/15-nodo-runtime.sh). Never cached: a change of
+  # identity provider must reach every browser at once.
+  location = /config.json {
+    limit_except GET { deny all; }
+    alias /tmp/nodo-web/config.json;
+    default_type application/json;
+    include /etc/nginx/conf.d/headers.inc;
+    add_header Cache-Control "no-store" always;
+  }
+
+  # Build files carry a hash in their name and never change.
+  location /_next/static/ {
+    limit_except GET { deny all; }
+    include /etc/nginx/conf.d/headers.inc;
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
+    try_files $uri =404;
+  }
+
+  # Pages: a directory per route, checked again by the browser every time (the files they name are cached).
+  location / {
+    limit_except GET { deny all; }
+    include /etc/nginx/conf.d/headers.inc;
+    add_header Cache-Control "no-cache" always;
+    try_files $uri $uri/index.html =404;
+    error_page 404 /404.html;
+  }
+
+  location = /404.html {
+    internal;
+    include /etc/nginx/conf.d/headers.inc;
+    add_header Cache-Control "no-cache" always;
+  }
+}
