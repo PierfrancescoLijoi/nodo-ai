@@ -59,6 +59,7 @@ class AppContainer:
     runtime: Any = None
     readiness: tuple[tuple[str, Callable[[], None]], ...] = ()
     query_gate: Bulkhead | None = None
+    speech: Any = None  # the speech adapter, for the local push-to-talk path
 
 
 @asynccontextmanager
@@ -69,13 +70,19 @@ async def _lifespan(app: FastAPI):
     try:
         yield
     finally:
-        if runtime is not None:
-            runtime.stop()
+        voice = getattr(app.state, "voice", None)
+        try:
+            if voice is not None:
+                await voice.shutdown()
+        finally:
+            if runtime is not None:
+                runtime.stop()
 
 
 def create_app(
     settings: Settings | None = None,
     oidc_key_provider: Callable[[], dict[str, Any]] | None = None,
+    voice_factory: Callable[[Settings, Any], Any] | None = None,
 ) -> FastAPI:
     effective_settings = settings or Settings()
     if oidc_key_provider is None and effective_settings.auth_mode == "oidc":
@@ -95,6 +102,7 @@ def create_app(
     instrument_app(app)
     app.state.container = _container(effective_settings, oidc_key_provider)
     app.include_router(router)
+    _configure_voice(app, effective_settings, voice_factory)
     _configure_cors(app, effective_settings)
     _configure_middleware(app)
     _configure_errors(app)
@@ -210,7 +218,27 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.runtime,
         a.readiness,
         Bulkhead("query", settings.max_concurrent_queries, wait_seconds=0.0),
+        a.speech,
     )
+
+
+def _configure_voice(
+    app: FastAPI, settings: Settings, factory: Callable[[Settings, Any], Any] | None
+) -> None:
+    """The real-time voice gateway: off unless NODO_VOICE_ENABLED, or a factory is injected."""
+    from nodo_api.voice.settings import VoiceSettings
+
+    voice = VoiceSettings()
+    if settings.service != "api" or (factory is None and not voice.enabled):
+        return
+    from nodo_api.voice.gateway import router as voice_router
+    from nodo_api.voice.wiring import build_voice
+
+    container = app.state.container
+    app.state.voice = (
+        factory(settings, container) if factory else build_voice(settings, voice, container)
+    )
+    app.include_router(voice_router)
 
 
 def _configure_cors(app: FastAPI, settings: Settings) -> None:

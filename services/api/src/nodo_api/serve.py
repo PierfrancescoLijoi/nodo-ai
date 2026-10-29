@@ -21,6 +21,7 @@ import uvicorn
 
 KEEP_ALIVE_SECONDS = 75  # above the 60 s idle timeout of the common gateways and load balancers
 GRACEFUL_SECONDS = 25  # below the 30 s the platform gives a replica to stop
+WS_MAX_BYTES = 64 * 1024  # a voice frame is at most 32 KB: nobody may send 16 MB before hello
 
 
 def main() -> None:
@@ -34,6 +35,7 @@ def main() -> None:
         forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1"),
         timeout_keep_alive=KEEP_ALIVE_SECONDS,
         timeout_graceful_shutdown=GRACEFUL_SECONDS,
+        ws_max_size=WS_MAX_BYTES,
         server_header=False,
         date_header=False,
         access_log=False,
