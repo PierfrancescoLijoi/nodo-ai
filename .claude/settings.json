@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/tools/diagrams/check_drawio.py\" --hook",
+            "timeout": 30,
+            "statusMessage": "Checking the draw.io diagram"
+          }
+        ]
+      }
+    ]
+  }
+}

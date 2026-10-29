@@ -1,0 +1,137 @@
+{
+  "samples": 9,
+  "audio_hours": 0.2643,
+  "wer": {
+    "micro": 0.1536,
+    "macro": 0.1536,
+    "macro_ci95": [
+      0.0415,
+      0.3243
+    ]
+  },
+  "cer": {
+    "macro": 0.1503
+  },
+  "entity_recall": 0.6496,
+  "number_recall": 1.0,
+  "latency_seconds": {
+    "p50": 6.123,
+    "p95": 8.804,
+    "max": 8.804
+  },
+  "rtf": {
+    "p50": 0.0579,
+    "p95": 0.0833
+  },
+  "speaker_accuracy": {
+    "mean": null,
+    "samples": 0
+  },
+  "by_locale": [
+    {
+      "locale": "en",
+      "samples": 9,
+      "wer_micro": 0.1536,
+      "wer_macro": 0.1536,
+      "cer_macro": 0.1503,
+      "entity_recall": 0.6496,
+      "number_recall": 1.0
+    }
+  ],
+  "by_scenario": [
+    {
+      "scenario": "babble",
+      "samples": 1,
+      "wer_micro": 0.3991,
+      "wer_macro": 0.3991,
+      "cer_macro": 0.3656,
+      "entity_recall": 0.5385,
+      "number_recall": 1.0
+    },
+    {
+      "scenario": "clean",
+      "samples": 1,
+      "wer_micro": 0.0386,
+      "wer_macro": 0.0386,
+      "cer_macro": 0.0443,
+      "entity_recall": 0.7692,
+      "number_recall": 1.0
+    },
+    {
+      "scenario": "clipping",
+      "samples": 1,
+      "wer_micro": 0.0429,
+      "wer_macro": 0.0429,
+      "cer_macro": 0.0369,
+      "entity_recall": 0.9231,
+      "number_recall": 1.0
+    },
+    {
+      "scenario": "dropouts",
+      "samples": 1,
+      "wer_micro": 0.0472,
+      "wer_macro": 0.0472,
+      "cer_macro": 0.0517,
+      "entity_recall": 0.7692,
+      "number_recall": 1.0
+    },
+    {
+      "scenario": "echo",
+      "samples": 1,
+      "wer_micro": 0.0429,
+      "wer_macro": 0.0429,
+      "cer_macro": 0.0399,
+      "entity_recall": 0.9231,
+      "number_recall": 1.0
+    },
+    {
+      "scenario": "snr10",
+      "samples": 1,
+      "wer_micro": 0.0343,
+      "wer_macro": 0.0343,
+      "cer_macro": 0.0428,
+      "entity_recall": 0.5,
+      "number_recall": 1.0
+    },
+    {
+      "scenario": "snr20",
+      "samples": 1,
+      "wer_micro": 0.0386,
+      "wer_macro": 0.0386,
+      "cer_macro": 0.0465,
+      "entity_recall": 0.3846,
+      "number_recall": 1.0
+    },
+    {
+      "scenario": "snr5",
+      "samples": 1,
+      "wer_micro": 0.0601,
+      "wer_macro": 0.0601,
+      "cer_macro": 0.0421,
+      "entity_recall": 0.8462,
+      "number_recall": 1.0
+    },
+    {
+      "scenario": "telephone",
+      "samples": 1,
+      "wer_micro": 0.6781,
+      "wer_macro": 0.6781,
+      "cer_macro": 0.6824,
+      "entity_recall": 0.1923,
+      "number_recall": 1.0
+    }
+  ],
+  "gate": {
+    "status": "insufficient_data",
+    "failed_metrics": [
+      "wer"
+    ],
+    "sample_shortfall": 21,
+    "thresholds": {
+      "max_wer": 0.15,
+      "min_speaker_accuracy": 0.9,
+      "max_rtf": 0.4167,
+      "min_samples": 30
+    }
+  }
+}

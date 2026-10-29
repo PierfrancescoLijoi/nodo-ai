@@ -1,0 +1,708 @@
+"""Integration tests against a real PostgreSQL. They run when NODO_TEST_POSTGRES_DSN points at a
+superuser connection (CI starts a service container; locally use a throwaway container)."""
+
+from __future__ import annotations
+
+import os
+import threading
+import uuid
+from dataclasses import replace
+from datetime import UTC, datetime
+
+import pytest
+
+psycopg = pytest.importorskip("psycopg")
+
+from psycopg.conninfo import conninfo_to_dict, make_conninfo  # noqa: E402
+
+from nodo_api.adapters.azure.graph_pg import PgGraphStore  # noqa: E402
+from nodo_api.adapters.azure.migrate import (  # noqa: E402
+    apply_migrations,
+    grant_roles,
+    migration_files,
+)
+from nodo_api.adapters.azure.postgres import (  # noqa: E402
+    PgAuditLog,
+    PgJobOutbox,
+    PgMeetingRepository,
+    PgTranscriptRepository,
+    PostgresDatabase,
+)
+from nodo_api.domain.models import (  # noqa: E402
+    Locale,
+    Meeting,
+    MeetingState,
+    RecordingAttestation,
+    TranscriptSegment,
+)
+from nodo_api.errors import NotFoundError  # noqa: E402
+
+DSN = os.environ.get("NODO_TEST_POSTGRES_DSN")
+pytestmark = pytest.mark.skipif(not DSN, reason="NODO_TEST_POSTGRES_DSN is not set")
+
+APP_ROLE = "nodo_app_test"
+APP_PASSWORD = "app-test-password"
+A, B = "ws-a", "ws-b"
+
+
+def _app_dsn() -> str:
+    params = conninfo_to_dict(DSN)
+    params.update(user=APP_ROLE, password=APP_PASSWORD)
+    return make_conninfo(**params)
+
+
+@pytest.fixture(scope="module")
+def admin_db():
+    db = PostgresDatabase.from_dsn(DSN)
+    with db.admin() as conn:
+        conn.execute("DROP SCHEMA public CASCADE")
+        conn.execute("CREATE SCHEMA public")
+        conn.execute(f"DROP ROLE IF EXISTS {APP_ROLE}")
+        conn.execute(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'")
+    with db.admin() as conn:
+        apply_migrations(conn)
+        conn.execute(f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}")
+        conn.execute(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {APP_ROLE}"
+        )
+        conn.execute(f"REVOKE UPDATE, DELETE ON audit_events FROM {APP_ROLE}")
+    yield db
+    db.close()
+
+
+@pytest.fixture
+def db(admin_db):
+    """The application connection: a non-superuser, so row level security really applies."""
+    database = PostgresDatabase.from_dsn(_app_dsn())
+    yield database
+    database.close()
+
+
+def _meeting(meeting_id: str, owner: str = "alice", workspace: str = A) -> Meeting:
+    now = datetime.now(UTC)
+    return Meeting(
+        id=meeting_id,
+        workspace_id=workspace,
+        owner_id=owner,
+        created_at=now,
+        state=MeetingState.UPLOADING,
+        attestation=RecordingAttestation(
+            owner, meeting_id, "2026-10-v1", now, "retention-30d", Locale.EN, "audit-1", "sig"
+        ),
+        project="NODO",
+    )
+
+
+def _segment(meeting_id: str, segment_id: str, text: str, version: int = 1) -> TranscriptSegment:
+    return TranscriptSegment(
+        segment_id, meeting_id, "S1", 0, 1000, text, 0.9, version, Locale.EN, "NODO"
+    )
+
+
+def test_migrations_are_applied_once(admin_db) -> None:
+    with admin_db.admin() as conn:
+        assert apply_migrations(conn) == []
+        versions = [r["version"] for r in conn.execute("SELECT version FROM schema_migrations")]
+    assert versions == [version for version, _, _ in migration_files()]
+
+
+def test_meeting_round_trip_and_ownership(db) -> None:
+    repo = PgMeetingRepository(db)
+    created = repo.add(A, _meeting("m-own"), "key-own-0001", "hash-1")
+    fetched = repo.get_owned(A, "alice", "m-own")
+    assert fetched == created
+    assert fetched.attestation.locale is Locale.EN
+    with pytest.raises(NotFoundError):
+        repo.get_owned(A, "mallory", "m-own")
+    assert "m-own" in repo.owned_ids(A, "alice")
+    assert "m-own" not in repo.owned_ids(A, "mallory")
+
+
+def test_speaker_names_survive_a_save_and_unicode_round_trips(db) -> None:
+    repo = PgMeetingRepository(db)
+    meeting = repo.add(A, _meeting("m-names"), "key-names-01", "hash-n")
+    assert meeting.speaker_names == ()
+    repo.save(A, replace(meeting, speaker_names=(("S1", "Zoë"), ("S2", "Łukasz"))))
+    stored = repo.get_owned(A, "alice", "m-names")
+    assert stored.speaker_names == (("S1", "Zoë"), ("S2", "Łukasz"))
+    repo.save(A, replace(stored, speaker_names=()))
+    assert repo.get_owned(A, "alice", "m-names").speaker_names == ()
+
+
+def test_idempotency_is_per_user_and_returns_the_stored_hash(db) -> None:
+    repo = PgMeetingRepository(db)
+    first = repo.add(A, _meeting("m-idem-a", "alice"), "shared-key-1", "hash-a")
+    again = repo.add(A, _meeting("m-idem-a2", "alice"), "shared-key-1", "hash-a")
+    assert again.id == first.id
+    other = repo.add(A, _meeting("m-idem-b", "bob"), "shared-key-1", "hash-b")
+    assert other.id == "m-idem-b"
+    found, stored_hash = repo.get_by_idempotency_key(A, "alice", "shared-key-1")
+    assert (found.id, stored_hash) == ("m-idem-a", "hash-a")
+
+
+def test_concurrent_creates_with_one_key_make_one_meeting(db) -> None:
+    repo = PgMeetingRepository(db)
+    results: list[str] = []
+
+    def create(index: int) -> None:
+        meeting = repo.add(A, _meeting(f"m-race-{index}"), "race-key-0001", "hash-r")
+        results.append(meeting.id)
+
+    threads = [threading.Thread(target=create, args=(i,)) for i in range(5)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(set(results)) == 1
+
+
+def test_a_deleted_meeting_frees_its_idempotency_key(db) -> None:
+    repo = PgMeetingRepository(db)
+    first = repo.add(A, _meeting("m-del-1"), "delete-key-001", "hash-d")
+    repo.save(A, replace(first, tombstoned_at=datetime.now(UTC)))
+    assert repo.get_by_idempotency_key(A, "alice", "delete-key-001") is None
+    second = repo.add(A, _meeting("m-del-2"), "delete-key-001", "hash-d")
+    assert second.id == "m-del-2"
+    with pytest.raises(NotFoundError):
+        repo.get_owned(A, "alice", "m-del-1")
+    assert repo.get_owned(A, "alice", "m-del-1", include_tombstoned=True).tombstoned_at
+
+
+def test_row_level_security_hides_other_workspaces_even_without_a_where_clause(db) -> None:
+    repo = PgMeetingRepository(db)
+    repo.add(A, _meeting("m-rls-a"), "rls-key-0001", "h")
+    repo.add(B, _meeting("m-rls-b", workspace=B), "rls-key-0002", "h")
+    with db.workspace(A) as conn:
+        ids = {r["id"] for r in conn.execute("SELECT id FROM meetings")}
+    assert "m-rls-a" in ids
+    assert "m-rls-b" not in ids
+    with db._pool.connection() as conn:  # no workspace set at all: fail closed
+        assert conn.execute("SELECT count(*) AS n FROM meetings").fetchone()["n"] == 0
+
+
+def test_rls_rejects_writing_into_another_workspace(db) -> None:
+    with pytest.raises(psycopg.errors.InsufficientPrivilege), db.workspace(A) as conn:
+        conn.execute(
+            "INSERT INTO meetings (workspace_id, id, owner_id, state, created_at)"
+            " VALUES (%s, 'm-evil', 'alice', 'uploading', now())",
+            (B,),
+        )
+
+
+def test_transcript_versions_are_immutable_and_latest_wins(db) -> None:
+    PgMeetingRepository(db).add(A, _meeting("m-tr"), "tr-key-000001", "h")
+    transcripts = PgTranscriptRepository(db)
+    transcripts.add_version(A, "m-tr", (_segment("m-tr", "s1", "one"),))
+    transcripts.add_version(A, "m-tr", (_segment("m-tr", "s1", "two", version=2),))
+    with pytest.raises(ValueError, match="immutable"):
+        transcripts.add_version(A, "m-tr", (_segment("m-tr", "s1", "again"),))
+    assert transcripts.get_version(A, "m-tr", 1)[0].text == "one"
+    assert transcripts.latest(A, "m-tr")[0].text == "two"
+    assert transcripts.get_segment(A, "m-tr", "s1").version == 2
+    assert transcripts.get_segment(A, "other-meeting", "s1") is None
+    transcripts.erase(A, "m-tr")
+    with pytest.raises(NotFoundError):
+        transcripts.latest(A, "m-tr")
+
+
+def test_audit_trail_is_append_only_for_the_application(db) -> None:
+    audit = PgAuditLog(db)
+    event_id = audit.append(A, "recording_attested", {"user_id": "alice"})
+    with pytest.raises(psycopg.errors.InsufficientPrivilege), db.workspace(A) as conn:
+        conn.execute("DELETE FROM audit_events WHERE id = %s", (event_id,))
+
+
+def test_outbox_records_a_job_once_and_tracks_publication(db) -> None:
+    outbox = PgJobOutbox(db)
+    job_id, published = outbox.record(A, "m-job", "transcribe", {"meeting_id": "m-job"})
+    assert published is False
+    again_id, _ = outbox.record(A, "m-job", "transcribe", {"meeting_id": "m-job"})
+    assert again_id == job_id
+    outbox.mark_published(A, "m-job", "transcribe")
+    assert outbox.record(A, "m-job", "transcribe", {"meeting_id": "m-job"}) == (job_id, True)
+
+
+def test_granted_roles_can_write_data_but_not_edit_the_audit_trail(admin_db) -> None:
+    role = "id-nodo-test-api"  # managed identity names contain hyphens and must be quoted
+    with admin_db.admin() as conn:
+        if conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone():
+            conn.execute(f'DROP OWNED BY "{role}"')
+            conn.execute(f'DROP ROLE "{role}"')
+        conn.execute(f'CREATE ROLE "{role}" NOLOGIN')
+        database = conn.execute("SELECT current_database() AS name").fetchone()["name"]
+        grant_roles(conn, (role,), database)
+        can = lambda table, action: conn.execute(  # noqa: E731
+            "SELECT has_table_privilege(%s, %s, %s) AS ok", (role, table, action)
+        ).fetchone()["ok"]
+        assert can("meetings", "DELETE") and can("meetings", "INSERT")
+        assert can("audit_events", "INSERT") and can("audit_events", "SELECT")
+        assert not can("audit_events", "DELETE") and not can("audit_events", "UPDATE")
+        assert not conn.execute(
+            "SELECT has_schema_privilege(%s, 'public', 'CREATE') AS ok", (role,)
+        ).fetchone()["ok"]
+
+
+def test_the_http_api_works_end_to_end_on_postgres(db, monkeypatch) -> None:
+    """The same HTTP flow the memory tests cover, with PostgreSQL as the source of truth."""
+    from fastapi.testclient import TestClient
+
+    from nodo_api import bootstrap
+    from nodo_api.config import Settings
+    from nodo_api.main import create_app
+
+    memory = bootstrap.memory_adapters(
+        Settings(environment="test", auth_mode="dev", attestation_hmac_key="x" * 20)
+    )
+    pg = bootstrap.Adapters(
+        meetings=PgMeetingRepository(db),
+        transcripts=PgTranscriptRepository(db),
+        blobs=memory.blobs,
+        jobs=memory.jobs,
+        retriever=memory.retriever,
+        graph=PgGraphStore(db),
+        llm=memory.llm,
+        audit=PgAuditLog(db),
+        speech=memory.speech,
+        extractor=memory.extractor,
+    )
+    monkeypatch.setattr(bootstrap, "build_adapters", lambda settings: pg)
+    monkeypatch.setattr("nodo_api.main.build_adapters", lambda settings: pg)
+    settings = Settings(
+        environment="test",
+        auth_mode="dev",
+        dev_token="e2e-token-0123456789",
+        dev_user_id="alice",
+        dev_workspace_id=A,
+        attestation_hmac_key="e2e-attestation-key-0123456789",
+    )
+    headers = {"Authorization": "Bearer e2e-token-0123456789"}
+    attestation = {
+        "notice_version": "2026-10-v1",
+        "locale": "pl",
+        "retention_policy_id": "retention-30d",
+        "acknowledged": True,
+    }
+    with TestClient(create_app(settings)) as client:
+        created = client.post(
+            "/v1/meetings",
+            headers={**headers, "Idempotency-Key": "e2e-key-0001"},
+            json={"recording_attestation": attestation, "project": "NODO"},
+        )
+        assert created.status_code == 201
+        meeting_id = created.json()["id"]
+        repeat = client.post(
+            "/v1/meetings",
+            headers={**headers, "Idempotency-Key": "e2e-key-0001"},
+            json={"recording_attestation": attestation, "project": "NODO"},
+        )
+        assert repeat.json()["id"] == meeting_id
+        assert (
+            client.get(f"/v1/meetings/{meeting_id}", headers=headers).json()["state"] == "uploading"
+        )
+        done = client.post(f"/v1/meetings/{meeting_id}/complete", headers=headers)
+        assert done.json()["state"] == "transcribing"
+
+        PgTranscriptRepository(db).add_version(
+            A, meeting_id, (_segment(meeting_id, "seg-1", "Kolejka asynchroniczna"),)
+        )
+        review = client.patch(
+            f"/v1/meetings/{meeting_id}/review",
+            headers=headers,
+            json={
+                "corrections": [{"segment_id": "seg-1", "text": "Kolejka async"}],
+                "base_version": 1,
+            },
+        )
+        assert review.json()["version"] == 2
+        page = client.get(f"/v1/meetings/{meeting_id}/transcript", headers=headers).json()
+        assert page["items"][0]["text"] == "Kolejka async" and page["total"] == 1
+
+        assert client.delete(f"/v1/meetings/{meeting_id}", headers=headers).status_code == 204
+        assert client.get(f"/v1/meetings/{meeting_id}", headers=headers).status_code == 404
+        assert client.delete(f"/v1/meetings/{meeting_id}", headers=headers).status_code == 204
+
+
+def test_a_local_archive_is_copied_into_postgres_and_a_second_copy_changes_nothing(
+    db, monkeypatch, tmp_path
+) -> None:
+    """The cloud side of ADR-015 on the real database: repositories, graph reviews, constraints."""
+    from fastapi.testclient import TestClient
+
+    from nodo_api import bootstrap
+    from nodo_api.config import Settings
+    from nodo_api.main import create_app
+    from tests import test_local_app as local
+    from tests.test_local_sync import _Borrowed
+
+    memory = bootstrap.memory_adapters(
+        Settings(environment="test", auth_mode="dev", attestation_hmac_key="x" * 20)
+    )
+    pg = bootstrap.Adapters(
+        meetings=PgMeetingRepository(db),
+        transcripts=PgTranscriptRepository(db),
+        blobs=memory.blobs,
+        jobs=memory.jobs,
+        retriever=memory.retriever,
+        graph=PgGraphStore(db),
+        llm=memory.llm,
+        audit=PgAuditLog(db),
+        speech=memory.speech,
+        extractor=memory.extractor,
+    )
+    cloud_settings = Settings(
+        environment="test",
+        auth_mode="dev",
+        dev_token="sync-token-0123456789",
+        dev_user_id="alice",
+        dev_workspace_id=A,
+        attestation_hmac_key="sync-attestation-key-0123456789",
+    )
+    monkeypatch.setattr("nodo_api.main.build_adapters", lambda settings: pg)
+    cloud_app = create_app(cloud_settings)
+    monkeypatch.undo()  # the local engine below builds its own adapters
+
+    local_app = local.create_app(local._settings(tmp_path))
+    container = local_app.state.container
+    from nodo_api.adapters.memory import MemorySpeech
+    from nodo_api.adapters.memory.extractor import KeywordExtractor
+    from nodo_api.services.ingestion import IngestionService
+    from nodo_api.worker import Worker
+    from tests.test_local_adapters import HashEmbedder
+
+    container.retriever._embedder = HashEmbedder()
+    container.runtime.loop._worker = Worker(
+        IngestionService(
+            container.meetings,
+            container.transcripts,
+            container.blobs,
+            container.retriever,
+            MemorySpeech(),
+            ("en-GB",),
+            KeywordExtractor(),
+            container.graph,
+        )
+    )
+    container.runtime.start = lambda: None
+    with TestClient(local_app) as local_client, TestClient(cloud_app) as cloud_client:
+        meeting_id = local._record(local_client)
+        container.runtime.loop.run_pending()
+        sync = container.runtime.sync
+        sync._http = lambda: _Borrowed(cloud_client)
+        first = sync.run("http://127.0.0.1:9", "sync-token-0123456789")
+        assert (first.pushed, first.failed) == (1, [])
+        again = sync.run("http://127.0.0.1:9", "sync-token-0123456789", force=True)
+        assert (again.pushed, again.failed) == (1, [])  # sent again: still one meeting
+        headers = {"Authorization": "Bearer sync-token-0123456789"}
+        copied = cloud_client.get(f"/v1/meetings/{meeting_id}", headers=headers).json()
+        here = local_client.get(f"/v1/meetings/{meeting_id}", headers=local.HEADERS).json()
+        assert copied["state"] == here["state"] and len(copied["speakers"]) == 2
+        assert {p["label"] for p in copied["insights"]["people"]} == {
+            p["label"] for p in here["insights"]["people"]
+        }
+        listed = cloud_client.get("/v1/meetings", headers=headers).json()["items"]
+        assert [m["id"] for m in listed].count(meeting_id) == 1
+
+
+def test_the_retention_role_scans_every_workspace_and_can_only_mark_audio(admin_db, db) -> None:
+    """Migration 0004: the one job that must look across workspaces gets exactly that, as a role."""
+    from datetime import timedelta
+
+    from nodo_api.adapters.azure.retention_pg import PgRetentionStore
+
+    repo = PgMeetingRepository(db)
+    now = datetime.now(UTC)
+
+    def old(meeting_id: str, workspace: str, days: int, policy: str):
+        meeting = _meeting(meeting_id, workspace=workspace)
+        created = now - timedelta(days=days)
+        attestation = replace(
+            meeting.attestation, retention_policy_id=policy, acknowledged_at=created
+        )
+        return replace(meeting, created_at=created, attestation=attestation)
+
+    repo.add(A, old("ret-a-due", A, 10, "retention-7d"), "ret-k-1", "h")
+    repo.add(B, old("ret-b-due", B, 40, "retention-30d"), "ret-k-2", "h")
+    repo.add(A, old("ret-a-fresh", A, 10, "retention-30d"), "ret-k-3", "h")
+
+    with admin_db.admin() as conn:
+        conn.execute("DROP ROLE IF EXISTS ret_login")
+        conn.execute("CREATE ROLE ret_login LOGIN PASSWORD 'ret-password' IN ROLE nodo_retention")
+        conn.execute("GRANT USAGE ON SCHEMA public TO ret_login")
+    params = conninfo_to_dict(DSN)
+    params.update(user="ret_login", password="ret-password")
+    retention_db = PostgresDatabase.from_dsn(make_conninfo(**params))
+    try:
+        store = PgRetentionStore(retention_db)
+        due = {d.meeting_id: d for d in store.audio_due(now, 50)}
+        assert {"ret-a-due", "ret-b-due"} <= set(due) and "ret-a-fresh" not in due
+        assert {due["ret-a-due"].workspace_id, due["ret-b-due"].workspace_id} == {A, B}
+
+        for forbidden in (
+            "SELECT * FROM transcript_segments",
+            "SELECT * FROM entities",
+            "SELECT * FROM audit_events",
+            "UPDATE meetings SET title = 'changed'",
+            "DELETE FROM meetings",
+        ):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege), retention_db.admin() as conn:
+                conn.execute(forbidden)
+
+        store.mark_audio_erased(A, "ret-a-due", now)
+        assert "ret-a-due" not in {d.meeting_id for d in store.audio_due(now, 50)}
+        with retention_db.admin() as conn:  # a second mark changes nothing (policy: not yet erased)
+            assert (
+                conn.execute(
+                    "UPDATE meetings SET audio_erased_at = now() WHERE id = 'ret-a-due'"
+                ).rowcount
+                == 0
+            )
+    finally:
+        retention_db.close()
+
+    # the application role is still confined to its workspace
+    assert PgMeetingRepository(db).all_for_workspace(B)[0].workspace_id == B
+    with db.workspace(A) as conn:
+        assert (
+            conn.execute(
+                "SELECT count(*) AS n FROM meetings WHERE workspace_id = %s", (B,)
+            ).fetchone()["n"]
+            == 0
+        )
+
+
+def test_export_requests_are_scoped_to_their_workspace_and_owner(db) -> None:
+    from nodo_api.adapters.azure.exports_pg import PgExportStore
+    from nodo_api.domain.exports import ExportState
+
+    store = PgExportStore(db)
+    now = datetime.now(UTC)
+    mine = store.create(A, "alice", None, now)
+    assert store.get(A, "alice", mine.id).state is ExportState.QUEUED
+    with pytest.raises(NotFoundError):
+        store.get(A, "mallory", mine.id)  # another person in the same workspace
+    with pytest.raises(NotFoundError):
+        store.get(B, "alice", mine.id)  # another workspace: row level security
+    store.set_state(A, mine.id, ExportState.READY, "x.json", 12)
+    ready = store.get_for_processing(A, mine.id)
+    assert (ready.state, ready.blob_name, ready.size_bytes) == (ExportState.READY, "x.json", 12)
+    assert ready.expires_at > now
+
+
+from tests.entity_contract import EntityVectorContract  # noqa: E402
+from tests.graph_contract import GraphContract  # noqa: E402
+from tests.review_contract import PendingReviewContract  # noqa: E402
+
+
+class TestPgGraph(GraphContract, EntityVectorContract, PendingReviewContract):
+    """The same behaviour tests the in-memory graph passes, on real PostgreSQL."""
+
+    @pytest.fixture
+    def store(self, db):
+        return PgGraphStore(db)
+
+    @pytest.fixture
+    def ws(self):
+        return f"ws-{uuid.uuid4().hex[:8]}"
+
+
+from tests.answer_cache_contract import AnswerStoreContract  # noqa: E402
+
+
+class TestPgAnswerStore(AnswerStoreContract):
+    """The same behaviour tests the memory and SQLite answer stores pass, on real PostgreSQL."""
+
+    @pytest.fixture
+    def store(self, db):
+        from nodo_api.adapters.azure.answers_pg import PgAnswerStore
+
+        return PgAnswerStore(db)
+
+    @pytest.fixture
+    def ws(self):
+        return f"ws-{uuid.uuid4().hex[:8]}"
+
+
+def test_speech_jobs_are_scoped_counted_and_forgotten(db) -> None:
+    from nodo_api.adapters.azure.speech_jobs_pg import PgSpeechJobStore
+
+    store, when = PgSpeechJobStore(db), datetime.now(UTC)
+    assert store.get(A, "m-speech") is None
+    store.start(A, "m-speech", "https://speech/job/1", when)
+    job = store.get(A, "m-speech")
+    assert (job.handle, job.polls) == ("https://speech/job/1", 0)
+    assert job.submitted_at == when
+    assert store.record_poll(A, "m-speech") == 1 and store.record_poll(A, "m-speech") == 2
+    assert store.get(B, "m-speech") is None  # another workspace sees nothing
+    store.start(A, "m-speech", "https://speech/job/2", when)  # a new submission replaces and resets
+    assert (store.get(A, "m-speech").handle, store.get(A, "m-speech").polls) == (
+        "https://speech/job/2",
+        0,
+    )
+    store.clear(A, "m-speech")
+    store.clear(A, "m-speech")  # forgetting twice is fine
+    assert store.get(A, "m-speech") is None
+
+
+def test_the_maintenance_role_lists_every_meeting_but_reads_other_data_only_per_workspace(
+    admin_db, db
+) -> None:
+    """Migration 0007: index maintenance may look across workspaces for meeting ids, and for the
+    rest of what it reads it is bound to one workspace at a time like everybody else."""
+    from nodo_api.adapters.azure.maintenance_pg import PgMaintenanceStore
+    from nodo_api.domain.models import MeetingState
+
+    repo = PgMeetingRepository(db)
+    repo.add(A, _meeting("mnt-a1", workspace=A), "mnt-k-1", "h")
+    repo.add(B, _meeting("mnt-b1", workspace=B), "mnt-k-2", "h")
+    gone = repo.add(A, _meeting("mnt-a2", workspace=A), "mnt-k-3", "h")
+    repo.save(A, replace(gone, tombstoned_at=datetime.now(UTC)))
+
+    with admin_db.admin() as conn:
+        conn.execute("DROP ROLE IF EXISTS mnt_login")
+        conn.execute("CREATE ROLE mnt_login LOGIN PASSWORD 'mnt-password' IN ROLE nodo_maintenance")
+        conn.execute("GRANT USAGE ON SCHEMA public TO mnt_login")
+    params = conninfo_to_dict(DSN)
+    params.update(user="mnt_login", password="mnt-password")
+    maintenance_db = PostgresDatabase.from_dsn(make_conninfo(**params))
+    try:
+        store = PgMaintenanceStore(maintenance_db)
+        everyone = store.list_meetings(None, 1000)
+        by_id = {m.meeting_id: m for m in everyone}
+        assert {"mnt-a1", "mnt-b1", "mnt-a2"} <= set(by_id)
+        assert by_id["mnt-a2"].tombstoned and not by_id["mnt-a1"].tombstoned
+        assert by_id["mnt-b1"].workspace_id == B and by_id["mnt-a1"].state is MeetingState.UPLOADING
+        ordered = [(m.workspace_id, m.meeting_id) for m in everyone]
+        assert len(set(ordered)) == len(ordered)  # the database's collation decides the order
+        first = store.list_meetings(None, 2)
+        assert len(first) == 2
+        nxt = store.list_meetings((first[-1].workspace_id, first[-1].meeting_id), 1000)
+        assert [m.meeting_id for m in first + nxt] == [m.meeting_id for m in everyone]
+
+        # transcripts and graph rows are visible only inside a workspace, as for any other role
+        with maintenance_db.workspace(A) as conn:
+            assert (
+                conn.execute("SELECT count(*) AS n FROM transcript_segments").fetchone()["n"] >= 0
+            )
+        with maintenance_db.admin() as conn:
+            assert (
+                conn.execute("SELECT count(*) AS n FROM transcript_segments").fetchone()["n"] == 0
+            )
+        for forbidden in (
+            "UPDATE meetings SET title = 'changed'",
+            "DELETE FROM meetings",
+            "INSERT INTO transcript_segments (workspace_id) VALUES ('x')",
+            "SELECT title FROM meetings",
+        ):
+            with (
+                pytest.raises(psycopg.errors.InsufficientPrivilege),
+                maintenance_db.admin() as conn,
+            ):
+                conn.execute(forbidden)
+    finally:
+        maintenance_db.close()
+
+
+def test_the_maintenance_role_may_say_the_cached_answers_are_out_of_date_and_nothing_more(
+    admin_db, db
+) -> None:
+    """Migration 0011: raise the epoch and drop the entries, bound to one workspace at a time."""
+    from datetime import timedelta
+
+    from nodo_api.adapters.azure.answers_pg import PgAnswerStore
+    from nodo_api.domain.answer_cache import AnswerKey, CachedAnswer
+    from nodo_api.domain.models import Answerability
+
+    now = datetime.now(UTC)
+    key = AnswerKey("v1", "en", "{}", "q")
+    answer = CachedAnswer("a", Answerability.SUPPORTED, (), ("x",))
+    app_store = PgAnswerStore(db)
+    app_store.put(
+        A,
+        "owner",
+        key,
+        [1.0, 0.0],
+        answer,
+        epoch=0,
+        created_at=now,
+        fresh_after=now - timedelta(days=1),
+        keep=10,
+    )
+    with admin_db.admin() as conn:
+        conn.execute("DROP ROLE IF EXISTS ans_login")
+        conn.execute("CREATE ROLE ans_login LOGIN PASSWORD 'ans-password' IN ROLE nodo_maintenance")
+        conn.execute("GRANT USAGE ON SCHEMA public TO ans_login")
+    params = conninfo_to_dict(DSN)
+    params.update(user="ans_login", password="ans-password")
+    maintenance_db = PostgresDatabase.from_dsn(make_conninfo(**params))
+    try:
+        PgAnswerStore(maintenance_db).bump(A, "owner")
+        assert app_store.epoch(A, "owner") == 1
+        assert app_store.nearest(A, "owner", key, [1.0, 0.0], 0.9, now - timedelta(days=1)) is None
+        for forbidden in (
+            "SELECT answer FROM answer_cache",
+            "UPDATE answer_cache SET answer = 'x'",
+            "INSERT INTO answer_cache (workspace_id) VALUES ('x')",
+        ):
+            with (
+                pytest.raises(psycopg.errors.InsufficientPrivilege),
+                maintenance_db.admin() as conn,
+            ):
+                conn.execute(forbidden)
+    finally:
+        maintenance_db.close()
+
+
+def test_the_graph_lists_the_segments_a_meeting_cites_on_postgres_too(db) -> None:
+    from nodo_api.adapters.azure.graph_pg import PgGraphStore
+    from tests.graph_contract import OWNER, meeting, queue_story
+
+    store, workspace = PgGraphStore(db), "ws-evidence"
+    first, _ = queue_story()
+    store.upsert_extraction(workspace, OWNER, meeting(1), first)
+    assert store.evidence_segment_ids(workspace, OWNER, "m1")
+    assert store.evidence_segment_ids(workspace, OWNER, "m2") == frozenset()
+    store.erase(workspace, "m1")
+    assert store.evidence_segment_ids(workspace, OWNER, "m1") == frozenset()
+
+
+def test_the_maintenance_role_finds_unsent_jobs_and_stuck_meetings_in_every_workspace(
+    admin_db, db
+) -> None:
+    from datetime import timedelta
+
+    from nodo_api.adapters.azure.maintenance_pg import PgMaintenanceStore
+
+    repo, outbox = PgMeetingRepository(db), PgJobOutbox(db)
+    now = datetime.now(UTC)
+    for workspace, name in ((A, "swp-a"), (B, "swp-b")):
+        meeting = repo.add(workspace, _meeting(name, workspace=workspace), f"swp-k-{name}", "h")
+        repo.save(workspace, replace(meeting, state=MeetingState.TRANSCRIBING))
+        outbox.record(workspace, name, "transcribe", {"meeting_id": name})
+    sent = repo.add(A, _meeting("swp-sent", workspace=A), "swp-k-sent", "h")
+    repo.save(A, replace(sent, state=MeetingState.TRANSCRIBING))
+    outbox.record(A, "swp-sent", "transcribe", {"meeting_id": "swp-sent"})
+    outbox.mark_published(A, "swp-sent", "transcribe")
+    with admin_db.admin() as conn:  # a record that is hours old; the fresh one stays fresh
+        conn.execute(
+            "UPDATE jobs SET created_at = now() - interval '5 hours' WHERE job_key LIKE 'swp-%'"
+        )
+        conn.execute("UPDATE jobs SET created_at = now() WHERE job_key = 'swp-b'")
+        conn.execute("DROP ROLE IF EXISTS swp_login")
+        conn.execute("CREATE ROLE swp_login LOGIN PASSWORD 'swp-password' IN ROLE nodo_maintenance")
+        conn.execute("GRANT USAGE ON SCHEMA public TO swp_login")
+    params = conninfo_to_dict(DSN)
+    params.update(user="swp_login", password="swp-password")
+    sweeper = PostgresDatabase.from_dsn(make_conninfo(**params))
+    try:
+        store = PgMaintenanceStore(sweeper)
+        cutoff = now - timedelta(hours=1)
+        unsent = {(j.workspace_id, j.job_key): j for j in store.unpublished_jobs(cutoff, 100)}
+        assert (A, "swp-a") in unsent and (A, "swp-sent") not in unsent
+        assert (B, "swp-b") not in unsent  # recorded a moment ago
+        assert unsent[(A, "swp-a")].payload == {"meeting_id": "swp-a"}
+        stuck = {(m.workspace_id, m.meeting_id) for m in store.stuck_meetings(cutoff, 100)}
+        assert {(A, "swp-a"), (A, "swp-sent")} <= stuck and (B, "swp-b") not in stuck
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), sweeper.admin() as conn:
+            conn.execute("DELETE FROM jobs")
+    finally:
+        sweeper.close()

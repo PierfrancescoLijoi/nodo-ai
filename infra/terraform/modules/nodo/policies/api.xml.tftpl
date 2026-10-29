@@ -1,0 +1,45 @@
+<policies>
+  <inbound>
+    <base />
+    <!-- Only Front Door may reach this gateway: the network rule narrows the source, this proves it. -->
+    <check-header name="X-Azure-FDID" failed-check-httpcode="403" failed-check-error-message="Forbidden" ignore-case="true">
+      <value>{{front-door-id}}</value>
+    </check-header>
+    <!-- Authentication happens here and again in the API: the gateway rejects bad tokens before they cost compute. -->
+    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized" require-scheme="Bearer" require-expiration-time="true" require-signed-tokens="true" clock-skew="60">
+      <openid-config url="{{oidc-issuer}}/.well-known/openid-configuration" />
+      <audiences>
+        <audience>{{oidc-audience}}</audience>
+      </audiences>
+      <issuers>
+        <issuer>{{oidc-issuer}}</issuer>
+      </issuers>
+    </validate-jwt>
+    <!-- Fairness per person, counted per regional gateway (the limit roughly doubles while both regions serve). The API sheds load too. -->
+    <rate-limit-by-key calls="${calls_per_minute}" renewal-period="60" counter-key='@(context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Subject ?? context.Request.IpAddress)' remaining-calls-header-name="x-ratelimit-remaining" />
+    <set-header name="X-Request-Id" exists-action="skip">
+      <value>@(context.RequestId.ToString())</value>
+    </set-header>
+    <set-header name="traceparent" exists-action="skip">
+      <value>@($"00-{context.RequestId.ToString("N")}-{context.RequestId.ToString("N").Substring(0,16)}-01")</value>
+    </set-header>
+    <!-- The gateway of each region talks to the API of its own region. -->
+    <set-backend-service backend-id='@(context.Deployment.Region == "${primary_region_display}" ? "api-primary" : "api-dr")' />
+  </inbound>
+  <backend>
+    <!-- No retry: a repeated write is the application's decision (idempotency keys), not the gateway's. -->
+    <forward-request timeout="60" buffer-request-body="false" />
+  </backend>
+  <outbound>
+    <base />
+    <set-header name="Server" exists-action="delete" />
+    <set-header name="X-Powered-By" exists-action="delete" />
+    <set-header name="X-AspNet-Version" exists-action="delete" />
+  </outbound>
+  <on-error>
+    <base />
+    <set-header name="X-Request-Id" exists-action="override">
+      <value>@(context.RequestId.ToString())</value>
+    </set-header>
+  </on-error>
+</policies>
