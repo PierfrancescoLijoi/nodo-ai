@@ -1,0 +1,149 @@
+name: Deploy web
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/web/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Azure environment to deploy
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-web-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Nothing to deploy to until the owner has run infra/azure/setup-github-oidc.sh and created the web
+    # interface (the web_client_id variable of the Terraform environment).
+    if: ${{ vars.AZURE_CLIENT_ID != '' && vars.WEB_APP_NAME != '' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'dev' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve deployment names
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          WEB_APP_NAME: ${{ vars.WEB_APP_NAME }}
+          # Professional tier: the standby web container (kept on the same image, or a failover would
+          # start an old one), its resource group, and the public host the smoke test goes through.
+          WEB_APP_NAME_DR: ${{ vars.WEB_APP_NAME_DR }}
+          RESOURCE_GROUP_DR: ${{ vars.AZURE_RESOURCE_GROUP_DR }}
+          PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+        run: |
+          set -euo pipefail
+          for name in RESOURCE_GROUP ACR_NAME WEB_APP_NAME; do
+            if [ -z "${!name}" ]; then
+              echo "Missing repository or environment variable: ${name}" >&2
+              exit 1
+            fi
+            printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
+          done
+          for name in WEB_APP_NAME_DR RESOURCE_GROUP_DR PUBLIC_HOST; do
+            printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
+          done
+          printf 'IMAGE=%s.azurecr.io/nodo-web:%s\n' "$ACR_NAME" "$GITHUB_SHA" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build web image
+        run: docker buildx build --load --tag "$IMAGE" apps/web
+
+      - name: Scan web image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Check the image before it leaves the runner
+        run: bash tools/verify/web-container-check.sh "$IMAGE"
+
+      # The professional tier firewalls the registry. This runner's address is allowed for the
+      # length of the job and removed again at the end, whatever happens.
+      - name: Allow this runner through the registry firewall
+        run: |
+          set -euo pipefail
+          runner_ip="$(curl --fail --silent --show-error https://api.ipify.org)"
+          echo "RUNNER_IP=${runner_ip}" >> "$GITHUB_ENV"
+          if [ "$(az acr show --name "$ACR_NAME" --query networkRuleSet.defaultAction --output tsv)" = "Deny" ]; then
+            az acr network-rule add --name "$ACR_NAME" --ip-address "$runner_ip"
+            echo "RUNNER_RULE_ADDED=true" >> "$GITHUB_ENV"
+            sleep 30
+          fi
+
+      - name: Push web image
+        run: |
+          set -euo pipefail
+          az acr login --name "$ACR_NAME"
+          docker push "$IMAGE"
+
+      - name: Deploy web
+        run: |
+          set -euo pipefail
+          az containerapp update \
+            --name "$WEB_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$IMAGE"
+          if [ -n "${WEB_APP_NAME_DR}" ]; then
+            az containerapp update \
+              --name "$WEB_APP_NAME_DR" \
+              --resource-group "${RESOURCE_GROUP_DR:-$RESOURCE_GROUP}" \
+              --image "$IMAGE"
+          fi
+
+      # Through the public door when there is one (edge, rewrite, gateway, then the container), so a
+      # broken route or policy fails the deploy: the page, its sign-in settings, and that /v1 still
+      # reaches the API (a token-less call must be refused by it, not answered by the web app).
+      - name: Smoke test web
+        run: |
+          set -euo pipefail
+          if [ -n "${PUBLIC_HOST}" ]; then
+            base="https://${PUBLIC_HOST}"
+          else
+            fqdn="$(az containerapp show \
+              --name "$WEB_APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query properties.configuration.ingress.fqdn \
+              --output tsv)"
+            base="https://${fqdn}"
+          fi
+          retry=(--fail --show-error --silent --retry 12 --retry-delay 10 --retry-all-errors --max-time 20)
+          curl "${retry[@]}" "${base}/" | grep -q "NODO"
+          curl "${retry[@]}" "${base}/config.json" | grep -q '"mode":"cloud"'
+          curl "${retry[@]}" "${base}/meetings/" >/dev/null
+          if [ -n "${PUBLIC_HOST}" ]; then
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/v1/meetings")"
+            if [ "$status" != "401" ]; then
+              echo "GET /v1/meetings without a token answered ${status}, expected 401 from the API" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Remove this runner from the registry firewall
+        if: always() && env.RUNNER_RULE_ADDED == 'true'
+        run: az acr network-rule remove --name "$ACR_NAME" --ip-address "$RUNNER_IP"

@@ -1,0 +1,35 @@
+<policies>
+  <inbound>
+    <base />
+    <!-- Only Front Door may reach this gateway: the network rule narrows the source, this proves it. -->
+    <check-header name="X-Azure-FDID" failed-check-httpcode="403" failed-check-error-message="Forbidden" ignore-case="true">
+      <value>{{front-door-id}}</value>
+    </check-header>
+    <!-- No token here: a browser cannot send headers on a WebSocket and a token in the address is logged.
+         The person is proved by the one-use ticket the client sends as its first message (ADR-028), which
+         the application checks before it accepts anything else. What the gateway can still do is count
+         handshakes per address, so a flood of sockets without a ticket stops here. -->
+    <rate-limit-by-key calls="${connects_per_minute}" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
+    <set-header name="X-Request-Id" exists-action="skip">
+      <value>@(context.RequestId.ToString())</value>
+    </set-header>
+    <!-- The gateway of each region talks to the voice gateway of its own region. -->
+%{ if standby_url != "" ~}
+    <set-backend-service base-url='@(context.Deployment.Region == "${primary_region_display}" ? "${primary_url}" : "${standby_url}")' />
+%{ else ~}
+    <set-backend-service base-url="${primary_url}" />
+%{ endif ~}
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+    <set-header name="X-Request-Id" exists-action="override">
+      <value>@(context.RequestId.ToString())</value>
+    </set-header>
+  </on-error>
+</policies>

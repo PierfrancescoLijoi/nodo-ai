@@ -1,0 +1,74 @@
+{
+  "cases": 60,
+  "coverage": 1.0,
+  "missing_case_ids": [],
+  "extra_prediction_ids": [],
+  "citation_precision": 0.7567567567567568,
+  "citation_recall": 0.45161290322580644,
+  "answerability_accuracy": 0.7333333333333333,
+  "forbidden_leak_count": 0,
+  "latency_ms": {
+    "samples": 60,
+    "p50": 773.05,
+    "p95": 1671.6,
+    "max": 1964.4
+  },
+  "by_category": {
+    "acl_negative": {
+      "cases": 6,
+      "answerability_accuracy": 1.0
+    },
+    "decision_change_over_time": {
+      "cases": 6,
+      "answerability_accuracy": 0.3333333333333333
+    },
+    "deleted_data": {
+      "cases": 6,
+      "answerability_accuracy": 1.0
+    },
+    "entity_collision": {
+      "cases": 6,
+      "answerability_accuracy": 0.6666666666666666
+    },
+    "false_cross_project_join": {
+      "cases": 6,
+      "answerability_accuracy": 0.5
+    },
+    "incomplete_reference": {
+      "cases": 6,
+      "answerability_accuracy": 0.3333333333333333
+    },
+    "multilingual_cross_lingual": {
+      "cases": 6,
+      "answerability_accuracy": 0.6666666666666666
+    },
+    "single_meeting_fact": {
+      "cases": 6,
+      "answerability_accuracy": 1.0
+    },
+    "speaker_ambiguity": {
+      "cases": 6,
+      "answerability_accuracy": 0.8333333333333334
+    },
+    "unanswerable": {
+      "cases": 6,
+      "answerability_accuracy": 1.0
+    }
+  },
+  "gate": {
+    "status": "fail",
+    "failed_metrics": [
+      "citation_precision",
+      "citation_recall",
+      "answerability_accuracy"
+    ],
+    "thresholds": {
+      "coverage": 1.0,
+      "citation_precision": 0.95,
+      "citation_recall": 0.9,
+      "answerability_accuracy": 0.95,
+      "forbidden_leak_count": 0,
+      "latency_p95_ms": 6000
+    }
+  }
+}

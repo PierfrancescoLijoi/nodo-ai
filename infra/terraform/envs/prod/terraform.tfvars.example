@@ -1,0 +1,21 @@
+subscription_id         = "00000000-0000-0000-0000-000000000000"
+oidc_issuer             = "https://<tenant>.ciamlogin.com/<tenant-id>/v2.0"
+oidc_audience           = "<application-id-of-the-api>"
+oidc_allowed_client_ids = ["<application-id-of-the-mobile-app>", "<application-id-of-the-desktop-app>"]
+custom_domain           = "api.example.com" # needs a CNAME and a validation TXT record at your DNS provider
+operator_cidrs          = ["203.0.113.10/32"] # the runner that applies Terraform and deploys images
+alert_emails            = ["oncall@example.com"]
+budget_contact_emails   = ["you@example.com"]
+waf_mode                = "Detection" # read the logs for a week, then "Prevention"
+
+# Regional availability must be checked first; DataZone deployments keep processing inside the EU.
+openai_deployments = {
+  chat      = { model_name = "<chat-model>", model_version = "<version>", sku_name = "DataZoneStandard", capacity = 200 }
+  embedding = { model_name = "<embedding-model>", model_version = "<version>", sku_name = "DataZoneStandard", capacity = 200 }
+}
+
+# The web interface: a single-page-application registration in the External ID tenant with the redirect
+# URI https://<custom_domain>/auth/callback/ (and http://localhost:8765/auth/callback/ for the desktop
+# app's "Copy to Azure"). Its client id must also be in oidc_allowed_client_ids.
+web_client_id = "<application-id-of-the-web-app>"
+web_api_scope = "api://<application-id-of-the-api>/access"

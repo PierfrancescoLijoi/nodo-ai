@@ -1,0 +1,15 @@
+subscription_id       = "00000000-0000-0000-0000-000000000000"
+oidc_issuer           = "" # https://<tenant>.ciamlogin.com/<tenant-id>/v2.0 once Entra External ID exists
+oidc_audience         = ""
+api_target_port       = 80 # placeholder only; change to 8000 with the first real NODO image
+budget_contact_emails = ["you@example.com"]
+
+# Fill after checking model availability in the chosen region:
+# openai_deployments = {
+#   chat      = { model_name = "<model>", model_version = "<version>", sku_name = "GlobalStandard", capacity = 10 }
+#   embedding = { model_name = "<embedding-model>", model_version = "<version>", sku_name = "Standard", capacity = 10 }
+# }
+
+# The web interface (leave empty to skip it). Placeholder image: web_target_port 80 until the first real one.
+# web_client_id = "<application-id-of-the-web-app>"
+# web_api_scope = "api://<application-id-of-the-api>/access"

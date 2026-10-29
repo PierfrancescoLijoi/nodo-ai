@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+edge
+coverage
+playwright-report
+test-results
+e2e
+*.md
+Dockerfile
+.dockerignore

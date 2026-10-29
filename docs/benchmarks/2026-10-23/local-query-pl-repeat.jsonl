@@ -1,0 +1,60 @@
+{"id": "case-001", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 545.0, "answer": "", "degraded": false}
+{"id": "case-002", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 490.9, "answer": "", "degraded": false}
+{"id": "case-003", "answerability": "supported", "citation_segment_ids": ["seg-b01-03"], "latency_ms": 11.0, "answer": "Alex Nowak", "degraded": false}
+{"id": "case-004", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 541.8, "answer": "", "degraded": false}
+{"id": "case-005", "answerability": "supported", "citation_segment_ids": ["seg-b01-02"], "latency_ms": 15.5, "answer": "kolejka borealis-weather", "degraded": false}
+{"id": "case-006", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 668.0, "answer": "", "degraded": false}
+{"id": "case-007", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 635.7, "answer": "", "degraded": false}
+{"id": "case-008", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 610.6, "answer": "", "degraded": false}
+{"id": "case-009", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 497.6, "answer": "", "degraded": false}
+{"id": "case-010", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 634.9, "answer": "", "degraded": false}
+{"id": "case-011", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 1082.4, "answer": "", "degraded": false}
+{"id": "case-012", "answerability": "supported", "citation_segment_ids": ["seg-b01-03", "seg-a01-01", "seg-b01-01", "seg-b01-02", "seg-b01-04"], "latency_ms": 11.8, "answer": "Dane przetwarzane przez zadanie HTTP są wysyłane do kolejki o nazwie borealis-weather. Przetwarzanie danych odbywa się trzy razy, a potem dane są wysyłane do kolejki błędów. Dane pogodowe przechowywane są przez czternascie dni.", "degraded": false}
+{"id": "case-013", "answerability": "supported", "citation_segment_ids": ["seg-b01-01", "seg-b02-04"], "latency_ms": 9.6, "answer": "Alex Nowak", "degraded": false}
+{"id": "case-014", "answerability": "supported", "citation_segment_ids": ["seg-b02-01"], "latency_ms": 8.3, "answer": "Alex Morgan", "degraded": false}
+{"id": "case-015", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 521.0, "answer": "", "degraded": false}
+{"id": "case-016", "answerability": "supported", "citation_segment_ids": ["seg-a02-02"], "latency_ms": 13.9, "answer": "Elena Rossi", "degraded": false}
+{"id": "case-017", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 608.4, "answer": "", "degraded": false}
+{"id": "case-018", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 573.5, "answer": "", "degraded": false}
+{"id": "case-019", "answerability": "supported", "citation_segment_ids": ["seg-a02-04"], "latency_ms": 13.8, "answer": "22 gennaio 2026", "degraded": false}
+{"id": "case-020", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 656.8, "answer": "", "degraded": false}
+{"id": "case-021", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 550.1, "answer": "", "degraded": false}
+{"id": "case-022", "answerability": "supported", "citation_segment_ids": ["seg-b01-04", "seg-b02-02"], "latency_ms": 12.3, "answer": "Quattroteen giorni", "degraded": false}
+{"id": "case-023", "answerability": "supported", "citation_segment_ids": ["seg-a02-03"], "latency_ms": 10.5, "answer": "Det synkrone design erstattede en kø asynkron og risponderede med et identificerende for jobbet.", "degraded": false}
+{"id": "case-024", "answerability": "supported", "citation_segment_ids": ["seg-a02-02"], "latency_ms": 10.3, "answer": "Elena Rossi", "degraded": false}
+{"id": "case-025", "answerability": "supported", "citation_segment_ids": ["seg-a02-01", "seg-a02-03"], "latency_ms": 11.0, "answer": "Po testowaniu okazało się, że występują timeouty przy jednoczesnym przesyłaniu wielu plików. Decyzja to zastosowanie kolejki asynchronicznej i odpowiedzi z identyfikatorem zadania.", "degraded": false}
+{"id": "case-026", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 549.3, "answer": "", "degraded": false}
+{"id": "case-027", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 454.2, "answer": "", "degraded": false}
+{"id": "case-028", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 546.3, "answer": "", "degraded": false}
+{"id": "case-029", "answerability": "supported", "citation_segment_ids": ["seg-b02-01", "seg-b02-04"], "latency_ms": 7.8, "answer": "Alex Morgan był odpowiedzialny za kompliencyję w projekcie Borealis.", "degraded": false}
+{"id": "case-030", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 584.8, "answer": "", "degraded": false}
+{"id": "case-031", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 614.8, "answer": "", "degraded": false}
+{"id": "case-032", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 532.2, "answer": "", "degraded": false}
+{"id": "case-033", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 716.5, "answer": "", "degraded": false}
+{"id": "case-034", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 578.0, "answer": "", "degraded": false}
+{"id": "case-035", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 731.8, "answer": "", "degraded": false}
+{"id": "case-036", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 688.4, "answer": "", "degraded": false}
+{"id": "case-037", "answerability": "supported", "citation_segment_ids": ["seg-b02-01", "seg-b01-01"], "latency_ms": 10.3, "answer": "Nie", "degraded": false}
+{"id": "case-038", "answerability": "supported", "citation_segment_ids": ["seg-b02-04", "seg-b02-01"], "latency_ms": 9.4, "answer": "Nie", "degraded": false}
+{"id": "case-039", "answerability": "supported", "citation_segment_ids": ["seg-b02-04", "seg-b02-01"], "latency_ms": 11.1, "answer": "Alex Nowak is the owner of the importer for the Borealis project, while Alex Morgan is the compliance owner for the Borealis project.", "degraded": false}
+{"id": "case-040", "answerability": "supported", "citation_segment_ids": ["seg-b01-01"], "latency_ms": 9.8, "answer": "Alex Nowak pracuje nad projektem Borealis.", "degraded": false}
+{"id": "case-041", "answerability": "supported", "citation_segment_ids": ["seg-b02-01"], "latency_ms": 9.8, "answer": "project Borealis", "degraded": false}
+{"id": "case-042", "answerability": "supported", "citation_segment_ids": ["seg-b02-04", "seg-b02-01"], "latency_ms": 10.3, "answer": "Nie, jedna osoba o imieniu Alex nie była właścicielem zarówno importu, jak i kompliancy. Alex Nowak był właścicielem importu, a Alex Morgan był właścicielem kompliancji.", "degraded": false}
+{"id": "case-043", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 540.1, "answer": "", "degraded": false}
+{"id": "case-044", "answerability": "supported", "citation_segment_ids": ["seg-b01-02", "seg-a03-02"], "latency_ms": 12.2, "answer": "Nie", "degraded": false}
+{"id": "case-045", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 516.6, "answer": "", "degraded": false}
+{"id": "case-046", "answerability": "supported", "citation_segment_ids": ["seg-b02-03"], "latency_ms": 13.3, "answer": "Nie.", "degraded": false}
+{"id": "case-047", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 545.5, "answer": "", "degraded": false}
+{"id": "case-048", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 578.2, "answer": "", "degraded": false}
+{"id": "case-049", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 611.3, "answer": "", "degraded": false}
+{"id": "case-050", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 540.7, "answer": "", "degraded": false}
+{"id": "case-051", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 618.4, "answer": "", "degraded": false}
+{"id": "case-052", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 610.9, "answer": "", "degraded": false}
+{"id": "case-053", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 30.8, "answer": "", "degraded": false}
+{"id": "case-054", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 24.0, "answer": "", "degraded": false}
+{"id": "case-055", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 641.9, "answer": "", "degraded": false}
+{"id": "case-056", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 668.8, "answer": "", "degraded": false}
+{"id": "case-057", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 538.8, "answer": "", "degraded": false}
+{"id": "case-058", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 691.2, "answer": "", "degraded": false}
+{"id": "case-059", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 600.3, "answer": "", "degraded": false}
+{"id": "case-060", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 683.6, "answer": "", "degraded": false}

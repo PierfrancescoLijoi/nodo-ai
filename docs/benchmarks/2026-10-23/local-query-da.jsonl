@@ -1,0 +1,60 @@
+{"id": "case-001", "answerability": "supported", "citation_segment_ids": ["seg-a01-03"], "latency_ms": 694.6, "answer": "Tre sekunder", "degraded": false}
+{"id": "case-002", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 589.0, "answer": "", "degraded": false}
+{"id": "case-003", "answerability": "supported", "citation_segment_ids": ["seg-a02-04"], "latency_ms": 1075.5, "answer": "Elena Rossi", "degraded": false}
+{"id": "case-004", "answerability": "supported", "citation_segment_ids": ["seg-a02-04"], "latency_ms": 1606.9, "answer": "Fristen for dead-letter-opgaven er 22. januar 2026.", "degraded": false}
+{"id": "case-005", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 618.4, "answer": "", "degraded": false}
+{"id": "case-006", "answerability": "supported", "citation_segment_ids": ["seg-a03-04"], "latency_ms": 1433.6, "answer": "Aurora har jobstatusser: queued, processing, completed og failed.", "degraded": false}
+{"id": "case-007", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 658.2, "answer": "", "degraded": false}
+{"id": "case-008", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 549.1, "answer": "", "degraded": false}
+{"id": "case-009", "answerability": "supported", "citation_segment_ids": ["seg-a02-03"], "latency_ms": 1187.7, "answer": "En coda asynkron", "degraded": false}
+{"id": "case-010", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 707.4, "answer": "", "degraded": false}
+{"id": "case-011", "answerability": "supported", "citation_segment_ids": ["seg-a01-04"], "latency_ms": 1404.6, "answer": "Forkastede anmodninger vil blive gentaget to gange af klienten.", "degraded": false}
+{"id": "case-012", "answerability": "supported", "citation_segment_ids": ["seg-a03-03", "seg-a03-04", "seg-a01-04", "seg-a01-02"], "latency_ms": 2786.5, "answer": "I forbindelse med request-behandling valideres og omformes hver fil i forespørgsel før en succesfuld respons returneres. Hvis et forespørgsel ikke er behandlet korrekt, kan det være i kø (queued), og det vil blive gentaget to gange af klienten. Hvis det fortsat ikke er behandlet korrekt, vil det blive markert som fejlet (failed).", "degraded": false}
+{"id": "case-013", "answerability": "supported", "citation_segment_ids": ["seg-b02-04"], "latency_ms": 1093.5, "answer": "Alex Nowak", "degraded": false}
+{"id": "case-014", "answerability": "supported", "citation_segment_ids": ["seg-b02-01"], "latency_ms": 1061.7, "answer": "Alex Morgan", "degraded": false}
+{"id": "case-015", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 624.2, "answer": "", "degraded": false}
+{"id": "case-016", "answerability": "supported", "citation_segment_ids": ["seg-a02-02"], "latency_ms": 1098.3, "answer": "Elena Rossi", "degraded": false}
+{"id": "case-017", "answerability": "supported", "citation_segment_ids": ["seg-a03-02"], "latency_ms": 1166.4, "answer": "Elena Rossi", "degraded": false}
+{"id": "case-018", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 621.5, "answer": "", "degraded": false}
+{"id": "case-019", "answerability": "supported", "citation_segment_ids": ["seg-a02-04"], "latency_ms": 1514.4, "answer": "Elena fik fristen den 22. januar 2026.", "degraded": false}
+{"id": "case-020", "answerability": "supported", "citation_segment_ids": ["seg-a03-01"], "latency_ms": 1157.4, "answer": "Fem", "degraded": false}
+{"id": "case-021", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 690.2, "answer": "", "degraded": false}
+{"id": "case-022", "answerability": "supported", "citation_segment_ids": ["seg-b01-04", "seg-b02-02"], "latency_ms": 1371.1, "answer": "Quattroteen giorni", "degraded": false}
+{"id": "case-023", "answerability": "supported", "citation_segment_ids": ["seg-a02-03"], "latency_ms": 1527.7, "answer": "Det synkrone design erstattede en kø asynkron.", "degraded": false}
+{"id": "case-024", "answerability": "supported", "citation_segment_ids": ["seg-a02-02"], "latency_ms": 1102.1, "answer": "Elena Rossi", "degraded": false}
+{"id": "case-025", "answerability": "supported", "citation_segment_ids": ["seg-a02-03"], "latency_ms": 1978.2, "answer": "Deles beslutning efter testen var at bruge en asynkron kø og svare med et jobidentifikator, da synkronen beslutning var overgået.", "degraded": false}
+{"id": "case-026", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 540.8, "answer": "", "degraded": false}
+{"id": "case-027", "answerability": "supported", "citation_segment_ids": ["seg-a03-01"], "latency_ms": 1352.7, "answer": "Aurora-forbrugeren kan behandle op til fem job ad gangen.", "degraded": false}
+{"id": "case-028", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 594.8, "answer": "", "degraded": false}
+{"id": "case-029", "answerability": "supported", "citation_segment_ids": ["seg-b02-01"], "latency_ms": 1334.3, "answer": "Alex Morgan var kompliansejer for projektet Borealis.", "degraded": false}
+{"id": "case-030", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 624.7, "answer": "", "degraded": false}
+{"id": "case-031", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 658.1, "answer": "", "degraded": false}
+{"id": "case-032", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 556.4, "answer": "", "degraded": false}
+{"id": "case-033", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 688.4, "answer": "", "degraded": false}
+{"id": "case-034", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 624.2, "answer": "", "degraded": false}
+{"id": "case-035", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 705.9, "answer": "", "degraded": false}
+{"id": "case-036", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 712.0, "answer": "", "degraded": false}
+{"id": "case-037", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 616.3, "answer": "", "degraded": false}
+{"id": "case-038", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 575.1, "answer": "", "degraded": false}
+{"id": "case-039", "answerability": "supported", "citation_segment_ids": ["seg-b02-04", "seg-b02-01"], "latency_ms": 1644.4, "answer": "Alex Nowak is the owner of the importer, and Alex Morgan is the compliance owner for project Borealis.", "degraded": false}
+{"id": "case-040", "answerability": "supported", "citation_segment_ids": ["seg-b01-01"], "latency_ms": 1362.9, "answer": "Alex Nowak arbejder på projekt Borealis.", "degraded": false}
+{"id": "case-041", "answerability": "supported", "citation_segment_ids": ["seg-b02-01"], "latency_ms": 1203.4, "answer": "Project Borealis", "degraded": false}
+{"id": "case-042", "answerability": "supported", "citation_segment_ids": ["seg-b02-04", "seg-b02-01"], "latency_ms": 1723.3, "answer": "Nej, en person med navnet Alex ejet ikke begge importering og compliance. Alex Nowak ejet importer, mens Alex Morgan ejet compliance.", "degraded": false}
+{"id": "case-043", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 734.5, "answer": "", "degraded": false}
+{"id": "case-044", "answerability": "supported", "citation_segment_ids": ["seg-b02-03", "seg-b01-05", "seg-b01-02", "seg-b01-01"], "latency_ms": 1722.9, "answer": "Nej, Borealis bruger ikke Aurora's dead-letter queue.", "degraded": false}
+{"id": "case-045", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 668.8, "answer": "", "degraded": false}
+{"id": "case-046", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 687.0, "answer": "", "degraded": false}
+{"id": "case-047", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 665.8, "answer": "", "degraded": false}
+{"id": "case-048", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 739.7, "answer": "", "degraded": false}
+{"id": "case-049", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 581.5, "answer": "", "degraded": false}
+{"id": "case-050", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 521.6, "answer": "", "degraded": false}
+{"id": "case-051", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 613.8, "answer": "", "degraded": false}
+{"id": "case-052", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 720.3, "answer": "", "degraded": false}
+{"id": "case-053", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 24.3, "answer": "", "degraded": false}
+{"id": "case-054", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 24.2, "answer": "", "degraded": false}
+{"id": "case-055", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 743.9, "answer": "", "degraded": false}
+{"id": "case-056", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 655.4, "answer": "", "degraded": false}
+{"id": "case-057", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 557.3, "answer": "", "degraded": false}
+{"id": "case-058", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 647.5, "answer": "", "degraded": false}
+{"id": "case-059", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 757.9, "answer": "", "degraded": false}
+{"id": "case-060", "answerability": "unanswerable", "citation_segment_ids": [], "latency_ms": 665.3, "answer": "", "degraded": false}

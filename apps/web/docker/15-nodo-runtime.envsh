@@ -1,0 +1,53 @@
+# Sourced (an .envsh file, not executed) by the nginx entrypoint before it renders the templates, so what
+# it exports reaches them. It turns the container's environment into two things:
+#   - /tmp/nodo-web/config.json, which the page reads to know where to sign in and which API to call
+#   - NODO_CONNECT_SRC, the origins the page's content policy lets it connect to
+# A wrong value stops the container at start (the platform shows the reason) instead of serving a page
+# that cannot sign anyone in.
+
+nodo_fail() {
+  echo "nodo-web: $1" >&2
+  exit 1
+}
+
+# Only characters that can be written into JSON and an nginx header without escaping.
+nodo_check() {
+  printf '%s' "$2" | grep -Eq '^[A-Za-z0-9:/._~?&=%@+, -]*$' || nodo_fail "$1 contains a character that is not allowed"
+}
+
+nodo_https() {
+  case "$2" in
+    https://*) ;;
+    *) nodo_fail "$1 must be an https address" ;;
+  esac
+}
+
+nodo_origin() {
+  printf '%s' "$1" | sed -E 's#^(https://[^/?]+).*#\1#'
+}
+
+[ -n "${NODO_OIDC_ISSUER:-}" ] || nodo_fail "NODO_OIDC_ISSUER is required"
+[ -n "${NODO_OIDC_CLIENT_ID:-}" ] || nodo_fail "NODO_OIDC_CLIENT_ID is required"
+[ -n "${NODO_OIDC_SCOPE:-}" ] || nodo_fail "NODO_OIDC_SCOPE is required"
+
+NODO_API_BASE_URL="${NODO_API_BASE_URL:-}"
+NODO_BLOB_ORIGIN="${NODO_BLOB_ORIGIN:-}"
+
+for name in NODO_OIDC_ISSUER NODO_OIDC_CLIENT_ID NODO_OIDC_SCOPE NODO_API_BASE_URL NODO_BLOB_ORIGIN; do
+  eval "value=\${$name}"
+  nodo_check "$name" "$value"
+done
+nodo_https NODO_OIDC_ISSUER "$NODO_OIDC_ISSUER"
+[ -z "$NODO_API_BASE_URL" ] || nodo_https NODO_API_BASE_URL "$NODO_API_BASE_URL"
+[ -z "$NODO_BLOB_ORIGIN" ] || nodo_https NODO_BLOB_ORIGIN "$NODO_BLOB_ORIGIN"
+
+NODO_CONNECT_SRC="$(nodo_origin "$NODO_OIDC_ISSUER")"
+[ -z "$NODO_API_BASE_URL" ] || NODO_CONNECT_SRC="$NODO_CONNECT_SRC $(nodo_origin "$NODO_API_BASE_URL")"
+[ -z "$NODO_BLOB_ORIGIN" ] || NODO_CONNECT_SRC="$NODO_CONNECT_SRC $(nodo_origin "$NODO_BLOB_ORIGIN")"
+export NODO_CONNECT_SRC
+
+mkdir -p /tmp/nodo-web
+cat > /tmp/nodo-web/config.json <<CONFIG
+{"mode":"cloud","apiBaseUrl":"${NODO_API_BASE_URL}","oidc":{"issuer":"${NODO_OIDC_ISSUER}","clientId":"${NODO_OIDC_CLIENT_ID}","scope":"${NODO_OIDC_SCOPE}"}}
+CONFIG
+echo "nodo-web: configured for ${NODO_OIDC_ISSUER}"

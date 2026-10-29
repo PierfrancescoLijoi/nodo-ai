@@ -1,0 +1,24 @@
+<policies>
+  <inbound>
+    <base />
+    <!-- Only Front Door may reach this gateway: the network rule narrows the source, this proves it. -->
+    <check-header name="X-Azure-FDID" failed-check-httpcode="403" failed-check-error-message="Forbidden" ignore-case="true">
+      <value>{{front-door-id}}</value>
+    </check-header>
+    <!-- The pages and scripts need no token: nobody has signed in when they are fetched. They hold no data. -->
+    <rate-limit-by-key calls="1200" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
+    <!-- The gateway of each region talks to the web container of its own region. -->
+    <set-backend-service backend-id='@(context.Deployment.Region == "${primary_region_display}" ? "web-primary" : "web-dr")' />
+  </inbound>
+  <backend>
+    <forward-request timeout="10" buffer-request-body="false" />
+  </backend>
+  <outbound>
+    <base />
+    <set-header name="Server" exists-action="delete" />
+    <set-header name="X-Powered-By" exists-action="delete" />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>
