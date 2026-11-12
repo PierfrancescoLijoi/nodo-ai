@@ -25,7 +25,7 @@ A Source of kind meeting: a recorded conversation that carries an attestation an
 _Avoid_: Call, session, recording
 
 **Attestation**:
-The owner's recorded statement, made before capture, that everyone involved has been told about the recording.
+The owner's per-meeting statement, recorded before capture, that everyone involved has been told about the recording. It is an auditable control, not proof of consent and not a legal basis.
 _Avoid_: Consent form, waiver
 
 **Section**:
