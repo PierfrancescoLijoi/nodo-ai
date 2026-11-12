@@ -105,6 +105,16 @@ One user: about 6 meetings per week, 45 minutes each, so about 4.5 audio hours p
 - Every graph edge and index document stores `meeting_id`, `segment_id`, `extraction_version`, so audit and cascade deletion are queries, not archaeology.
 - Retention is policy per data class: audio (default 30 days), transcript, graph.
 
+### Sources
+
+`SourceRepository` and `FragmentRepository` are additive ports for the knowledge-base source model.
+Memory and SQLite implement them in Phase 1; the Azure adapter container leaves them unavailable
+until the cloud source path is implemented. Meetings remain authoritative in the existing meeting
+and transcript stores: the source adapter exposes each meeting with the same id, and the fragment
+adapter presents transcript segments as fragments with the same ids and time locators. Non-meeting
+sources use the `sources`, `sections` and versioned `fragments` tables. All reads are scoped by
+workspace, and owner-facing reads perform the owner check in the repository query.
+
 ## 7. Query path (trust pipeline)
 
 ```mermaid

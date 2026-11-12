@@ -1,6 +1,6 @@
 # NODO API v1 - contract for the app
 
-The OpenAPI file in `packages/contracts/openapi.json` is generated from the code. This page is the human contract the mobile client is built against. All endpoints need `Authorization: Bearer <access token>` (Entra External ID). Errors use `{ "error": { "code", "message", "request_id" } }` with status 401, 404, 409 or 422. Timestamps are ISO 8601 UTC strings. A user only ever sees their own meetings and graph.
+The OpenAPI file in `packages/contracts/openapi.json` is generated from the code. This page is the human contract the mobile client is built against. All endpoints need `Authorization: Bearer <access token>` (Entra External ID). Errors use `{ "error": { "code", "message", "request_id" } }` with status 401, 404, 409, 422 or 501. Timestamps are ISO 8601 UTC strings. A user only ever sees their own sources, meetings and graph.
 
 ## Meetings
 
@@ -35,6 +35,32 @@ MeetingOutput {
 `PATCH /v1/meetings/{id}/speakers/{speaker_id}` with `{ name: string | null }` names a speaker (or clears the name with `null`) and returns the updated `MeetingOutput`. Rules: `speaker_id` matches `S<n>` and must exist in the transcript (404 otherwise); only meetings in `review` or `ready` can be edited (409); names are 1 to 80 characters, at most 5 words, letters, digits, marks, spaces, `.` `'` `-` (422 otherwise, no control characters). A change queues a background re-analysis, so the named person appears in the graph and in `insights.people` a few seconds later. Names belong to one meeting; nothing links them across meetings and no voice data is kept.
 
 `POST /v1/meetings` accepts an optional `title` (1 to 120 characters). `GET /v1/meetings/{id}/transcript?limit&offset` is unchanged: items have `id, meeting_id, speaker_id ("S1", "S2"), start_ms, end_ms, text, confidence, version, locale`.
+
+## Sources
+
+A source is a meeting, document, deck, web page, note or imported audio item. Phase 1 exposes a
+read-only view. `GET /v1/sources?kind=&limit=20&cursor=<opaque>` returns
+`{ items: SourceOutput[], next_cursor: string | null }`, newest first. `limit` is 1 to 100 and
+`kind`, when present, is one of `meeting`, `document`, `deck`, `web`, `note`, `audio`.
+
+```
+SourceOutput {
+  id, kind, title: string|null, state, created_at,
+  origin: string|null, language: "en"|"pl"|"it"|"da"|null, version
+}
+```
+
+`GET /v1/sources/{id}` returns one owned source. A missing source and another user's source both
+return 404. `GET /v1/sources/{id}/outline` returns
+`{ sections: { id, parent_id, ordinal, level, title }[] }` in depth-first reading order.
+`GET /v1/sources/{id}/fragments` returns
+`{ version, fragments: { id, section_id, ordinal, text, locator, speaker_id, confidence }[] }`.
+`locator` is an object containing one or more of `time_ms`, `page`, `bbox`, `slide`, `chars`;
+ranges are two-element arrays. For a meeting, fragment ids are transcript segment ids and locators
+contain `time_ms`; the existing `/v1/meetings*` contract is unchanged.
+
+Non-meeting sources are local-only in Phase 1. On an engine without source adapters all four routes
+return 501 with error code `not_available_on_engine`.
 
 ## Questions
 

@@ -155,6 +155,14 @@ page_revision_claims(page_id, rev, ordinal, span_start, span_end, text_hash) + p
                                                              -- lets erasure redact old revisions (ADR-031)
 ```
 
+**Phase 1 implementation notes.** The additive first phase deliberately keeps four transitional
+forms. `MEETING` and `SOURCE` graph nodes coexist: meetings retain `MEETING`, while every other
+source uses `SOURCE`. The existing `meetings` table remains the meeting-detail table and SQLite
+triggers backfill and keep its shared fields in `sources`, preserving all ids. `Citation` and the
+search index remain meeting/segment-shaped until Phases 2 and 4. `CHILD_OF` is available in the
+graph vocabulary now, while write-time cycle enforcement and the depth-six hierarchy rules arrive
+in Phase 3.
+
 Decisions inside the model:
 
 - **Locator** is JSON: `{"t":[start_ms,end_ms]}`, `{"page":n,"bbox":[...]}`, `{"slide":n}`, `{"chars":[a,b]}`. The evidence validator keeps its strictest rule for every kind: the quoted text must be a substring of the stored fragment. Time ranges are checked only when present.
