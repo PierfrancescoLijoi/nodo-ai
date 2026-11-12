@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from nodo_api.domain.models import Answerability, Locale, MeetingState
+from nodo_api.domain.sources import SourceKind
 
 
 class FrozenModel(BaseModel):
@@ -104,6 +105,49 @@ class MeetingListItem(FrozenModel):
 class MeetingList(FrozenModel):
     items: tuple[MeetingListItem, ...]
     next_cursor: str | None
+
+
+class SourceOutput(FrozenModel):
+    id: str
+    kind: SourceKind
+    title: str | None
+    state: str
+    created_at: datetime
+    origin: str | None
+    language: Locale | None
+    version: int
+
+
+class SourceList(FrozenModel):
+    items: tuple[SourceOutput, ...]
+    next_cursor: str | None
+
+
+class SectionOutput(FrozenModel):
+    id: str
+    parent_id: str | None
+    ordinal: int
+    level: int
+    title: str
+
+
+class SourceOutline(FrozenModel):
+    sections: tuple[SectionOutput, ...]
+
+
+class FragmentOutput(FrozenModel):
+    id: str
+    section_id: str | None
+    ordinal: int
+    text: str
+    locator: dict[str, Any]
+    speaker_id: str | None
+    confidence: float | None
+
+
+class SourceFragments(FrozenModel):
+    version: int
+    fragments: tuple[FragmentOutput, ...]
 
 
 class UploadSessionOutput(FrozenModel):

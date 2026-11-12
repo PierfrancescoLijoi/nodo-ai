@@ -21,8 +21,11 @@ from nodo_api.api.v1.mapping import (
     decode_cursor,
     edge_output,
     encode_cursor,
+    fragment_output,
     list_item,
     meeting_output,
+    section_output,
+    source_output,
     subgraph_output,
 )
 from nodo_api.api.v1.schemas import (
@@ -40,6 +43,10 @@ from nodo_api.api.v1.schemas import (
     ReviewInput,
     ReviewOutput,
     ReviewRelationInput,
+    SourceFragments,
+    SourceList,
+    SourceOutline,
+    SourceOutput,
     SpeakerNameInput,
     SubgraphOutput,
     TranscriptPage,
@@ -49,7 +56,8 @@ from nodo_api.api.v1.schemas import (
 from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
-from nodo_api.errors import AuthenticationError, ValidationFailed
+from nodo_api.domain.sources import SourceKind
+from nodo_api.errors import AuthenticationError, NotAvailableOnEngine, ValidationFailed
 from nodo_api.services.query import QueryFilters, QueryRequest
 from nodo_api.telemetry import pseudonym
 
@@ -132,6 +140,62 @@ def list_meetings(
     return MeetingList(
         items=tuple(list_item(m, digests.get(m.id)) for m in items),
         next_cursor=encode_cursor(items[-1]) if has_more and items else None,
+    )
+
+
+def _source_stores(container):
+    if container.sources is None or container.fragments is None:
+        raise NotAvailableOnEngine
+    return container.sources, container.fragments
+
+
+@router.get("/sources", response_model=SourceList)
+def list_sources(
+    actor: PrincipalDep,
+    request: Request,
+    kind: SourceKind | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+):
+    sources, _ = _source_stores(request.app.state.container)
+    kinds = None if kind is None else frozenset({kind})
+    page = sources.list_owned(
+        actor.workspace_id, actor.user_id, limit + 1, decode_cursor(cursor), kinds
+    )
+    items, has_more = page[:limit], len(page) > limit
+    return SourceList(
+        items=tuple(source_output(item) for item in items),
+        next_cursor=encode_cursor(items[-1]) if has_more and items else None,
+    )
+
+
+@router.get("/sources/{source_id}", response_model=SourceOutput)
+def get_source(source_id: str, actor: PrincipalDep, request: Request):
+    sources, _ = _source_stores(request.app.state.container)
+    source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    return source_output(source)
+
+
+@router.get("/sources/{source_id}/outline", response_model=SourceOutline)
+def get_source_outline(source_id: str, actor: PrincipalDep, request: Request):
+    sources, fragments = _source_stores(request.app.state.container)
+    sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    return SourceOutline(
+        sections=tuple(
+            section_output(item) for item in fragments.outline(actor.workspace_id, source_id)
+        )
+    )
+
+
+@router.get("/sources/{source_id}/fragments", response_model=SourceFragments)
+def get_source_fragments(source_id: str, actor: PrincipalDep, request: Request):
+    sources, fragments = _source_stores(request.app.state.container)
+    source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    return SourceFragments(
+        version=source.version,
+        fragments=tuple(
+            fragment_output(item) for item in fragments.latest(actor.workspace_id, source_id)
+        ),
     )
 
 

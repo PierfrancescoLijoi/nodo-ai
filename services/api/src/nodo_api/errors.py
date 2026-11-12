@@ -34,3 +34,9 @@ class ValidationFailed(NodoError):
     code = "validation_error"
     status_code = 422
     public_message = "Request validation failed"
+
+
+class NotAvailableOnEngine(NodoError):
+    code = "not_available_on_engine"
+    status_code = 501
+    public_message = "This feature is not available on the configured engine"
