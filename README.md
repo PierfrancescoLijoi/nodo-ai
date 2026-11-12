@@ -581,6 +581,7 @@ NODO AI is open source under the [MIT License](LICENSE). Copyright 2026 Pierfran
 
 ## Current status
 
+- The knowledge-base direction is documented in [PRODUCT.md](docs/product/PRODUCT.md) and the [design specification](docs/superpowers/specs/2026-11-12-knowledge-base-design.md).
 - Local meeting capture, ingestion, grounded query, graph, review, export and deletion are
   implemented and exercised end to end.
 - The browser real-time client and backend voice gateway are implemented, including durable ACK,
