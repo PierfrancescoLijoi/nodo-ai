@@ -8,6 +8,7 @@ same shape and differ only in how a fragment is located inside its source.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -55,6 +56,8 @@ class Locator:
             raise ValueError("slide starts at 1")
         if self.bbox is not None and self.page is None:
             raise ValueError("bbox needs a page")
+        if self.bbox is not None and not all(math.isfinite(v) for v in self.bbox):
+            raise ValueError("bbox coordinates must be finite numbers")
 
     def to_json(self) -> str:
         fields = {
@@ -68,12 +71,18 @@ class Locator:
             {k: v for k, v in fields.items() if v is not None},
             sort_keys=True,
             separators=(",", ":"),
+            allow_nan=False,
         )
 
     @classmethod
     def from_json(cls, text: str) -> Locator:
-        data = json.loads(text)
-        return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in data.items()})
+        try:
+            data = json.loads(text)
+            if not isinstance(data, dict):
+                raise ValueError("a locator is a JSON object")
+            return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in data.items()})
+        except (TypeError, AttributeError) as error:
+            raise ValueError(f"invalid locator: {error}") from error
 
 
 @dataclass(frozen=True, slots=True)

@@ -138,3 +138,16 @@ def test_source_from_meeting_keeps_id_and_state():
     assert (source.id, source.kind, source.state) == ("m1", SourceKind.MEETING, "ready")
     assert (source.workspace_id, source.owner_id, source.title) == ("w1", "u1", "Weekly")
     assert source.created_at == NOW
+
+
+@pytest.mark.parametrize(
+    "text", ["[1, 2]", '{"page":1,"nope":2}', '{"page":"x"}', "not json", "{}"]
+)
+def test_locator_from_json_raises_only_value_error(text: str) -> None:
+    with pytest.raises(ValueError):
+        Locator.from_json(text)
+
+
+def test_locator_rejects_non_finite_bbox() -> None:
+    with pytest.raises(ValueError):
+        Locator(page=1, bbox=(0.0, 0.0, float("nan"), 1.0))
