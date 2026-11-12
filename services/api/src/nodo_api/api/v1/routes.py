@@ -191,11 +191,11 @@ def get_source_outline(source_id: str, actor: PrincipalDep, request: Request):
 def get_source_fragments(source_id: str, actor: PrincipalDep, request: Request):
     sources, fragments = _source_stores(request.app.state.container)
     source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    latest = fragments.latest(actor.workspace_id, source_id)
+    # A meeting is versioned by its transcript, not by the sources row.
     return SourceFragments(
-        version=source.version,
-        fragments=tuple(
-            fragment_output(item) for item in fragments.latest(actor.workspace_id, source_id)
-        ),
+        version=latest[0].version if latest else source.version,
+        fragments=tuple(fragment_output(item) for item in latest),
     )
 
 

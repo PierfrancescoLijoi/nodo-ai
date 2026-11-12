@@ -183,6 +183,13 @@ class FragmentContract:
         # the source row follows the newest version
         assert sources.get_owned(ws, OWNER, "d1").version == 3
 
+    def test_add_version_refuses_a_tombstoned_source(self, sources, fragments, ws) -> None:
+        added = sources.add(ws, source("d1", ws=ws))
+        fragments.add_version(ws, "d1", (), (fragment("f1", "d1", 0),))
+        sources.save(ws, replace(added, tombstoned_at=added.created_at))
+        with pytest.raises(NotFoundError):
+            fragments.add_version(ws, "d1", (), (fragment("f1", "d1", 0, "late"),))
+
     def test_latest_returns_newest_version_in_order(self, sources, fragments, ws) -> None:
         sources.add(ws, source("d1", ws=ws))
         fragments.add_version(ws, "d1", (), (fragment("old", "d1", 0, "old text"),))

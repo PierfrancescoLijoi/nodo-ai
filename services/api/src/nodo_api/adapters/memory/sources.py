@@ -126,6 +126,9 @@ class MemoryFragmentRepository:
             raise NotFoundError
         if kind is SourceKind.MEETING:
             raise ValueError("A meeting transcript is written through the transcript repository")
+        stored = self._sources.get_for_processing(workspace_id, source_id)
+        if stored.tombstoned_at is not None:
+            raise NotFoundError  # deletion wins: a deleted source takes no new content
         check_version(source_id, sections, fragments)
         key = (workspace_id, source_id)
         versions = self._versions.setdefault(key, {})

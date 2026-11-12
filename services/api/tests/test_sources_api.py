@@ -142,3 +142,19 @@ def test_openapi_lists_source_paths(app) -> None:
         "/v1/sources/{source_id}/outline",
         "/v1/sources/{source_id}/fragments",
     }
+
+
+def test_fragments_of_a_reviewed_meeting_report_the_transcript_version(
+    client, auth_headers
+) -> None:
+    review = client.patch(
+        "/v1/meetings/seed-m1/review",
+        headers=auth_headers,
+        json={"corrections": [{"segment_id": "seg-001", "text": "Updated text"}]},
+    )
+    assert review.status_code == 200
+
+    body = client.get("/v1/sources/seed-m1/fragments", headers=auth_headers).json()
+
+    assert body["version"] == 2
+    assert body["fragments"][0]["text"] == "Updated text"

@@ -202,6 +202,12 @@ class SqliteFragmentRepository:
                 raise ValueError(
                     "A meeting transcript is written through the transcript repository"
                 )
+            gone = conn.execute(
+                "SELECT tombstoned_at FROM sources WHERE workspace_id = ? AND id = ?",
+                (workspace_id, source_id),
+            ).fetchone()["tombstoned_at"]
+            if gone is not None:
+                raise NotFoundError  # deletion wins: a deleted source takes no new content
             top = conn.execute(
                 "SELECT max(version) AS version FROM fragments WHERE workspace_id = ?"
                 " AND source_id = ?",
