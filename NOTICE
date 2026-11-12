@@ -2,3 +2,21 @@ NODO AI
 Copyright 2026 Pierfrancesco Lijoi
 
 Licensed under the MIT License. See LICENSE.
+
+Document import uses the following libraries, installed as dependencies of the
+optional document extra. Their code is not copied into this repository; each
+keeps its own licence. The licences were read from the installed package
+metadata on 2026-11-12.
+
+- pdfminer.six (MIT), https://github.com/pdfminer/pdfminer.six
+- pypdfium2 (BSD-3-Clause and Apache-2.0, bundles PDFium), https://github.com/pypdfium2-team/pypdfium2
+- pypdf (BSD-3-Clause), https://github.com/py-pdf/pypdf
+- python-docx (MIT), https://github.com/python-openxml/python-docx
+- python-pptx (MIT), https://github.com/scanny/python-pptx
+- openpyxl (MIT) and et_xmlfile (MIT), https://foss.heptapod.net/openpyxl/openpyxl
+- beautifulsoup4 (MIT) and soupsieve (MIT), https://www.crummy.com/software/BeautifulSoup/bs4/
+- markdown-it-py (MIT) and mdurl (MIT), https://github.com/executablebooks/markdown-it-py
+- lxml (BSD-3-Clause), https://github.com/lxml/lxml
+- Pillow (MIT-CMU), https://github.com/python-pillow/Pillow
+- XlsxWriter (BSD-2-Clause), https://github.com/jmcnamara/XlsxWriter
+- reportlab (BSD), used only by the tests, https://www.reportlab.com/

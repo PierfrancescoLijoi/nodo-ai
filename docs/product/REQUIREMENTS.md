@@ -230,12 +230,12 @@ The ADR column lists decisions that directly constrain the requirement. A dash m
 
 | Requirement | Phase | ADR |
 |---|---|---|
-| **FR-1** | Phase 2 - Documents | [ADR-029](../adr/029-source-model.md) |
-| **FR-2** | Phase 2 - Documents | [ADR-007](../adr/007-derived-stores-rebuildable.md), [ADR-029](../adr/029-source-model.md) |
-| **FR-3** | Phase 2 - Documents | [ADR-002](../adr/002-event-driven-ingestion.md) |
+| **FR-1** | Phase 2 - Documents | [ADR-029](../adr/029-source-model.md), [ADR-032](../adr/032-document-parser-stack.md) |
+| **FR-2** | Phase 2 - Documents | [ADR-007](../adr/007-derived-stores-rebuildable.md), [ADR-029](../adr/029-source-model.md), [ADR-032](../adr/032-document-parser-stack.md) |
+| **FR-3** | Phase 2 - Documents | [ADR-002](../adr/002-event-driven-ingestion.md), [ADR-032](../adr/032-document-parser-stack.md) |
 | **FR-4** | Phase 3 - Hierarchy | [ADR-029](../adr/029-source-model.md), [ADR-030](../adr/030-concept-hierarchy-as-relation.md) |
 | **FR-5** | Phase 2 - Documents | [ADR-005](../adr/005-attestation-not-consent.md), [ADR-019](../adr/019-compliance-and-data-governance.md), [ADR-029](../adr/029-source-model.md) |
-| **FR-6** | Phase 2 - Documents | [ADR-029](../adr/029-source-model.md) |
+| **FR-6** | Phase 2 - Documents | [ADR-029](../adr/029-source-model.md), [ADR-032](../adr/032-document-parser-stack.md) |
 | **FR-7** | Phase 3 - Hierarchy | [ADR-030](../adr/030-concept-hierarchy-as-relation.md) |
 | **FR-8** | Phase 3 - Hierarchy | [ADR-030](../adr/030-concept-hierarchy-as-relation.md) |
 | **FR-9** | Phase 5 - Wiki and health | [ADR-012](../adr/012-graph-architecture.md), [ADR-019](../adr/019-compliance-and-data-governance.md), [ADR-029](../adr/029-source-model.md), [ADR-031](../adr/031-wiki-pages-and-human-edits.md) |
