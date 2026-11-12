@@ -178,3 +178,13 @@ def test_diarization_labels_are_not_people() -> None:
         (EntityType.PERSON, "Sara"),
         (EntityType.TOPIC, "S1"),
     ]
+
+
+def test_evidence_has_source_and_fragment_ids_and_legacy_aliases():
+    from nodo_api.domain.graph import Evidence
+
+    ev = Evidence("src-1", "frag-1")
+    assert (ev.source_id, ev.fragment_id) == ("src-1", "frag-1")
+    assert (ev.meeting_id, ev.segment_id) == ("src-1", "frag-1")
+    assert ev == Evidence(source_id="src-1", fragment_id="frag-1")
+    assert hash(ev) == hash(Evidence("src-1", "frag-1"))

@@ -75,7 +75,7 @@ def entity_support(graph: Subgraph) -> dict[str, frozenset[tuple[str, str]]]:
     nodes = {n.id: n for n in graph.nodes}
     support: dict[str, set[tuple[str, str]]] = {}
     for edge in graph.edges:
-        evidence = {(e.meeting_id, e.segment_id) for e in edge.evidence}
+        evidence = {(e.source_id, e.fragment_id) for e in edge.evidence}
         for node_id in (edge.source_id, edge.target_id):
             node = nodes.get(node_id)
             if node is not None and node.type is not EntityType.MEETING:

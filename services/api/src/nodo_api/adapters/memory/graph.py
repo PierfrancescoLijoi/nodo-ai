@@ -144,7 +144,7 @@ class MemoryGraphStore:
         mine = sum(
             1
             for r in part.relations.values()
-            if any(e.meeting_id == meeting.id for e in r.relation.evidence)
+            if any(e.source_id == meeting.id for e in r.relation.evidence)
         )
         return GraphWriteResult(len(extraction.entities) + 1, mine)
 
@@ -181,7 +181,7 @@ class MemoryGraphStore:
 
     def _drop_meeting_evidence(self, part: _Partition, meeting_id: str) -> None:
         for row in part.relations.values():
-            kept = tuple(e for e in row.relation.evidence if e.meeting_id != meeting_id)
+            kept = tuple(e for e in row.relation.evidence if e.source_id != meeting_id)
             if len(kept) != len(row.relation.evidence):
                 row.relation = replace(row.relation, evidence=kept)
 
@@ -312,10 +312,10 @@ class MemoryGraphStore:
         if part is None:
             return frozenset()
         return frozenset(
-            e.segment_id
+            e.fragment_id
             for row in part.relations.values()
             for e in row.relation.evidence
-            if e.meeting_id == meeting_id
+            if e.source_id == meeting_id
         )
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
@@ -503,7 +503,7 @@ class MemoryGraphStore:
             rel = row.relation
             new, old = part.entities.get(rel.source_id), part.entities.get(rel.target_id)
             if new and old:
-                meeting = rel.evidence[0].meeting_id if rel.evidence else None
+                meeting = rel.evidence[0].source_id if rel.evidence else None
                 changes.append(Change(rel.id, new.label, old.label, meeting, new.effective_at))
         return tuple(changes)
 

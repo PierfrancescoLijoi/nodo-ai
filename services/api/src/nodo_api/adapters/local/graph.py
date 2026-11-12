@@ -122,7 +122,7 @@ class SqliteGraphStore:
             )
             conn.executemany(
                 "INSERT OR IGNORE INTO relation_evidence (workspace_id, owner_id, relation_id,"
-                " meeting_id, segment_id) VALUES (?, ?, ?, ?, ?)",
+                " source_id, fragment_id) VALUES (?, ?, ?, ?, ?)",
                 evidence,
             )
             self._sweep(conn, workspace_id, owner_id, touched)
@@ -257,7 +257,7 @@ class SqliteGraphStore:
     ) -> list[str]:
         rows = conn.execute(
             "DELETE FROM relation_evidence WHERE workspace_id = ? AND owner_id = ?"
-            " AND meeting_id = ? RETURNING relation_id",
+            " AND source_id = ? RETURNING relation_id",
             (workspace_id, owner_id, meeting_id),
         ).fetchall()
         return list({r["relation_id"] for r in rows})
@@ -415,16 +415,16 @@ class SqliteGraphStore:
     ) -> frozenset[str]:
         with self._db.transaction(write=False) as conn:
             rows = conn.execute(
-                "SELECT DISTINCT segment_id FROM relation_evidence"
-                " WHERE workspace_id = ? AND owner_id = ? AND meeting_id = ?",
+                "SELECT DISTINCT fragment_id FROM relation_evidence"
+                " WHERE workspace_id = ? AND owner_id = ? AND source_id = ?",
                 (workspace_id, owner_id, meeting_id),
             ).fetchall()
-        return frozenset(row["segment_id"] for row in rows)
+        return frozenset(row["fragment_id"] for row in rows)
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         with self._db.transaction() as conn:
             rows = conn.execute(
-                "DELETE FROM relation_evidence WHERE workspace_id = ? AND meeting_id = ?"
+                "DELETE FROM relation_evidence WHERE workspace_id = ? AND source_id = ?"
                 " RETURNING owner_id, relation_id",
                 (workspace_id, meeting_id),
             ).fetchall()
@@ -614,14 +614,14 @@ class SqliteGraphStore:
         grouped: dict[str, list[Evidence]] = {}
         for part in _slices(relation_ids):
             rows = conn.execute(
-                "SELECT relation_id, meeting_id, segment_id FROM relation_evidence"
+                "SELECT relation_id, source_id, fragment_id FROM relation_evidence"
                 f" WHERE workspace_id = ? AND owner_id = ? AND relation_id IN ({_marks(len(part))})"
-                " ORDER BY meeting_id, segment_id",
+                " ORDER BY source_id, fragment_id",
                 (workspace_id, owner_id, *part),
             ).fetchall()
             for row in rows:
                 grouped.setdefault(row["relation_id"], []).append(
-                    Evidence(row["meeting_id"], row["segment_id"])
+                    Evidence(row["source_id"], row["fragment_id"])
                 )
         return grouped
 
@@ -694,9 +694,9 @@ class SqliteGraphStore:
         with self._db.transaction(write=False) as conn:
             rows = conn.execute(
                 "SELECT r.id, n.label AS new_label, o.label AS old_label, n.effective_at,"
-                " (SELECT ev.meeting_id FROM relation_evidence ev WHERE ev.workspace_id = r.workspace_id"
+                " (SELECT ev.source_id FROM relation_evidence ev WHERE ev.workspace_id = r.workspace_id"
                 "  AND ev.owner_id = r.owner_id AND ev.relation_id = r.id"
-                "  ORDER BY ev.meeting_id LIMIT 1) AS meeting_id"
+                "  ORDER BY ev.source_id LIMIT 1) AS meeting_id"
                 " FROM relations r"
                 " JOIN entities n ON n.workspace_id = r.workspace_id AND n.owner_id = r.owner_id"
                 "  AND n.id = r.source_id"
@@ -724,13 +724,13 @@ class SqliteGraphStore:
         with their review status. Relations to other meetings' decisions become references."""
         with self._db.transaction(write=False) as conn:
             evidence_rows = conn.execute(
-                "SELECT relation_id, segment_id FROM relation_evidence"
-                " WHERE workspace_id = ? AND owner_id = ? AND meeting_id = ? ORDER BY segment_id",
+                "SELECT relation_id, fragment_id FROM relation_evidence"
+                " WHERE workspace_id = ? AND owner_id = ? AND source_id = ? ORDER BY fragment_id",
                 (workspace_id, owner_id, meeting_id),
             ).fetchall()
             by_relation: dict[str, list[str]] = {}
             for row in evidence_rows:
-                by_relation.setdefault(row["relation_id"], []).append(row["segment_id"])
+                by_relation.setdefault(row["relation_id"], []).append(row["fragment_id"])
             relations = self._relations_with_ends(conn, workspace_id, owner_id, list(by_relation))
         entities: dict[tuple[EntityType, str], ExportedEntity] = {}
         exported: list[ExportedRelation] = []

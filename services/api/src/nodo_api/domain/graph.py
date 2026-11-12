@@ -101,8 +101,19 @@ def relation_id(
 
 @dataclass(frozen=True, slots=True)
 class Evidence:
-    meeting_id: str
-    segment_id: str
+    """A source and one fragment of it that supports a relation. For a meeting the source id is
+    the meeting id and the fragment id the segment id."""
+
+    source_id: str
+    fragment_id: str
+
+    @property
+    def meeting_id(self) -> str:
+        return self.source_id
+
+    @property
+    def segment_id(self) -> str:
+        return self.fragment_id
 
 
 @dataclass(frozen=True, slots=True)
