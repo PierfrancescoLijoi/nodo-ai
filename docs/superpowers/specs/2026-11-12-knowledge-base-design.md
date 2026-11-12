@@ -150,7 +150,9 @@ entities(..., ref)                                           -- type 'source' re
 relations(kind += CHILD_OF)                                  -- concept hierarchy; acyclic check on write
 pages(id, owner, kind, slug, title, status, body_md, content_hash, model_version, prompt_version, stale)
 page_claims(page_id, ordinal, text)  +  page_citations(page_id, claim_ordinal, source_id, fragment_id, quote)
-page_revisions(page_id, rev, body_md, author, at)            -- human edits are authoritative and kept
+page_revisions(page_id, rev, body_md, author, at, provenance) -- human edits are authoritative and kept
+page_revision_claims(page_id, rev, ordinal, span_start, span_end, text_hash) + per-revision citations
+                                                             -- lets erasure redact old revisions (ADR-031)
 ```
 
 Decisions inside the model:
@@ -162,7 +164,7 @@ Decisions inside the model:
 - **Versions and deletion** (rules, because they fix the id scheme):
   - A source version is immutable. A new version re-parses; a fragment whose section path and text hash are unchanged **keeps its id** and is carried forward; changed or removed fragments stay stored as "superseded" so earlier approvals remain explainable and citations show their version.
   - Relations and decisions an approved person built on a superseded fragment are not deleted: they become `needs_reconfirmation` and appear in Review. Pages that cite superseded fragments become `stale` and regenerate as proposals against the human revision.
-  - **Deleting a source wins over everything.** All its versions, fragments, index rows, graph evidence, orphaned concepts and cache entries are erased. Page claims that cited only erased fragments are removed from the current body *and redacted in every stored revision*, leaving a visible "removed: source deleted" marker. Human-written text is kept only where it does not depend on the erased source.
+  - **Deleting a source wins over everything.** All its versions, fragments, index rows, graph evidence, orphaned concepts and cache entries are erased. Any page claim that cited an erased fragment, even if it also cites fragments that survive, is removed from the current body *and redacted in every stored revision*, leaving a visible "removed: source deleted" marker, and the page goes `stale` so it regenerates as a proposal against the remaining sources. Human-written text is kept only where it does not depend on the erased source (uncited text depends on none). ADR-031 gives the reasons and the per-revision records this needs.
 - **Source node kept in the graph** (`MENTIONED_IN` / `DECIDED_IN` target the source node) so the existing sweep and erase rules stay valid.
 
 ## 8. Pipelines
