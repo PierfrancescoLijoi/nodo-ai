@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 from uuid import uuid4
 
 from nodo_api.domain.exports import EXPORT_TTL_HOURS, Export, ExportState
-from nodo_api.domain.graph import EntityType, Subgraph
+from nodo_api.domain.graph import ORIGIN_TYPES, EntityType, Subgraph
 from nodo_api.domain.maintenance import MaintenanceMeeting, PendingJob
 from nodo_api.domain.models import (
     Answerability,
@@ -447,9 +447,7 @@ class MockLlm:
             )
             for item in evidence[:3]
         )
-        entities = tuple(
-            dict.fromkeys(n.label for n in graph.nodes if n.type is not EntityType.MEETING)
-        )
+        entities = tuple(dict.fromkeys(n.label for n in graph.nodes if n.type not in ORIGIN_TYPES))
         return GeneratedAnswer(
             self.localized_answer(locale), Answerability.SUPPORTED, citations, entities
         )

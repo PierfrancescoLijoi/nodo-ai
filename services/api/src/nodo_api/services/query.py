@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from nodo_api.domain.answer_cache import CachedAnswer
-from nodo_api.domain.graph import EntityType, Subgraph
+from nodo_api.domain.graph import ORIGIN_TYPES, Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
 from nodo_api.errors import NotFoundError
 from nodo_api.ports import GraphStore, LlmClient, MeetingRepository, Retriever, TranscriptRepository
@@ -78,7 +78,7 @@ def entity_support(graph: Subgraph) -> dict[str, frozenset[tuple[str, str]]]:
         evidence = {(e.source_id, e.fragment_id) for e in edge.evidence}
         for node_id in (edge.source_id, edge.target_id):
             node = nodes.get(node_id)
-            if node is not None and node.type is not EntityType.MEETING:
+            if node is not None and node.type not in ORIGIN_TYPES:
                 support.setdefault(node.label, set()).update(evidence)
     return {label: frozenset(keys) for label, keys in support.items()}
 

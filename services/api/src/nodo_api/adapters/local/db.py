@@ -104,7 +104,7 @@ class LocalDatabase:
                 f"BEGIN IMMEDIATE;\n{script}\n"
                 f"INSERT INTO schema_migrations VALUES ({version}, '{name}', '{now_text()}');\n"
             )
-            if script.startswith(FOREIGN_KEYS_OFF):
+            if script.lstrip().startswith(FOREIGN_KEYS_OFF):
                 _run_without_foreign_keys(conn, body)
             else:
                 conn.executescript(body + "COMMIT;")
