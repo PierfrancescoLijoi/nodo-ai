@@ -135,7 +135,7 @@ def test_delete_other_users_source_is_not_found(rig: Rig) -> None:
 def test_delete_meeting_source_is_refused(rig: Rig) -> None:
     rig.add_meeting()
 
-    with pytest.raises(ValidationFailed):
+    with pytest.raises(ValidationFailed, match="use the meetings API"):
         rig.service.delete(WS, OWNER, "m1")
 
     assert rig.sources.get_owned(WS, OWNER, "m1").kind.value == "meeting"
