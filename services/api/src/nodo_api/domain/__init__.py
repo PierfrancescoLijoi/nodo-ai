@@ -1,3 +1,13 @@
+from nodo_api.domain.documents import (
+    Block,
+    BlockKind,
+    ParsedDocument,
+    ParseError,
+    build_sections_and_fragments,
+    fragment_id,
+    split_text,
+    stable_text,
+)
 from nodo_api.domain.models import (
     Answerability,
     Citation,
@@ -21,12 +31,16 @@ from nodo_api.domain.sources import (
 __all__ = [
     "MAX_FRAGMENT_CHARS",
     "Answerability",
+    "Block",
+    "BlockKind",
     "Citation",
     "Fragment",
     "Locale",
     "Locator",
     "Meeting",
     "MeetingState",
+    "ParseError",
+    "ParsedDocument",
     "RecordingAttestation",
     "RetentionPolicy",
     "Section",
@@ -34,4 +48,8 @@ __all__ = [
     "SourceKind",
     "Speaker",
     "TranscriptSegment",
+    "build_sections_and_fragments",
+    "fragment_id",
+    "split_text",
+    "stable_text",
 ]
