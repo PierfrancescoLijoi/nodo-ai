@@ -233,3 +233,247 @@ def test_foreign_keys_are_back_on_after_a_failed_migration(tmp_path, monkeypatch
         assert not conn.in_transaction
     finally:
         db.close()
+
+
+# --- 0009: sources, sections and fragments ------------------------------------------------------
+
+
+def _meeting_row(conn, meeting_id, *, state="ready", tombstoned_at=None, title=None, ws="w"):
+    conn.execute(
+        "INSERT INTO meetings (workspace_id, id, owner_id, state, project, created_at,"
+        " tombstoned_at, title) VALUES (?, ?, 'u', ?, 'NODO', ?, ?, ?)",
+        (
+            ws,
+            meeting_id,
+            state,
+            f"2026-10-0{meeting_id[-1]}T00:00:00.000000+00:00",
+            tombstoned_at,
+            title,
+        ),
+    )
+
+
+def _source(conn, meeting_id, ws="w"):
+    return conn.execute(
+        "SELECT * FROM sources WHERE workspace_id = ? AND id = ?", (ws, meeting_id)
+    ).fetchone()
+
+
+def test_existing_meetings_are_backfilled_as_sources(tmp_path):
+    path = tmp_path / "nodo.db"
+    old = migrate_to(path, 8)
+    _meeting_row(old, "m1", title="Kickoff")
+    _meeting_row(old, "m2", state="failed", tombstoned_at="2026-10-05T00:00:00.000000+00:00")
+    old.execute(
+        "INSERT INTO transcript_segments VALUES ('w', 'm1', 1, 's1', 'S1', 0, 10, 'hello', 0.9,"
+        " 'en', 'NODO')"
+    )
+    before = [tuple(r) for r in old.execute("SELECT * FROM meetings ORDER BY id")]
+    old.close()
+
+    db = LocalDatabase(path)
+    try:
+        with db.transaction(write=False) as conn:
+            sources = {r["id"]: r for r in conn.execute("SELECT * FROM sources")}
+            after = [tuple(r) for r in conn.execute("SELECT * FROM meetings ORDER BY id")]
+            segments = conn.execute("SELECT count(*) FROM transcript_segments").fetchone()[0]
+    finally:
+        db.close()
+    assert after == before and segments == 1
+    assert set(sources) == {"m1", "m2"}
+    one, two = sources["m1"], sources["m2"]
+    assert (one["workspace_id"], one["owner_id"], one["kind"], one["version"]) == (
+        "w",
+        "u",
+        "meeting",
+        1,
+    )
+    assert (one["title"], one["state"], one["tombstoned_at"]) == ("Kickoff", "ready", None)
+    assert one["created_at"] == "2026-10-01T00:00:00.000000+00:00"
+    assert (two["state"], two["tombstoned_at"]) == ("failed", "2026-10-05T00:00:00.000000+00:00")
+    assert all(r["origin"] is None and r["content_hash"] is None for r in sources.values())
+
+
+def test_new_meeting_appears_as_source_with_same_id_and_state(tmp_path):
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        with db.transaction() as conn:
+            _meeting_row(conn, "m3", state="uploading")
+            row = _source(conn, "m3")
+        assert (row["kind"], row["state"], row["owner_id"], row["version"]) == (
+            "meeting",
+            "uploading",
+            "u",
+            1,
+        )
+    finally:
+        db.close()
+
+
+def test_meeting_update_and_tombstone_reach_sources(tmp_path):
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        with db.transaction() as conn:
+            _meeting_row(conn, "m1", state="uploading")
+            conn.execute("UPDATE sources SET origin = 'mic', content_hash = 'h' WHERE id = 'm1'")
+            conn.execute(
+                "UPDATE meetings SET state = 'ready', title = 'Renamed', project = 'Other',"
+                " summary = 'x' WHERE id = 'm1'"
+            )
+            row = _source(conn, "m1")
+            assert (row["state"], row["title"]) == ("ready", "Renamed")
+            assert (row["origin"], row["content_hash"], row["owner_id"]) == ("mic", "h", "u")
+            assert row["tombstoned_at"] is None
+            conn.execute(
+                "UPDATE meetings SET tombstoned_at = '2026-10-09T00:00:00.000000+00:00'"
+                " WHERE id = 'm1'"
+            )
+            assert _source(conn, "m1")["tombstoned_at"] == "2026-10-09T00:00:00.000000+00:00"
+            columns = {r[1] for r in conn.execute("PRAGMA table_info(sources)")}
+            assert "project" not in columns
+    finally:
+        db.close()
+
+
+def test_meeting_repository_writes_reach_sources(tmp_path):
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    from nodo_api.adapters.local.db import to_text
+    from nodo_api.adapters.local.repos import SqliteMeetingRepository
+    from nodo_api.domain.models import Locale, Meeting, MeetingState, RecordingAttestation
+
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        created = datetime(2026, 10, 1, tzinfo=UTC)
+        meeting = Meeting(
+            id="m1",
+            workspace_id="w",
+            owner_id="u",
+            created_at=created,
+            state=MeetingState.UPLOADING,
+            attestation=RecordingAttestation(
+                "u", "m1", "v1", created, "retention-30d", Locale.EN, "audit-1", "sig"
+            ),
+            project="NODO",
+        )
+        repo = SqliteMeetingRepository(db)
+        repo.add("w", meeting, "key-1", "hash-1")
+        repo.add("w", meeting, "key-1", "hash-1")  # idempotent replay writes nothing new
+        deleted = datetime(2026, 10, 2, tzinfo=UTC)
+        ready = replace(meeting, state=MeetingState.READY, title="T")
+        repo.save("w", ready)
+        with db.transaction(write=False) as conn:
+            row = conn.execute("SELECT * FROM sources").fetchone()
+        assert (row["state"], row["title"], row["tombstoned_at"]) == ("ready", "T", None)
+        repo.save("w", replace(ready, tombstoned_at=deleted, project="Other"))
+        with db.transaction(write=False) as conn:
+            rows = conn.execute("SELECT * FROM sources").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["id"] == "m1" and rows[0]["kind"] == "meeting"
+        assert rows[0]["created_at"] == to_text(created)
+        assert rows[0]["tombstoned_at"] == to_text(deleted)
+    finally:
+        db.close()
+
+
+def test_insert_or_replace_of_a_meeting_does_not_duplicate_or_fail(tmp_path):
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        with db.transaction() as conn:
+            _meeting_row(conn, "m1", state="uploading")
+            conn.execute(
+                "INSERT OR REPLACE INTO meetings (workspace_id, id, owner_id, state, created_at,"
+                " title) VALUES ('w', 'm1', 'u', 'ready', '2026-10-01T00:00:00.000000+00:00', 'T')"
+            )
+            rows = conn.execute("SELECT state, title FROM sources").fetchall()
+        assert [tuple(r) for r in rows] == [("ready", "T")]
+    finally:
+        db.close()
+
+
+def test_meeting_delete_removes_source(tmp_path):
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        with db.transaction() as conn:
+            _meeting_row(conn, "m1")
+            _meeting_row(conn, "m2")
+            conn.execute("DELETE FROM meetings WHERE id = 'm1'")
+            assert _source(conn, "m1") is None
+            assert _source(conn, "m2") is not None
+    finally:
+        db.close()
+
+
+def _insert_document(conn, source_id="d1", kind="document"):
+    conn.execute(
+        "INSERT INTO sources (workspace_id, owner_id, id, kind, title, state, created_at)"
+        " VALUES ('w', 'u', ?, ?, 'Handbook', 'ready', '2026-10-01T00:00:00.000000+00:00')",
+        (source_id, kind),
+    )
+
+
+def _insert_fragment(conn, fragment_id, text, source_id="d1"):
+    conn.execute(
+        "INSERT INTO fragments (workspace_id, source_id, version, id, section_id, ordinal, text,"
+        " locator) VALUES ('w', ?, 1, ?, 'sec1', 0, ?, '{\"page\":1}')",
+        (source_id, fragment_id, text),
+    )
+
+
+def test_deleting_a_source_cascades_to_sections_and_fragments(tmp_path):
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        with db.transaction() as conn:
+            _insert_document(conn, "d1")
+            _insert_document(conn, "d2")
+            for source_id in ("d1", "d2"):
+                conn.execute(
+                    "INSERT INTO sections (workspace_id, source_id, id, parent_id, ordinal, level,"
+                    " title) VALUES ('w', ?, 'sec1', NULL, 0, 1, 'Intro')",
+                    (source_id,),
+                )
+                _insert_fragment(conn, "f1", "Some text", source_id)
+            conn.execute("DELETE FROM sources WHERE id = 'd1'")
+            sections = conn.execute("SELECT source_id FROM sections").fetchall()
+            fragments = conn.execute("SELECT source_id FROM fragments").fetchall()
+            assert [r[0] for r in sections] == ["d2"] and [r[0] for r in fragments] == ["d2"]
+            with pytest.raises(sqlite3.IntegrityError):  # a fragment needs its source
+                _insert_fragment(conn, "f9", "orphan", "missing")
+    finally:
+        db.close()
+
+
+def test_fragment_text_limit_enforced(tmp_path):
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        with db.transaction() as conn:
+            _insert_document(conn)
+            _insert_fragment(conn, "ok", "x" * 20_000)
+            for bad in ("", "x" * 20_001):
+                with pytest.raises(sqlite3.IntegrityError):
+                    conn.execute("SAVEPOINT s")
+                    try:
+                        _insert_fragment(conn, "bad", bad)
+                    finally:
+                        conn.execute("ROLLBACK TO s")
+                        conn.execute("RELEASE s")
+    finally:
+        db.close()
+
+
+def test_source_kind_is_restricted_and_listing_uses_its_index(tmp_path):
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        with db.transaction() as conn:
+            for kind in ("document", "deck", "web", "note", "audio"):
+                _insert_document(conn, f"s-{kind}", kind)
+            with pytest.raises(sqlite3.IntegrityError):
+                _insert_document(conn, "s-bad", "spreadsheet")
+            plan = conn.execute(
+                "EXPLAIN QUERY PLAN SELECT id FROM sources WHERE workspace_id = 'w'"
+                " AND owner_id = 'u' AND tombstoned_at IS NULL ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        assert any("sources_list_idx" in r["detail"] for r in plan)
+    finally:
+        db.close()
