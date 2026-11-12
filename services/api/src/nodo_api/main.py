@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -25,7 +26,13 @@ from nodo_api.errors import NodoError
 from nodo_api.jwks import JwksCache
 from nodo_api.middleware import EdgeProtection
 from nodo_api.resilience import Bulkhead, DependencyUnavailable, is_transient
-from nodo_api.services import EvidenceValidator, GraphService, MeetingService, QueryService
+from nodo_api.services import (
+    EvidenceValidator,
+    GraphService,
+    MeetingService,
+    QueryService,
+    SourceService,
+)
 from nodo_api.services.exports import ExportService
 from nodo_api.services.sync_import import SyncImportService
 from nodo_api.telemetry import configure, configure_logging, instrument_app, request_id_var
@@ -60,6 +67,9 @@ class AppContainer:
     readiness: tuple[tuple[str, Callable[[], None]], ...] = ()
     query_gate: Bulkhead | None = None
     speech: Any = None  # the speech adapter, for the local push-to-talk path
+    sources: Any = None
+    fragments: Any = None
+    source_service: SourceService | None = None
 
 
 @asynccontextmanager
@@ -200,6 +210,18 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.entity_indexer,
         a.answers,
     )
+    source_service = (
+        SourceService(
+            sources=a.sources,
+            fragments=a.fragments,
+            graph=a.graph,
+            answers=a.answers,
+            audit=a.audit,
+            clock=lambda: datetime.now(UTC),
+        )
+        if a.sources is not None and a.fragments is not None
+        else None
+    )
     return AppContainer(
         settings,
         AuthManager(settings, key_provider),
@@ -228,6 +250,9 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.readiness,
         Bulkhead("query", settings.max_concurrent_queries, wait_seconds=0.0),
         a.speech,
+        a.sources,
+        a.fragments,
+        source_service,
     )
 
 

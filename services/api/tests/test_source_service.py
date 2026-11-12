@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -19,7 +20,7 @@ from nodo_api.domain.models import Locale, Meeting, MeetingState, RecordingAttes
 from nodo_api.errors import NotFoundError, ValidationFailed
 from nodo_api.services.answer_cache import AnswerCache
 from nodo_api.services.sources import SourceService
-from tests.source_contract import OWNER, OTHER, T0, fragment, section, segment, source
+from tests.source_contract import OTHER, OWNER, T0, fragment, section, segment, source
 from tests.source_graph_contract import handbook
 
 WS = "workspace-a"
@@ -53,7 +54,8 @@ class Rig:
         self.transcripts = transcripts
 
     def add_document(self, source_id: str = "doc1", owner: str = OWNER) -> None:
-        self.sources.add(WS, source(source_id, owner=owner, ws=WS, title="Private handbook"))
+        value = replace(source(source_id, owner=owner, ws=WS), title="Private handbook")
+        self.sources.add(WS, value)
         self.fragments.add_version(
             WS,
             source_id,
@@ -108,16 +110,19 @@ def test_delete_removes_fragments_graph_evidence_and_bumps_cache_epoch(rig: Rig)
     assert rig.fragments.latest(WS, "doc1") == ()
     assert rig.fragments.outline(WS, "doc1") == ()
     assert rig.graph.evidence_segment_ids(WS, OWNER, "doc1") == frozenset()
-    assert rig.graph.neighborhood(
-        WS,
-        OWNER,
-        graph_ids,
-        depth=1,
-        node_limit=10,
-        fanout=10,
-        include_proposed=True,
-        as_of=None,
-    ).nodes == ()
+    assert (
+        rig.graph.neighborhood(
+            WS,
+            OWNER,
+            graph_ids,
+            depth=1,
+            node_limit=10,
+            fanout=10,
+            include_proposed=True,
+            as_of=None,
+        ).nodes
+        == ()
+    )
     assert rig.answer_store.epoch(WS, OWNER) == before + 1
 
 
