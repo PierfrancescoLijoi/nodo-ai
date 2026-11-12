@@ -28,6 +28,7 @@ from nodo_api.domain.models import (
     TranscriptSegment,
 )
 from nodo_api.domain.retention import AudioDue
+from nodo_api.domain.sources import Fragment, Section, Source, SourceKind
 
 # Every method takes workspace_id (and, where data belongs to a person, the user or the set of
 # meeting ids that person may see) so that access control happens inside the store query,
@@ -84,6 +85,73 @@ class TranscriptRepository(Protocol):
     ) -> TranscriptSegment | None: ...
 
     def erase(self, workspace_id: str, meeting_id: str) -> None: ...
+
+
+class SourceRepository(Protocol):
+    """Everything put into the knowledge base (ADR-029). Meetings appear here with their meeting
+    id, written by the meeting repository; this port writes every other kind."""
+
+    def add(self, workspace_id: str, source: Source) -> Source:
+        """Store a new source. A meeting source raises ValueError: meetings are not added here."""
+        ...
+
+    def get_owned(
+        self, workspace_id: str, user_id: str, source_id: str, *, include_tombstoned: bool = False
+    ) -> Source:
+        """Return the source only if the user owns it, otherwise raise NotFoundError."""
+        ...
+
+    def get_for_processing(self, workspace_id: str, source_id: str) -> Source:
+        """System access for the ingestion worker, which acts for the owner and has no user."""
+        ...
+
+    def save(self, workspace_id: str, source: Source) -> Source:
+        """Update title, state, origin, language, hash and tombstone. Owner and version stay."""
+        ...
+
+    def list_owned(
+        self,
+        workspace_id: str,
+        user_id: str,
+        limit: int,
+        cursor: tuple[datetime, str] | None,
+        kinds: frozenset[SourceKind] | None = None,
+    ) -> tuple[Source, ...]:
+        """Newest first, never tombstoned. Pass the last (created_at, id) seen as `cursor`."""
+        ...
+
+
+class FragmentRepository(Protocol):
+    """Sections and fragments of a source, versioned like transcripts. For a meeting source
+    `latest` and `get_fragment` read the transcript (fragment id = segment id)."""
+
+    def add_version(
+        self,
+        workspace_id: str,
+        source_id: str,
+        sections: tuple[Section, ...],
+        fragments: tuple[Fragment, ...],
+    ) -> int:
+        """Store the next version in one transaction and return its number (1-based). The sections
+        replace the source's outline. Raises ValueError for a meeting or inconsistent input and
+        NotFoundError for an unknown source."""
+        ...
+
+    def latest(self, workspace_id: str, source_id: str) -> tuple[Fragment, ...]:
+        """Fragments of the newest version in ordinal order; empty if there are none."""
+        ...
+
+    def get_fragment(
+        self, workspace_id: str, source_id: str, fragment_id: str
+    ) -> Fragment | None: ...
+
+    def outline(self, workspace_id: str, source_id: str) -> tuple[Section, ...]:
+        """Sections in reading order (parents before children, siblings by ordinal)."""
+        ...
+
+    def erase(self, workspace_id: str, source_id: str) -> None:
+        """Delete every fragment and section of the source. A meeting raises ValueError."""
+        ...
 
 
 class BlobStore(Protocol):

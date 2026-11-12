@@ -69,6 +69,10 @@ class MemoryMeetingRepository:
             raise NotFoundError
         return meeting
 
+    def exists(self, workspace_id: str, meeting_id: str) -> bool:
+        """Whether the meeting is stored, tombstoned or not (the source store uses it)."""
+        return (workspace_id, meeting_id) in self._meetings
+
     def owned_ids(self, workspace_id: str, user_id: str) -> frozenset[str]:
         return frozenset(
             meeting.id

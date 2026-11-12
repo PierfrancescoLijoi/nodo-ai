@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -188,3 +189,45 @@ class Source:
             created_at=meeting.created_at,
             tombstoned_at=meeting.tombstoned_at,
         )
+
+
+def outline_order(sections: Sequence[Section]) -> tuple[Section, ...]:
+    """Sections in reading order: each parent, then its children by ordinal, depth first.
+
+    Sections whose parent is missing, or that sit in a cycle, are left out; `check_version` uses
+    that to reject them."""
+    children: dict[str | None, list[Section]] = {}
+    for section in sections:
+        children.setdefault(section.parent_id, []).append(section)
+
+    def ordered(parent: str | None) -> list[Section]:
+        return sorted(children.get(parent, ()), key=lambda s: (s.ordinal, s.id), reverse=True)
+
+    out: list[Section] = []
+    stack = ordered(None)
+    while stack:
+        section = stack.pop()
+        out.append(section)
+        stack.extend(ordered(section.id))
+    return tuple(out)
+
+
+def check_version(
+    source_id: str, sections: Sequence[Section], fragments: Sequence[Fragment]
+) -> None:
+    """Reject a new version that does not hang together, before any store writes it."""
+    if not fragments:
+        raise ValueError("A source version needs at least one fragment")
+    if any(s.source_id != source_id for s in sections) or any(
+        f.source_id != source_id for f in fragments
+    ):
+        raise ValueError("A source version must contain sections and fragments of one source")
+    if len({s.id for s in sections}) != len(sections):
+        raise ValueError("Section ids must be unique within a source")
+    if len({f.id for f in fragments}) != len(fragments):
+        raise ValueError("Fragment ids must be unique within a version")
+    if len(outline_order(sections)) != len(sections):
+        raise ValueError("Sections must form a tree: every parent must exist and none may loop")
+    known = {s.id for s in sections}
+    if any(f.section_id is not None and f.section_id not in known for f in fragments):
+        raise ValueError("A fragment points at a section that is not in this version")

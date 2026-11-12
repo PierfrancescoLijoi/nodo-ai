@@ -26,6 +26,7 @@ from nodo_api.adapters.local.repos import (
 from nodo_api.adapters.local.reranker import OnnxReranker
 from nodo_api.adapters.local.retention import SqliteRetentionStore
 from nodo_api.adapters.local.search import SqliteRetriever
+from nodo_api.adapters.local.sources import SqliteFragmentRepository, SqliteSourceRepository
 from nodo_api.adapters.local.speech import LocalSpeechToText
 from nodo_api.adapters.local.sync import LocalSyncService
 from nodo_api.api.v1.sync_schemas import SyncSource
@@ -243,4 +244,6 @@ def local_adapters(settings: Settings):
         maintenance=maintenance,
         entity_indexer=entity_indexer,
         answers=answers,
+        sources=SqliteSourceRepository(db),
+        fragments=SqliteFragmentRepository(db),
     )

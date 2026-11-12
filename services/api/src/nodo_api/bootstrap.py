@@ -39,6 +39,8 @@ class Adapters:
     maintenance: Any = None  # the cross-workspace meeting listing for index maintenance
     entity_indexer: Any = None  # entity vectors: finding graph entities by meaning (ADR-024)
     answers: Any = None  # the answer cache: questions already answered (ADR-026)
+    sources: Any = None  # sources of every kind (ADR-029); local and memory only, None on Azure
+    fragments: Any = None  # sections and fragments of sources; local and memory only
 
 
 @dataclass(slots=True)
@@ -77,11 +79,13 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemoryAuditLog,
         MemoryBlobStore,
         MemoryExportStore,
+        MemoryFragmentRepository,
         MemoryGraphStore,
         MemoryJobQueue,
         MemoryMaintenanceStore,
         MemoryMeetingRepository,
         MemoryRetentionStore,
+        MemorySourceRepository,
         MemorySpeech,
         MemoryTranscriptRepository,
         MockLlm,
@@ -94,6 +98,7 @@ def memory_adapters(settings: Settings) -> Adapters:
     transcripts = MemoryTranscriptRepository()
     retriever = MockRetriever()
     graph = MemoryGraphStore()
+    sources = MemorySourceRepository(meetings)
     if settings.seed_demo_data:
         seed_memory_adapters(meetings, transcripts, retriever, graph)
     return Adapters(
@@ -110,6 +115,8 @@ def memory_adapters(settings: Settings) -> Adapters:
         retention=MemoryRetentionStore(meetings),
         exports=MemoryExportStore(),
         maintenance=MemoryMaintenanceStore(meetings),
+        sources=sources,
+        fragments=MemoryFragmentRepository(sources, transcripts),
     )
 
 
@@ -269,6 +276,8 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
             f"{settings.openai_chat_deployment}|{settings.openai_embedding_deployment}",
             AZURE_ANSWER_SIMILARITY,
         ),
+        sources=None,  # sources beyond meetings stay local until the cloud path (ADR-029)
+        fragments=None,
     )
 
 
