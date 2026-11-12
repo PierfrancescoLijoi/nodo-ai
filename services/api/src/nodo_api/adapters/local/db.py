@@ -18,6 +18,7 @@ from pathlib import Path
 
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f+00:00"
 BUSY_TIMEOUT_MS = 30_000
+FOREIGN_KEYS_OFF = "-- nodo:foreign-keys-off"  # first line of a migration that rebuilds tables
 
 
 def to_text(moment: datetime | None) -> str | None:
@@ -99,11 +100,14 @@ class LocalDatabase:
         for version, name, script in migration_files():
             if version in done:
                 continue
-            conn.executescript(
+            body = (
                 f"BEGIN IMMEDIATE;\n{script}\n"
                 f"INSERT INTO schema_migrations VALUES ({version}, '{name}', '{now_text()}');\n"
-                "COMMIT;"
             )
+            if script.startswith(FOREIGN_KEYS_OFF):
+                _run_without_foreign_keys(conn, body)
+            else:
+                conn.executescript(body + "COMMIT;")
 
     def close(self) -> None:
         with self._guard:
@@ -111,6 +115,26 @@ class LocalDatabase:
                 with contextlib.suppress(sqlite3.ProgrammingError):
                     conn.close()
             self._open.clear()
+
+
+def _run_without_foreign_keys(conn: sqlite3.Connection, body: str) -> None:
+    """A migration that rebuilds a table other tables point at (SQLite's 12-step procedure):
+    dropping the old table with foreign keys on would cascade into its children. The pragma is a
+    no-op inside a transaction, so it is set before BEGIN; the migration commits only when
+    PRAGMA foreign_key_check finds nothing dangling."""
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(body)
+        broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if broken:
+            raise sqlite3.IntegrityError(f"foreign key check failed: {[tuple(r) for r in broken]}")
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def migration_files() -> list[tuple[int, str, str]]:

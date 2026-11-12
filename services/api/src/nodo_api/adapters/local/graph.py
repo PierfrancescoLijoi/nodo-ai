@@ -64,6 +64,7 @@ def _entity(row: sqlite3.Row) -> Entity:
         effective_at=from_text(row["effective_at"]),
         due_at=from_text(row["due_at"]),
         meeting_id=row["ref"] if kind is EntityType.MEETING else None,
+        source_id=row["ref"] if kind is EntityType.SOURCE else None,
     )
 
 
@@ -303,7 +304,7 @@ class SqliteGraphStore:
     def _delete_unsupported(conn, workspace_id: str, owner_id: str, ids: Sequence[str]):
         return conn.execute(
             f"DELETE FROM entities WHERE workspace_id = ? AND owner_id = ?"
-            f" AND id IN ({_marks(len(ids))}) AND CASE WHEN type = 'meeting' THEN"
+            f" AND id IN ({_marks(len(ids))}) AND CASE WHEN type IN ('meeting', 'source') THEN"
             " NOT EXISTS (SELECT 1 FROM relations r WHERE r.workspace_id = entities.workspace_id"
             " AND r.owner_id = entities.owner_id AND r.target_id = entities.id)"
             " ELSE NOT EXISTS (SELECT 1 FROM relations r WHERE r.workspace_id = entities.workspace_id"
@@ -352,7 +353,7 @@ class SqliteGraphStore:
                 "SELECT e.id, e.type, e.label, e.status, e.effective_at, e.due_at, e.ref"
                 " FROM entities e LEFT JOIN entity_vectors v ON v.workspace_id = e.workspace_id"
                 " AND v.owner_id = e.owner_id AND v.entity_id = e.id"
-                " WHERE e.workspace_id = ? AND e.owner_id = ? AND e.type <> 'meeting'"
+                " WHERE e.workspace_id = ? AND e.owner_id = ? AND e.type NOT IN ('meeting', 'source')"
                 " AND (v.entity_id IS NULL OR (? IS NOT NULL AND v.dims <> ?))"
                 " ORDER BY e.updated_at DESC, e.id LIMIT ?",
                 (workspace_id, owner_id, dimensions, dimensions, limit),
@@ -369,7 +370,7 @@ class SqliteGraphStore:
                 conn.execute(
                     "INSERT INTO entity_vectors (workspace_id, owner_id, entity_id, dims, vector)"
                     " SELECT e.workspace_id, e.owner_id, e.id, ?, ? FROM entities e"
-                    " WHERE e.workspace_id = ? AND e.owner_id = ? AND e.id = ? AND e.type <> 'meeting'"
+                    " WHERE e.workspace_id = ? AND e.owner_id = ? AND e.id = ? AND e.type NOT IN ('meeting', 'source')"
                     " ON CONFLICT (workspace_id, owner_id, entity_id)"
                     " DO UPDATE SET dims = excluded.dims, vector = excluded.vector",
                     (
@@ -394,7 +395,7 @@ class SqliteGraphStore:
                 "SELECT e.id, e.type, e.label, e.status, e.effective_at, e.due_at, e.ref, v.vector"
                 " FROM entity_vectors v JOIN entities e ON e.workspace_id = v.workspace_id"
                 " AND e.owner_id = v.owner_id AND e.id = v.entity_id"
-                " WHERE v.workspace_id = ? AND v.owner_id = ? AND v.dims = ? AND e.type <> 'meeting'",
+                " WHERE v.workspace_id = ? AND v.owner_id = ? AND v.dims = ? AND e.type NOT IN ('meeting', 'source')",
                 (workspace_id, owner_id, len(vector)),
             ).fetchall()
         if not rows:
@@ -483,7 +484,7 @@ class SqliteGraphStore:
         with self._db.transaction(write=False) as conn:
             rows = conn.execute(
                 f"SELECT {_ENTITY_COLUMNS}, ({score}) AS score FROM entities"
-                f" WHERE workspace_id = ? AND owner_id = ? AND type <> 'meeting'{type_filter}"
+                f" WHERE workspace_id = ? AND owner_id = ? AND type NOT IN ('meeting', 'source'){type_filter}"
                 f" AND ({match}) ORDER BY score DESC, updated_at DESC, id LIMIT ?",
                 (*patterns, workspace_id, owner_id, *(kinds or ()), *patterns, limit),
             ).fetchall()
@@ -493,7 +494,7 @@ class SqliteGraphStore:
         with self._db.transaction(write=False) as conn:
             rows = conn.execute(
                 f"SELECT {_ENTITY_COLUMNS} FROM entities WHERE workspace_id = ? AND owner_id = ?"
-                " AND type <> 'meeting' ORDER BY updated_at DESC, id LIMIT ?",
+                " AND type NOT IN ('meeting', 'source') ORDER BY updated_at DESC, id LIMIT ?",
                 (workspace_id, owner_id, limit),
             ).fetchall()
         return tuple(_entity(r) for r in rows)

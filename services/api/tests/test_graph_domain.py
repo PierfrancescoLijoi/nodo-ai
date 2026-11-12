@@ -12,8 +12,10 @@ from nodo_api.domain.graph import (
     Extraction,
     RelationKind,
     entity_id,
+    meeting_entity_id,
     normalize_label,
     relation_id,
+    source_entity_id,
     validate_extraction,
 )
 
@@ -188,3 +190,28 @@ def test_evidence_has_source_and_fragment_ids_and_legacy_aliases():
     assert (ev.meeting_id, ev.segment_id) == ("src-1", "frag-1")
     assert ev == Evidence(source_id="src-1", fragment_id="frag-1")
     assert hash(ev) == hash(Evidence("src-1", "frag-1"))
+
+
+def test_child_of_requires_things() -> None:
+    entities = [
+        ent("t1", T, "Ingestion", "s1"),
+        ent("t2", T, "Platform", "s1"),
+        ent("a", A, "Write the runbook", "s1"),
+        ent("p", P, "Marco", "s1"),
+    ]
+    kept = clean(
+        entities,
+        [
+            rel("t1", K.CHILD_OF, "t2", "s1"),
+            rel("a", K.CHILD_OF, "t2", "s1"),
+            rel("t1", K.CHILD_OF, "p", "s1"),
+        ],
+    )
+    assert [(r.source, r.target) for r in kept.relations] == [("t1", "t2")]
+
+
+def test_source_nodes_are_never_extracted_and_ids_follow_the_meeting_scheme() -> None:
+    kept = clean([ent("s", EntityType.SOURCE, "Handbook", "s1"), ent("t", T, "Ingestion", "s1")])
+    assert [e.key for e in kept.entities] == ["t"]
+    assert source_entity_id("w", "o", "doc1") == entity_id("w", "o", EntityType.SOURCE, "doc1")
+    assert source_entity_id("w", "o", "doc1") != meeting_entity_id("w", "o", "doc1")

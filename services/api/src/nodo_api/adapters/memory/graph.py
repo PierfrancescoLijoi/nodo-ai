@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from nodo_api.domain.graph import (
     AUTO_APPROVED,
     EXISTING_PREFIX,
+    ORIGIN_TYPES,
     Change,
     Entity,
     EntityType,
@@ -188,9 +189,10 @@ class MemoryGraphStore:
     def _sweep(self, part: _Partition) -> None:
         """Remove what has lost its support, until nothing more falls.
 
-        A relation needs evidence. An entity needs a mention in a meeting (a meeting node needs any
-        relation). An entity nobody mentions any more disappears together with the relations that
-        pointed at it, so deleting a meeting also deletes the labels it contributed.
+        A relation needs evidence. An entity needs a mention in a meeting or source (a meeting or
+        source node needs any relation). An entity nobody mentions any more disappears together
+        with the relations that pointed at it, so deleting a meeting also deletes the labels it
+        contributed.
         """
         changed = True
         while changed:
@@ -207,7 +209,7 @@ class MemoryGraphStore:
             touched = {r.relation.source_id for r in part.relations.values()}
             touched |= {r.relation.target_id for r in part.relations.values()}
             for eid, entity in list(part.entities.items()):
-                alive = eid in touched if entity.type is EntityType.MEETING else eid in mentioned
+                alive = eid in touched if entity.type in ORIGIN_TYPES else eid in mentioned
                 if not alive:
                     del part.entities[eid]
                     part.normalized.pop(eid, None)
@@ -262,7 +264,7 @@ class MemoryGraphStore:
         missing = [
             e
             for e in part.entities.values()
-            if e.type is not EntityType.MEETING
+            if e.type not in ORIGIN_TYPES
             and (
                 e.id not in part.vectors
                 or (dimensions is not None and len(part.vectors[e.id]) != dimensions)
@@ -296,7 +298,7 @@ class MemoryGraphStore:
         scored = []
         for key, stored in part.vectors.items():
             entity = part.entities.get(key)
-            if entity is None or entity.type is EntityType.MEETING or len(stored) != len(query):
+            if entity is None or entity.type in ORIGIN_TYPES or len(stored) != len(query):
                 continue
             other = math.sqrt(sum(x * x for x in stored)) or 1.0
             cosine = sum(a * b for a, b in zip(query, stored, strict=True)) / (norm * other)
@@ -357,7 +359,7 @@ class MemoryGraphStore:
         wanted = [t for t in (normalize_label(x) for x in terms) if len(t) >= 3]
         scored = []
         for eid, entity in part.entities.items():
-            if entity.type is EntityType.MEETING or (types and entity.type not in types):
+            if entity.type in ORIGIN_TYPES or (types and entity.type not in types):
                 continue
             score = sum(1 for t in wanted if t in part.normalized[eid])
             if score:
@@ -367,7 +369,7 @@ class MemoryGraphStore:
     def overview(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Entity, ...]:
         part = self._part(workspace_id, owner_id)
         ordered = sorted(
-            (e for e in part.entities.values() if e.type is not EntityType.MEETING),
+            (e for e in part.entities.values() if e.type not in ORIGIN_TYPES),
             key=lambda e: (-part.touched[e.id], e.id),
         )
         return tuple(ordered[:limit])

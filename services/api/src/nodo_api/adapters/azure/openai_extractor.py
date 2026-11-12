@@ -15,6 +15,7 @@ from typing import Any
 from nodo_api.adapters.azure.openai_llm import record_tokens
 from nodo_api.domain.graph import (
     EXISTING_PREFIX,
+    ORIGIN_TYPES,
     Entity,
     EntityType,
     ExtractedEntity,
@@ -31,9 +32,13 @@ LANGUAGE_NAMES = {
     Locale.IT: "Italian",
     Locale.DA: "Danish",
 }
-MODEL_ENTITY_TYPES = [t.value for t in EntityType if t is not EntityType.MEETING]
+# Origin nodes are made by the store and CHILD_OF is not extracted yet (ADR-030), so the schema
+# offered to the model stays the meeting vocabulary.
+MODEL_ENTITY_TYPES = [t.value for t in EntityType if t not in ORIGIN_TYPES]
 MODEL_RELATION_KINDS = [
-    k.value for k in RelationKind if k not in (RelationKind.MENTIONED_IN, RelationKind.DECIDED_IN)
+    k.value
+    for k in RelationKind
+    if k not in (RelationKind.MENTIONED_IN, RelationKind.DECIDED_IN, RelationKind.CHILD_OF)
 ]
 
 SYSTEM_PROMPT = (
