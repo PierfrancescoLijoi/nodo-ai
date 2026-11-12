@@ -45,14 +45,14 @@ parent/child structure, so connections are shallow.
 
 - An answer or wiki claim without a quote that exists in a stored fragment.
 - Anything leaving the machine in local mode, including model downloads that the user did not approve.
-- Copying GPL/AGPL code into an Apache-2.0 repository.
+- Copying GPL/AGPL code into an MIT-licensed repository.
 - A knowledge base that only an engineer can install.
 - A graph the user cannot read as a plain list.
 
 ## 3. Constraints
 
 - Platform: Windows 11, one laptop class machine (reference: RTX 4050 6 GB, 16 GB RAM). CPU-only must work, slowly.
-- Licence: NODO stays Apache-2.0. Reuse code only from MIT/Apache/BSD projects with a notice entry. GPL/AGPL/non-commercial projects are inspiration only. Model weights carry their own licences and are shown to the user before download.
+- Licence: NODO uses MIT. Reuse code only from MIT/Apache/BSD projects with a notice entry. GPL/AGPL/non-commercial projects are inspiration only. Model weights carry their own licences and are shown to the user before download.
 - Principles that do not change (README "Design principles"): evidence or silence; authorization before retrieval; humans decide; archive first, projections rebuildable; fail closed on durability; bound everything; one contract for two engines; accessible list before visual graph; honest about what was verified.
 - Existing contract: `/v1/meetings*`, `/v1/query`, `/v1/graph/*`, sync and export keep working for current clients.
 - The cloud engine (PostgreSQL, Azure AI Search) must keep passing the shared contract suites; it gains the new model after local does.

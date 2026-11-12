@@ -1,7 +1,7 @@
 # Licensing policy
 
-NODO AI is distributed under the [Apache License 2.0](../LICENSE). Code may be
-reused only from projects under an MIT, Apache-2.0 or BSD licence. Before code
+NODO AI is distributed under the [MIT License](../LICENSE). Code may be reused
+only from projects under an MIT, Apache-2.0 or BSD licence. Before code
 is incorporated, its exact revision and licence must be checked, its required
 copyright and licence notices must be preserved, and an attribution must be
 added to [NOTICE](../NOTICE). Listing a project below does not mean that its
