@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     # Experimental until the four-language golden set passes without precision/ACL regressions.
     local_reranker_enabled: bool = False
     local_rerank_candidates: int = Field(default=20, ge=2, le=50)
+    local_import_max_bytes: int = Field(default=200 * 1024 * 1024, ge=1)
+    local_import_max_pages: int = Field(default=2000, ge=1)
+    local_import_max_ratio: int = Field(default=100, ge=1)
+    # Total uncompressed size of an OOXML archive, judged from its directory before any parsing.
+    local_import_max_uncompressed_bytes: int = Field(default=512 * 1024 * 1024, ge=1)
+    local_parser_timeout_seconds: float = Field(default=300.0, gt=0)
+    local_parser_memory_mb: int = Field(default=2048, ge=64)
 
     azure_storage_account: str | None = None
     azure_servicebus_fqdn: str | None = None

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 from nodo_api.domain.answer_cache import AnswerKey, CachedAnswer
+from nodo_api.domain.documents import ParsedDocument
 from nodo_api.domain.exports import Export, ExportState
 from nodo_api.domain.graph import (
     Change,
@@ -33,6 +35,16 @@ from nodo_api.domain.sources import Fragment, Section, Source, SourceKind
 # Every method takes workspace_id (and, where data belongs to a person, the user or the set of
 # meeting ids that person may see) so that access control happens inside the store query,
 # before anything is retrieved, never after.
+
+
+class DocumentParser(Protocol):
+    def parse(
+        self,
+        path: Path,
+        *,
+        timeout_seconds: float | None = None,
+        declared_name: str | None = None,
+    ) -> ParsedDocument: ...
 
 
 class MeetingRepository(Protocol):
