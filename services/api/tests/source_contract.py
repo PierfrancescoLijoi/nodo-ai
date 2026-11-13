@@ -6,13 +6,22 @@ and its transcript through the existing meeting and transcript repositories."""
 
 from __future__ import annotations
 
+import sys
+import threading
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from nodo_api.domain.models import Locale, TranscriptSegment
-from nodo_api.domain.sources import Fragment, Locator, Section, Source, SourceKind
+from nodo_api.domain.sources import (
+    DuplicateContentError,
+    Fragment,
+    Locator,
+    Section,
+    Source,
+    SourceKind,
+)
 from nodo_api.errors import NotFoundError
 
 OWNER = "user-a"
@@ -173,6 +182,87 @@ class SourceContract:
         with pytest.raises(NotFoundError):
             sources.get_owned(ws, OWNER, "m2")
 
+    def test_find_by_hash_is_owner_scoped_and_ignores_tombstoned(self, sources, ws) -> None:
+        mine = sources.add(ws, source("d1", ws=ws, content_hash="h1"))
+        sources.add(ws, source("d2", ws=ws, content_hash="h2", owner=OTHER))
+        gone = sources.add(ws, source("d3", ws=ws, content_hash="h3"))
+        sources.save(ws, _tombstoned(gone))
+
+        assert sources.find_by_hash(ws, OWNER, "h1") == mine
+        assert sources.find_by_hash(ws, OWNER, "h2") is None  # another owner's file
+        assert sources.find_by_hash(ws, OTHER, "h2") is not None
+        assert sources.find_by_hash(ws, OWNER, "h3") is None  # deleted
+        assert sources.find_by_hash(ws, OWNER, "unknown") is None
+        assert sources.find_by_hash(f"{ws}-other", OWNER, "h1") is None
+
+    def test_find_by_hash_finds_every_non_meeting_kind(self, sources, ws) -> None:
+        for kind in (K.DOCUMENT, K.DECK, K.WEB, K.NOTE, K.AUDIO):
+            added = sources.add(ws, source(f"s-{kind}", kind, ws=ws, content_hash=f"h-{kind}"))
+            assert sources.find_by_hash(ws, OWNER, f"h-{kind}") == added
+
+    def test_concurrent_adds_of_one_hash_leave_one_winner(self, sources, ws) -> None:
+        for round_ in range(20):
+            target = f"add-{round_}"
+            outcomes = _race(
+                [
+                    lambda n=n, target=target: sources.add(
+                        ws, source(f"{target}-{n}", ws=ws, content_hash=target)
+                    )
+                    for n in range(6)
+                ]
+            )
+            wins = [o for o in outcomes if not isinstance(o, BaseException)]
+            assert len(wins) == 1, outcomes
+            assert all(isinstance(o, DuplicateContentError) for o in outcomes if o not in wins)
+            assert sources.find_by_hash(ws, OWNER, target) == wins[0]
+        assert len(sources.list_owned(ws, OWNER, 100, None)) == 20
+
+    def test_concurrent_saves_of_one_hash_leave_one_winner(self, sources, ws) -> None:
+        for round_ in range(20):
+            rows = [
+                sources.add(ws, source(f"s{round_}-{n}", ws=ws, content_hash=f"own-{round_}-{n}"))
+                for n in range(6)
+            ]
+            target = f"save-{round_}"
+            outcomes = _race(
+                [
+                    lambda row=row, target=target: sources.save(
+                        ws, replace(row, content_hash=target)
+                    )
+                    for row in rows
+                ]
+            )
+            wins = [o for o in outcomes if not isinstance(o, BaseException)]
+            assert len(wins) == 1, outcomes
+            assert all(isinstance(o, DuplicateContentError) for o in outcomes if o not in wins)
+            assert sources.find_by_hash(ws, OWNER, target).id == wins[0].id
+
+    def test_find_by_hash_never_returns_a_meeting(self, sources, seed_meeting, ws) -> None:
+        seed_meeting(ws, OWNER, "m1", ())
+        assert sources.get_owned(ws, OWNER, "m1").content_hash is None
+        assert sources.find_by_hash(ws, OWNER, "hash") is None  # the meeting row holds "hash"
+
+    def test_one_live_source_per_owner_and_hash(self, sources, ws) -> None:
+        first = sources.add(ws, source("d1", ws=ws, content_hash="h1"))
+        with pytest.raises(DuplicateContentError):
+            sources.add(ws, source("d2", ws=ws, content_hash="h1"))
+        second = sources.add(ws, source("d2", ws=ws, content_hash="h2"))
+        with pytest.raises(DuplicateContentError):
+            sources.save(ws, replace(second, content_hash="h1"))
+        # a duplicate id is a different mistake and is told apart
+        with pytest.raises(ValueError) as same_id:
+            sources.add(ws, source("d1", ws=ws, content_hash="h9"))
+        assert not isinstance(same_id.value, DuplicateContentError)
+        assert sources.get_owned(ws, OWNER, "d2").content_hash == "h2"
+        # no hash yet is not a clash, another owner or workspace may hold the same file
+        sources.add(ws, source("n1", ws=ws))
+        sources.add(ws, source("n2", ws=ws))
+        sources.add(ws, source("d3", ws=ws, content_hash="h1", owner=OTHER))
+        sources.add(f"{ws}-other", source("d1", ws=f"{ws}-other", content_hash="h1"))
+        # deleting the first frees the hash for a new source
+        sources.save(ws, _tombstoned(first))
+        assert sources.add(ws, source("d4", ws=ws, content_hash="h1")).id == "d4"
+
 
 class FragmentContract:
     def test_add_version_returns_incrementing_versions(self, sources, fragments, ws) -> None:
@@ -328,6 +418,108 @@ class FragmentContract:
         assert fragments.latest(ws, "d1")[0].text == "some text"
         fragments.erase(other, "d1")
         assert len(fragments.latest(ws, "d1")) == 1
+
+    def test_versions_list_newest_first(self, sources, fragments, ws) -> None:
+        sources.add(ws, source("d1", ws=ws))
+        for n in (1, 2, 3):
+            fragments.add_version(ws, "d1", (), (fragment("f1", "d1", 0, f"text {n}"),))
+        fragments.record_version(ws, "d1", 1, "h1", "pdf", "doc-1|m", "a.pdf", 100)
+        fragments.record_version(ws, "d1", 3, "h3", "pdf", None, None, 300)
+        fragments.record_version(ws, "d1", 2, "h2", "pdf", "doc-1|m", "b.pdf", 200)
+
+        got = fragments.versions(ws, OWNER, "d1")
+        assert [v.version for v in got] == [3, 2, 1]
+        assert [v.content_hash for v in got] == ["h3", "h2", "h1"]
+        assert (got[2].parser, got[2].extraction_version) == ("pdf", "doc-1|m")
+        assert (got[2].original_name, got[2].size_bytes, got[2].source_id) == ("a.pdf", 100, "d1")
+        assert (got[0].extraction_version, got[0].original_name) == (None, None)
+        assert got[0].created_at.tzinfo is not None
+        # recording the same version again replaces the row (a retried import)
+        fragments.record_version(ws, "d1", 2, "h2b", "docx", "doc-1|m", "c.docx", 250)
+        again = {v.version: v for v in fragments.versions(ws, OWNER, "d1")}
+        assert len(again) == 3
+        assert (again[2].content_hash, again[2].parser, again[2].size_bytes) == ("h2b", "docx", 250)
+
+    def test_versions_are_owner_scoped(self, sources, fragments, seed_meeting, ws) -> None:
+        sources.add(ws, source("d1", ws=ws))
+        fragments.record_version(ws, "d1", 1, "h1", "pdf", None, "a.pdf", 10)
+        assert len(fragments.versions(ws, OWNER, "d1")) == 1
+        with pytest.raises(NotFoundError):
+            fragments.versions(ws, OTHER, "d1")
+        with pytest.raises(NotFoundError):
+            fragments.versions(ws, OWNER, "unknown")
+        with pytest.raises(NotFoundError):
+            fragments.versions(f"{ws}-other", OWNER, "d1")
+        seed_meeting(ws, OWNER, "m1", ())
+        assert fragments.versions(ws, OWNER, "m1") == ()
+
+    def test_record_version_refused_for_a_deleted_source(self, sources, fragments, ws) -> None:
+        added = sources.add(ws, source("d1", ws=ws))
+        fragments.add_version(ws, "d1", (), (fragment("f1", "d1", 0),))
+        fragments.record_version(ws, "d1", 1, "h1", "pdf", None, "Secret.pdf", 10)
+        sources.save(ws, replace(added, tombstoned_at=T0))
+        fragments.erase(ws, "d1")  # what a deletion does
+        with pytest.raises(NotFoundError):  # a worker that is late must not bring the name back
+            fragments.record_version(ws, "d1", 2, "h2", "pdf", None, "Secret.pdf", 10)
+        # look at the store itself: nothing was written (the source is made visible again)
+        sources.save(ws, replace(added, tombstoned_at=None))
+        assert fragments.versions(ws, OWNER, "d1") == ()
+
+    def test_record_version_needs_a_known_source_that_is_not_a_meeting(
+        self, sources, fragments, seed_meeting, ws
+    ) -> None:
+        with pytest.raises(NotFoundError):
+            fragments.record_version(ws, "unknown", 1, "h", "pdf", None, None, 1)
+        seed_meeting(ws, OWNER, "m1", ())
+        with pytest.raises(ValueError):
+            fragments.record_version(ws, "m1", 1, "h", "pdf", None, None, 1)
+        sources.add(ws, source("d1", ws=ws))
+        with pytest.raises(ValueError):
+            fragments.record_version(ws, "d1", 0, "h", "pdf", None, None, 1)
+        with pytest.raises(ValueError):
+            fragments.record_version(ws, "d1", 1, "h", "pdf", None, None, -1)
+        assert fragments.versions(ws, OWNER, "d1") == ()
+
+    def test_version_records_are_workspace_isolated_and_erase_drops_them(
+        self, sources, fragments, ws
+    ) -> None:
+        other = f"{ws}-other"
+        sources.add(ws, source("d1", ws=ws))
+        sources.add(other, source("d1", ws=other))
+        fragments.add_version(ws, "d1", (), (fragment("f1", "d1", 0),))
+        fragments.record_version(ws, "d1", 1, "h1", "pdf", None, "a.pdf", 10)
+        fragments.record_version(other, "d1", 1, "hx", "md", None, "x.md", 5)
+        assert [v.content_hash for v in fragments.versions(ws, OWNER, "d1")] == ["h1"]
+        assert [v.content_hash for v in fragments.versions(other, OWNER, "d1")] == ["hx"]
+        # erase removes everything derived from the source, the original name included
+        fragments.erase(ws, "d1")
+        assert fragments.versions(ws, OWNER, "d1") == ()
+        assert [v.content_hash for v in fragments.versions(other, OWNER, "d1")] == ["hx"]
+
+
+def _race(calls) -> list[object]:
+    """Run the calls at the same moment on their own threads; return each result or exception."""
+    barrier = threading.Barrier(len(calls))
+    results: list[object] = [None] * len(calls)
+
+    def run(index: int) -> None:
+        barrier.wait()
+        try:
+            results[index] = calls[index]()
+        except BaseException as error:
+            results[index] = error
+
+    previous = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)  # make a thread switch likely between a check and its write
+    try:
+        threads = [threading.Thread(target=run, args=(i,)) for i in range(len(calls))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(previous)
+    return results
 
 
 def _tombstoned(value: Source) -> Source:

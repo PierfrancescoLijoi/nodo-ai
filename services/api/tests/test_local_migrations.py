@@ -477,3 +477,149 @@ def test_source_kind_is_restricted_and_listing_uses_its_index(tmp_path):
         assert any("sources_list_idx" in r["detail"] for r in plan)
     finally:
         db.close()
+
+
+# --- 0010: import jobs, source versions, one live source per owner and file --------------------
+
+
+def _hashed_document(conn, source_id, content_hash, owner="u", kind="document", gone=None):
+    conn.execute(
+        "INSERT INTO sources (workspace_id, owner_id, id, kind, title, state, content_hash,"
+        " created_at, tombstoned_at) VALUES ('w', ?, ?, ?, 'Handbook', 'ready', ?,"
+        " '2026-10-01T00:00:00.000000+00:00', ?)",
+        (owner, source_id, kind, content_hash, gone),
+    )
+
+
+def test_0010_creates_import_tables_and_keeps_existing_data(tmp_path):
+    path = tmp_path / "nodo.db"
+    old = migrate_to(path, 9)
+    _meeting_row(old, "m1", title="Kickoff")
+    _insert_document(old, "d1")
+    _insert_fragment(old, "f1", "Some text", "d1")
+    meetings_before = [tuple(r) for r in old.execute("SELECT * FROM meetings")]
+    sources_before = [tuple(r) for r in old.execute("SELECT * FROM sources ORDER BY id")]
+    old.close()
+
+    db = LocalDatabase(path)
+    try:
+        with db.transaction(write=False) as conn:
+            tables = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+            jobs = [r["name"] for r in conn.execute("PRAGMA table_info(import_jobs)")]
+            versions = [r["name"] for r in conn.execute("PRAGMA table_info(source_versions)")]
+            applied = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
+            meetings_after = [tuple(r) for r in conn.execute("SELECT * FROM meetings")]
+            sources_after = [tuple(r) for r in conn.execute("SELECT * FROM sources ORDER BY id")]
+            fragments = conn.execute("SELECT count(*) FROM fragments").fetchone()[0]
+            check = conn.execute("PRAGMA foreign_key_check").fetchall()
+    finally:
+        db.close()
+    assert {"import_jobs", "source_versions"} <= tables
+    assert jobs == [
+        "workspace_id",
+        "owner_id",
+        "source_id",
+        "state",
+        "step",
+        "done",
+        "total",
+        "attempt",
+        "error_code",
+        "cancel_requested",
+        "created_at",
+        "updated_at",
+    ]
+    assert versions == [
+        "workspace_id",
+        "source_id",
+        "version",
+        "content_hash",
+        "parser",
+        "extraction_version",
+        "original_name",
+        "size_bytes",
+        "created_at",
+    ]
+    assert applied[-1] == 10 and applied == sorted(applied)
+    assert (meetings_after, sources_after, fragments) == (meetings_before, sources_before, 1)
+    assert check == []
+
+
+def test_0010_applies_on_a_fresh_database_and_is_not_rerun(tmp_path):
+    path = tmp_path / "nodo.db"
+    LocalDatabase(path).close()
+    LocalDatabase(path).close()  # opening again must not apply it a second time
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute("SELECT name FROM schema_migrations WHERE version = 10").fetchall()
+    finally:
+        conn.close()
+    assert rows == [("0010_imports.sql",)]
+
+
+def test_duplicate_content_hash_for_one_owner_is_refused_by_the_index(tmp_path):
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        with db.transaction() as conn:
+            _hashed_document(conn, "d1", "h1")
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("SAVEPOINT s")
+                try:
+                    _hashed_document(conn, "d2", "h1", kind="deck")
+                finally:
+                    conn.execute("ROLLBACK TO s")
+                    conn.execute("RELEASE s")
+            _hashed_document(conn, "d3", "h1", owner="other")  # another owner may hold the file
+            _hashed_document(conn, "d4", None)  # no hash yet is not a clash
+            _hashed_document(conn, "d5", None)
+            _hashed_document(conn, "d6", "h1", gone="2026-10-02T00:00:00.000000+00:00")
+            conn.execute("UPDATE sources SET tombstoned_at = '2026-10-03' WHERE id = 'd1'")
+            _hashed_document(conn, "d7", "h1")  # deleting d1 freed the hash
+            # a meeting is outside the rule
+            _hashed_document(conn, "m1", "h1", kind="meeting")
+            _hashed_document(conn, "m2", "h1", kind="meeting")
+    finally:
+        db.close()
+
+
+def test_import_job_and_version_rows_follow_their_source(tmp_path):
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        with db.transaction() as conn:
+            _insert_document(conn, "d1")
+            conn.execute(
+                "INSERT INTO import_jobs (workspace_id, owner_id, source_id, state, created_at,"
+                " updated_at) VALUES ('w', 'u', 'd1', 'queued', '2026-10-01', '2026-10-01')"
+            )
+            conn.execute(
+                "INSERT INTO source_versions (workspace_id, source_id, version, content_hash,"
+                " parser, size_bytes, created_at) VALUES ('w', 'd1', 1, 'h', 'pdf', 10,"
+                " '2026-10-01')"
+            )
+            with pytest.raises(sqlite3.IntegrityError):  # a job needs a source
+                conn.execute("SAVEPOINT s")
+                try:
+                    conn.execute(
+                        "INSERT INTO import_jobs (workspace_id, owner_id, source_id, state,"
+                        " created_at, updated_at) VALUES ('w', 'u', 'nope', 'queued', 'a', 'a')"
+                    )
+                finally:
+                    conn.execute("ROLLBACK TO s")
+                    conn.execute("RELEASE s")
+            with pytest.raises(sqlite3.IntegrityError):  # and a known state
+                conn.execute("SAVEPOINT s")
+                try:
+                    conn.execute("UPDATE import_jobs SET state = 'sleeping'")
+                finally:
+                    conn.execute("ROLLBACK TO s")
+                    conn.execute("RELEASE s")
+            conn.execute("DELETE FROM sources WHERE id = 'd1'")
+            left = [
+                conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
+                for t in ("import_jobs", "source_versions")
+            ]
+        assert left == [0, 0]
+    finally:
+        db.close()

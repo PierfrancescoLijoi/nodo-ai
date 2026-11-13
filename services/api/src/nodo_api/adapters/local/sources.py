@@ -7,17 +7,19 @@ and are read through the transcript repository."""
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 
 from nodo_api.adapters.local.db import LocalDatabase, from_text, to_text
 from nodo_api.adapters.local.repos import SqliteTranscriptRepository
 from nodo_api.domain.models import Locale
 from nodo_api.domain.sources import (
+    DuplicateContentError,
     Fragment,
     Locator,
     Section,
     Source,
     SourceKind,
+    SourceVersion,
     check_version,
     outline_order,
 )
@@ -74,6 +76,10 @@ class SqliteSourceRepository:
                     ),
                 )
         except sqlite3.IntegrityError as error:
+            if "content_hash" in str(error):
+                raise DuplicateContentError(
+                    "This owner already has a source with this hash"
+                ) from error
             raise ValueError("A source with this id already exists") from error
         return source
 
@@ -103,30 +109,42 @@ class SqliteSourceRepository:
     def save(self, workspace_id: str, source: Source) -> Source:
         if source.kind is SourceKind.MEETING:
             raise ValueError("Meetings are saved through the meeting repository")
-        with self._db.transaction() as conn:
-            cursor = conn.execute(
-                "UPDATE sources SET title = ?, state = ?, origin = ?, language = ?,"
-                " content_hash = ?, tombstoned_at = ? WHERE workspace_id = ? AND id = ?"
-                " AND kind = ?",
-                (
-                    source.title,
-                    source.state,
-                    source.origin,
-                    source.language.value if source.language else None,
-                    source.content_hash,
-                    to_text(source.tombstoned_at),
-                    workspace_id,
-                    source.id,
-                    source.kind.value,
-                ),
-            )
-            if cursor.rowcount == 0:
-                raise NotFoundError
-            row = conn.execute(
-                f"SELECT {_SOURCE_COLUMNS} FROM sources WHERE workspace_id = ? AND id = ?",
-                (workspace_id, source.id),
-            ).fetchone()
+        try:
+            with self._db.transaction() as conn:
+                cursor = conn.execute(
+                    "UPDATE sources SET title = ?, state = ?, origin = ?, language = ?,"
+                    " content_hash = ?, tombstoned_at = ? WHERE workspace_id = ? AND id = ?"
+                    " AND kind = ?",
+                    (
+                        source.title,
+                        source.state,
+                        source.origin,
+                        source.language.value if source.language else None,
+                        source.content_hash,
+                        to_text(source.tombstoned_at),
+                        workspace_id,
+                        source.id,
+                        source.kind.value,
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    raise NotFoundError
+                row = conn.execute(
+                    f"SELECT {_SOURCE_COLUMNS} FROM sources WHERE workspace_id = ? AND id = ?",
+                    (workspace_id, source.id),
+                ).fetchone()
+        except sqlite3.IntegrityError as error:
+            raise DuplicateContentError("This owner already has a source with this hash") from error
         return _source(row)
+
+    def find_by_hash(self, workspace_id: str, user_id: str, content_hash: str) -> Source | None:
+        with self._db.transaction(write=False) as conn:
+            row = conn.execute(
+                f"SELECT {_SOURCE_COLUMNS} FROM sources WHERE workspace_id = ? AND owner_id = ?"
+                " AND content_hash = ? AND tombstoned_at IS NULL AND kind != 'meeting'",
+                (workspace_id, user_id, content_hash),
+            ).fetchone()
+        return _source(row) if row else None
 
     def list_owned(
         self,
@@ -277,11 +295,80 @@ class SqliteFragmentRepository:
             ).fetchall()
         return outline_order([_section(row) for row in rows])
 
+    def record_version(
+        self,
+        workspace_id: str,
+        source_id: str,
+        version: int,
+        content_hash: str,
+        parser: str,
+        extraction_version: str | None,
+        original_name: str | None,
+        size_bytes: int,
+    ) -> None:
+        if version < 1 or size_bytes < 0:
+            raise ValueError("A version starts at 1 and a file has no negative size")
+        with self._db.transaction() as conn:
+            row = conn.execute(
+                "SELECT kind, tombstoned_at FROM sources WHERE workspace_id = ? AND id = ?",
+                (workspace_id, source_id),
+            ).fetchone()
+            if row is None or row["tombstoned_at"] is not None:
+                raise NotFoundError  # deletion wins: a deleted source takes no new records
+            if row["kind"] == SourceKind.MEETING:
+                raise ValueError("A meeting has no file versions")
+            conn.execute(
+                "INSERT OR REPLACE INTO source_versions (workspace_id, source_id, version,"
+                " content_hash, parser, extraction_version, original_name, size_bytes, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    workspace_id,
+                    source_id,
+                    version,
+                    content_hash,
+                    parser,
+                    extraction_version,
+                    original_name,
+                    size_bytes,
+                    to_text(datetime.now(UTC)),
+                ),
+            )
+
+    def versions(
+        self, workspace_id: str, user_id: str, source_id: str
+    ) -> tuple[SourceVersion, ...]:
+        with self._db.transaction(write=False) as conn:
+            owned = conn.execute(
+                "SELECT 1 FROM sources WHERE workspace_id = ? AND id = ? AND owner_id = ?"
+                " AND tombstoned_at IS NULL",
+                (workspace_id, source_id, user_id),
+            ).fetchone()
+            if owned is None:
+                raise NotFoundError
+            rows = conn.execute(
+                "SELECT * FROM source_versions WHERE workspace_id = ? AND source_id = ?"
+                " ORDER BY version DESC",
+                (workspace_id, source_id),
+            ).fetchall()
+        return tuple(
+            SourceVersion(
+                source_id=row["source_id"],
+                version=row["version"],
+                content_hash=row["content_hash"],
+                parser=row["parser"],
+                extraction_version=row["extraction_version"],
+                original_name=row["original_name"],
+                size_bytes=row["size_bytes"],
+                created_at=from_text(row["created_at"]),
+            )
+            for row in rows
+        )
+
     def erase(self, workspace_id: str, source_id: str) -> None:
         with self._db.transaction() as conn:
             if self._kind(conn, workspace_id, source_id) is SourceKind.MEETING:
                 raise ValueError("Meeting transcripts are erased through the meeting service")
-            for table in ("fragments", "sections"):
+            for table in ("fragments", "sections", "source_versions"):
                 conn.execute(
                     f"DELETE FROM {table} WHERE workspace_id = ? AND source_id = ?",
                     (workspace_id, source_id),

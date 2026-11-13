@@ -41,6 +41,7 @@ class Adapters:
     answers: Any = None  # the answer cache: questions already answered (ADR-026)
     sources: Any = None  # sources of every kind (ADR-029); local and memory only, None on Azure
     fragments: Any = None  # sections and fragments of sources; local and memory only
+    imports: Any = None  # import jobs of documents (Task 5); local and memory only, None on Azure
 
 
 @dataclass(slots=True)
@@ -81,6 +82,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemoryExportStore,
         MemoryFragmentRepository,
         MemoryGraphStore,
+        MemoryImportJobRepository,
         MemoryJobQueue,
         MemoryMaintenanceStore,
         MemoryMeetingRepository,
@@ -117,6 +119,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         maintenance=MemoryMaintenanceStore(meetings),
         sources=sources,
         fragments=MemoryFragmentRepository(sources, transcripts),
+        imports=MemoryImportJobRepository(sources),
     )
 
 
@@ -278,6 +281,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
         ),
         sources=None,  # sources beyond meetings stay local until the cloud path (ADR-029)
         fragments=None,
+        imports=None,
     )
 
 

@@ -50,3 +50,11 @@ class TestSqliteSources(SourceContract, FragmentContract):
                 transcripts.add_version(ws, meeting_id, segments)
 
         return put
+
+    def test_find_by_hash_skips_a_meeting_even_if_its_row_held_a_hash(
+        self, db, sources, seed_meeting, ws
+    ) -> None:
+        seed_meeting(ws, "user-a", "m1", ())
+        with db.transaction() as conn:
+            conn.execute("UPDATE sources SET content_hash = 'x' WHERE id = 'm1'")
+        assert sources.find_by_hash(ws, "user-a", "x") is None

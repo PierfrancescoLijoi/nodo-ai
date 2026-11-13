@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -30,7 +30,15 @@ from nodo_api.domain.models import (
     TranscriptSegment,
 )
 from nodo_api.domain.retention import AudioDue
-from nodo_api.domain.sources import Fragment, Section, Source, SourceKind
+from nodo_api.domain.sources import (
+    Clear,
+    Fragment,
+    ImportJob,
+    Section,
+    Source,
+    SourceKind,
+    SourceVersion,
+)
 
 # Every method takes workspace_id (and, where data belongs to a person, the user or the set of
 # meeting ids that person may see) so that access control happens inside the store query,
@@ -118,7 +126,12 @@ class SourceRepository(Protocol):
         ...
 
     def save(self, workspace_id: str, source: Source) -> Source:
-        """Update title, state, origin, language, hash and tombstone. Owner and version stay."""
+        """Update title, state, origin, language, hash and tombstone. Owner and version stay.
+        Raises DuplicateContentError if another live source of the same owner has the hash."""
+        ...
+
+    def find_by_hash(self, workspace_id: str, user_id: str, content_hash: str) -> Source | None:
+        """The owner's live source with this content hash, or None. Meetings never match."""
         ...
 
     def list_owned(
@@ -162,7 +175,78 @@ class FragmentRepository(Protocol):
         ...
 
     def erase(self, workspace_id: str, source_id: str) -> None:
-        """Delete every fragment and section of the source. A meeting raises ValueError."""
+        """Delete every fragment, section and version record of the source. A meeting raises
+        ValueError."""
+        ...
+
+    def record_version(
+        self,
+        workspace_id: str,
+        source_id: str,
+        version: int,
+        content_hash: str,
+        parser: str,
+        extraction_version: str | None,
+        original_name: str | None,
+        size_bytes: int,
+    ) -> None:
+        """Note what a version was made from. Recording the same version again replaces the row.
+        A version with no fragments (no text layer) can be recorded. Raises NotFoundError for an
+        unknown or deleted source and ValueError for a meeting."""
+        ...
+
+    def versions(
+        self, workspace_id: str, user_id: str, source_id: str
+    ) -> tuple[SourceVersion, ...]:
+        """Recorded versions, newest first. NotFoundError unless the user owns a live source."""
+        ...
+
+
+class ImportJobRepository(Protocol):
+    """Progress of the import of one source, read by the person and written by the worker."""
+
+    def create(self, workspace_id: str, owner_id: str, source_id: str) -> ImportJob:
+        """Start the job for the owner's live, non-meeting source, in state queued. Calling it
+        again returns the job as it stands. NotFoundError for any other source."""
+        ...
+
+    def get_owned(self, workspace_id: str, user_id: str, source_id: str) -> ImportJob:
+        """NotFoundError unless the user owns the job."""
+        ...
+
+    def get_for_processing(self, workspace_id: str, source_id: str) -> ImportJob:
+        """System access for the worker."""
+        ...
+
+    def update(
+        self,
+        workspace_id: str,
+        source_id: str,
+        *,
+        state: str | None = None,
+        step: str | Clear | None = None,
+        done: int | None = None,
+        total: int | None = None,
+        attempt: int | None = None,
+        error_code: str | Clear | None = None,
+        cancel_requested: bool | None = None,
+        expected_state: str | Collection[str] | None = None,
+    ) -> ImportJob:
+        """Change the fields given. None leaves a field alone; CLEAR empties step or error_code
+        (an empty string is refused). ValueError for an unknown state, a negative counter or an
+        empty string. With expected_state (a state or several) the write happens only if the job
+        is in one of them, tested and written together: otherwise nothing is written and
+        ConflictError is raised. NotFoundError if there is no job."""
+        ...
+
+    def request_cancel(self, workspace_id: str, user_id: str, source_id: str) -> ImportJob:
+        """Ask the worker to stop. The worker sees the flag through `is_cancel_requested`."""
+        ...
+
+    def is_cancel_requested(self, workspace_id: str, source_id: str) -> bool: ...
+
+    def delete(self, workspace_id: str, source_id: str) -> None:
+        """Remove the job; no error if there is none."""
         ...
 
 

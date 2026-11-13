@@ -5,15 +5,18 @@ merges them in, the way the SQLite triggers copy meetings into the sources table
 
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 
 from nodo_api.adapters.memory.adapters import MemoryMeetingRepository, MemoryTranscriptRepository
 from nodo_api.domain.sources import (
+    DuplicateContentError,
     Fragment,
     Section,
     Source,
     SourceKind,
+    SourceVersion,
     check_version,
     outline_order,
 )
@@ -24,13 +27,17 @@ class MemorySourceRepository:
     def __init__(self, meetings: MemoryMeetingRepository) -> None:
         self._meetings = meetings
         self._sources: dict[tuple[str, str], Source] = {}
+        # The check for a clash and the write must not be separated by another thread.
+        self._lock = threading.RLock()
 
     def add(self, workspace_id: str, source: Source) -> Source:
         if source.kind is SourceKind.MEETING:
             raise ValueError("Meetings are added through the meeting repository")
-        if self.kind_of(workspace_id, source.id) is not None:
-            raise ValueError("A source with this id already exists")
-        self._sources[(workspace_id, source.id)] = source
+        with self._lock:
+            if self.kind_of(workspace_id, source.id) is not None:
+                raise ValueError("A source with this id already exists")
+            self._check_hash_free(workspace_id, source)
+            self._sources[(workspace_id, source.id)] = source
         return source
 
     def get_owned(
@@ -57,13 +64,36 @@ class MemorySourceRepository:
     def save(self, workspace_id: str, source: Source) -> Source:
         if source.kind is SourceKind.MEETING:
             raise ValueError("Meetings are saved through the meeting repository")
-        stored = self._sources.get((workspace_id, source.id))
-        if stored is None or stored.kind is not source.kind:
-            raise NotFoundError
-        # The owner never moves and the version belongs to the fragment repository.
-        saved = replace(source, owner_id=stored.owner_id, version=stored.version)
-        self._sources[(workspace_id, source.id)] = saved
+        with self._lock:
+            stored = self._sources.get((workspace_id, source.id))
+            if stored is None or stored.kind is not source.kind:
+                raise NotFoundError
+            # The owner never moves and the version belongs to the fragment repository.
+            saved = replace(source, owner_id=stored.owner_id, version=stored.version)
+            self._check_hash_free(workspace_id, saved)
+            self._sources[(workspace_id, source.id)] = saved
         return saved
+
+    def find_by_hash(self, workspace_id: str, user_id: str, content_hash: str) -> Source | None:
+        return next(
+            (
+                s
+                for (stored_workspace, _), s in self._sources.items()
+                if stored_workspace == workspace_id
+                and s.owner_id == user_id
+                and s.content_hash == content_hash
+                and s.tombstoned_at is None
+            ),
+            None,
+        )
+
+    def _check_hash_free(self, workspace_id: str, source: Source) -> None:
+        """The rule schema 0010 enforces: one live source per owner and file hash."""
+        if source.content_hash is None or source.tombstoned_at is not None:
+            return
+        clash = self.find_by_hash(workspace_id, source.owner_id, source.content_hash)
+        if clash is not None and clash.id != source.id:
+            raise DuplicateContentError("This owner already has a source with this hash")
 
     def list_owned(
         self,
@@ -101,8 +131,9 @@ class MemorySourceRepository:
         return SourceKind.MEETING if self._meetings.exists(workspace_id, source_id) else None
 
     def set_version(self, workspace_id: str, source_id: str, version: int) -> None:
-        stored = self._sources[(workspace_id, source_id)]
-        self._sources[(workspace_id, source_id)] = replace(stored, version=version)
+        with self._lock:
+            stored = self._sources[(workspace_id, source_id)]
+            self._sources[(workspace_id, source_id)] = replace(stored, version=version)
 
 
 class MemoryFragmentRepository:
@@ -113,6 +144,7 @@ class MemoryFragmentRepository:
         self._transcripts = transcripts
         self._versions: dict[tuple[str, str], dict[int, tuple[Fragment, ...]]] = {}
         self._sections: dict[tuple[str, str], tuple[Section, ...]] = {}
+        self._records: dict[tuple[str, str], dict[int, SourceVersion]] = {}
 
     def add_version(
         self,
@@ -152,9 +184,47 @@ class MemoryFragmentRepository:
     def outline(self, workspace_id: str, source_id: str) -> tuple[Section, ...]:
         return outline_order(self._sections.get((workspace_id, source_id), ()))
 
+    def record_version(
+        self,
+        workspace_id: str,
+        source_id: str,
+        version: int,
+        content_hash: str,
+        parser: str,
+        extraction_version: str | None,
+        original_name: str | None,
+        size_bytes: int,
+    ) -> None:
+        if version < 1 or size_bytes < 0:
+            raise ValueError("A version starts at 1 and a file has no negative size")
+        kind = self._sources.kind_of(workspace_id, source_id)
+        if kind is None:
+            raise NotFoundError
+        if kind is SourceKind.MEETING:
+            raise ValueError("A meeting has no file versions")
+        self._sources.get_for_processing(workspace_id, source_id)  # deletion wins: NotFoundError
+        self._records.setdefault((workspace_id, source_id), {})[version] = SourceVersion(
+            source_id,
+            version,
+            content_hash,
+            parser,
+            extraction_version,
+            original_name,
+            size_bytes,
+            datetime.now(UTC),
+        )
+
+    def versions(
+        self, workspace_id: str, user_id: str, source_id: str
+    ) -> tuple[SourceVersion, ...]:
+        self._sources.get_owned(workspace_id, user_id, source_id)  # NotFoundError otherwise
+        recorded = self._records.get((workspace_id, source_id), {})
+        return tuple(recorded[number] for number in sorted(recorded, reverse=True))
+
     def erase(self, workspace_id: str, source_id: str) -> None:
         if self._sources.kind_of(workspace_id, source_id) is SourceKind.MEETING:
             raise ValueError("Meeting transcripts are erased through the meeting service")
+        self._records.pop((workspace_id, source_id), None)
         self._versions.pop((workspace_id, source_id), None)
         self._sections.pop((workspace_id, source_id), None)
 

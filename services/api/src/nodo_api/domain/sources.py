@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal, get_args
 
 from nodo_api.domain.models import Locale, Meeting, TranscriptSegment
 
@@ -189,6 +190,86 @@ class Source:
             created_at=meeting.created_at,
             tombstoned_at=meeting.tombstoned_at,
         )
+
+
+ImportState = Literal[
+    "queued",
+    "parsing",
+    "indexing",
+    "extracting",
+    "ready",
+    "failed",
+    "cancelled",
+    "awaiting_confirmation",
+]
+IMPORT_STATES: tuple[str, ...] = get_args(ImportState)
+
+
+class Clear:
+    def __repr__(self) -> str:
+        return "CLEAR"
+
+
+CLEAR = Clear()  # pass as step or error_code to ImportJobRepository.update to set it to NULL
+
+
+def check_job_update(
+    state: object,
+    step: object,
+    counters: Sequence[int | None],
+    error_code: object,
+    expected: object,
+) -> tuple[str, ...] | None:
+    """Validate the arguments of ImportJobRepository.update; return the states the job must be in
+    for the write to happen (None: write whatever the state is)."""
+    if state is not None and state not in IMPORT_STATES:
+        raise ValueError("Unknown import state")
+    if any(n is not None and n < 0 for n in counters):
+        raise ValueError("Progress counters cannot be negative")
+    if step == "" or error_code == "":
+        raise ValueError("Use CLEAR, not an empty string, to clear a step or an error code")
+    if expected is None:
+        return None
+    wanted = (expected,) if isinstance(expected, str) else tuple(sorted(set(expected)))  # type: ignore[call-overload]
+    if not wanted or any(item not in IMPORT_STATES for item in wanted):
+        raise ValueError("expected_state needs known import states")
+    return wanted
+
+
+class DuplicateContentError(ValueError):
+    """Another live source of the same owner already has this content hash (same bytes again)."""
+
+
+@dataclass(frozen=True, slots=True)
+class ImportJob:
+    """Progress of one import, keyed by its source (the state machine is in the import service)."""
+
+    workspace_id: str
+    owner_id: str
+    source_id: str
+    state: ImportState
+    step: str | None
+    done: int
+    total: int
+    attempt: int
+    error_code: str | None
+    cancel_requested: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SourceVersion:
+    """What one version of a source was made from. No API shows the original name."""
+
+    source_id: str
+    version: int
+    content_hash: str
+    parser: str
+    extraction_version: str | None
+    original_name: str | None
+    size_bytes: int
+    created_at: datetime
 
 
 def outline_order(sections: Sequence[Section]) -> tuple[Section, ...]:

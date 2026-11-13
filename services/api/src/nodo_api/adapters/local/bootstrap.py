@@ -14,6 +14,7 @@ from nodo_api.adapters.local.db import LocalDatabase
 from nodo_api.adapters.local.embedder import DEFAULT_MODEL, LocalEmbedder
 from nodo_api.adapters.local.exports import SqliteExportStore
 from nodo_api.adapters.local.graph import SqliteGraphStore
+from nodo_api.adapters.local.imports import SqliteImportJobRepository
 from nodo_api.adapters.local.llm import LocalExtractor, LocalLlm
 from nodo_api.adapters.local.maintenance import LocalIndexService, SqliteMaintenanceStore
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer, LocalModelPaths, data_dir
@@ -246,4 +247,5 @@ def local_adapters(settings: Settings):
         answers=answers,
         sources=SqliteSourceRepository(db),
         fragments=SqliteFragmentRepository(db),
+        imports=SqliteImportJobRepository(db),
     )
