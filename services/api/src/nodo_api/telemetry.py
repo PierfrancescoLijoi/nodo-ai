@@ -55,7 +55,11 @@ def tracer() -> trace.Tracer:
 @contextmanager
 def span(name: str, **attributes: Any) -> Iterator[Span]:
     """A span that records an exception's type (never its message) and marks itself failed."""
-    with tracer().start_as_current_span(name) as current:
+    # The SDK defaults would record the exception message and stack trace as a span event, and
+    # an error message can quote a document or a transcript: only the type is recorded here.
+    with tracer().start_as_current_span(
+        name, record_exception=False, set_status_on_exception=False
+    ) as current:
         for key, value in attributes.items():
             if value is not None:
                 current.set_attribute(key, value)
@@ -63,7 +67,7 @@ def span(name: str, **attributes: Any) -> Iterator[Span]:
             yield current
         except BaseException as error:
             current.set_attribute("error.type", type(error).__name__)
-            current.set_status(Status(StatusCode.ERROR))
+            current.set_status(Status(StatusCode.ERROR, type(error).__name__))
             raise
 
 

@@ -15,7 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from nodo_api.adapters.local.db import LocalDatabase, now_text, to_text
-from nodo_api.worker import Worker
+from nodo_api.worker import IMPORT_AGING_SECONDS, IMPORT_SOURCE, Worker
 
 logger = logging.getLogger("nodo_local_queue")
 
@@ -31,12 +31,15 @@ class LocalMessage:
     job_type: str
     body: list[bytes]
     delivery_count: int
+    claimed_at: str | None = None  # the claim token: release_claim matches only this claim
 
 
 class SqliteJobQueue:
     def __init__(self, db: LocalDatabase) -> None:
         self._db = db
         self.wake = threading.Event()
+        self._started = now_text()
+        self._last_was_import = False  # the priority rule below alternates on this
 
     def publish_once(
         self, workspace_id: str, job_key: str, job_type: str, payload: dict[str, Any]
@@ -88,23 +91,37 @@ class SqliteJobQueue:
             ).fetchone()
         return int(row["n"])
 
-    def claim_next(self) -> LocalMessage | None:
-        now = datetime.now(UTC)
+    def claim_next(self, now: datetime | None = None) -> LocalMessage | None:
+        """Claim the next ready job in one statement, so two claimers never get the same job.
+
+        Meeting jobs go first. An import that has waited IMPORT_AGING_SECONDS ranks with them by
+        age, but only when the previous claim was not an import: at most one aged import runs
+        between meeting jobs, so imports are never starved and a backlog of them never holds a
+        meeting back by more than one import."""
+        now = now or datetime.now(UTC)
         stale = to_text(now - timedelta(seconds=CLAIM_TIMEOUT_SECONDS))
+        aged = to_text(now - timedelta(seconds=IMPORT_AGING_SECONDS))
         with self._db.transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM jobs WHERE done_at IS NULL AND failed_reason IS NULL"
+            rows = conn.execute(
+                "UPDATE jobs SET claimed_at = ?, attempts = attempts + 1 WHERE rowid = ("
+                " SELECT rowid FROM jobs WHERE done_at IS NULL AND failed_reason IS NULL"
                 " AND run_after <= ? AND (claimed_at IS NULL OR claimed_at < ?)"
-                " ORDER BY run_after, created_at LIMIT 1",
-                (to_text(now), stale),
-            ).fetchone()
-            if row is None:
-                return None
-            conn.execute(
-                "UPDATE jobs SET claimed_at = ?, attempts = attempts + 1"
-                " WHERE workspace_id = ? AND job_key = ? AND job_type = ?",
-                (to_text(now), row["workspace_id"], row["job_key"], row["job_type"]),
-            )
+                " ORDER BY (job_type = ? AND NOT (? AND run_after <= ?)),"
+                " run_after, created_at, rowid LIMIT 1"
+                ") RETURNING *",
+                (
+                    to_text(now),
+                    to_text(now),
+                    stale,
+                    IMPORT_SOURCE,
+                    not self._last_was_import,
+                    aged,
+                ),
+            ).fetchall()
+        if not rows:
+            return None
+        row = rows[0]
+        self._last_was_import = row["job_type"] == IMPORT_SOURCE
         body = {
             "job_id": row["id"],
             "workspace_id": row["workspace_id"],
@@ -117,8 +134,48 @@ class SqliteJobQueue:
             row["job_key"],
             row["job_type"],
             [json.dumps(body).encode()],
-            row["attempts"] + 1,
+            row["attempts"],  # RETURNING gives the row after the increment
+            row["claimed_at"],
         )
+
+    def release_claim(self, message: LocalMessage) -> bool:
+        """Put back the job of a graceful stop and refund its delivery: closing the app is not a
+        failure. Matches only this claim of an open job, so a job the worker settled meanwhile
+        (done, retry scheduled, dead-lettered) or claimed again is never touched."""
+        with self._db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE jobs SET claimed_at = NULL, attempts = max(attempts - 1, 0)"
+                " WHERE workspace_id = ? AND job_key = ? AND job_type = ? AND claimed_at = ?"
+                " AND done_at IS NULL AND failed_reason IS NULL",
+                (message.workspace_id, message.job_key, message.job_type, message.claimed_at),
+            )
+        return cursor.rowcount == 1
+
+    def release_claims(self) -> int:
+        """Hand back jobs a crashed engine left claimed. The crash keeps its delivery, so a job
+        that kills the engine every time still reaches its cap and ends failed.
+
+        Only claims older than this queue are released: a claim this engine made is live."""
+        with self._db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE jobs SET claimed_at = NULL"
+                " WHERE claimed_at IS NOT NULL AND claimed_at < ?"
+                " AND done_at IS NULL AND failed_reason IS NULL",
+                (self._started,),
+            )
+        return cursor.rowcount
+
+    def cancel(self, workspace_id: str, job_key: str, job_type: str) -> bool:
+        """Cancel a job nobody has claimed. False otherwise: a running import is cancelled
+        cooperatively through ImportJobRepository.request_cancel."""
+        with self._db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE jobs SET failed_reason = 'cancelled' WHERE workspace_id = ? AND job_key = ?"
+                " AND job_type = ? AND claimed_at IS NULL AND done_at IS NULL"
+                " AND failed_reason IS NULL",
+                (workspace_id, job_key, job_type),
+            )
+        return cursor.rowcount == 1
 
     def _update(self, message: LocalMessage, sql: str, params: tuple) -> None:
         with self._db.transaction() as conn:
@@ -157,6 +214,7 @@ class LocalWorkerLoop:
         self._worker = worker
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="nodo-worker", daemon=True)
+        self._current: LocalMessage | None = None  # the job the thread is handling
 
     def start(self) -> None:
         self._thread.start()
@@ -166,6 +224,15 @@ class LocalWorkerLoop:
         self._queue.wake.set()
         if self._thread.is_alive():
             self._thread.join(timeout)
+        current = self._current
+        if current is not None and self._thread.is_alive():
+            # Still busy after the wait: the app is closing, not crashing, so the job goes back
+            # to the queue without costing a delivery. Only a real crash (no stop) costs one.
+            try:
+                if self._queue.release_claim(current):
+                    logger.warning("released_running_job_on_stop")
+            except Exception as error:
+                logger.error("release_on_stop_failed type=%s", type(error).__name__)
 
     def run_pending(self) -> int:
         """Handle everything that is ready now, on the calling thread. Used by tests."""
@@ -187,4 +254,10 @@ class LocalWorkerLoop:
                 self._queue.wake.wait(POLL_SECONDS)
                 self._queue.wake.clear()
                 continue
-            self._worker.handle(self._queue, message)
+            self._current = message
+            try:
+                self._worker.handle(self._queue, message)
+            except Exception as error:  # keep the thread alive; the type only, never the text
+                logger.error("handle_failed type=%s", type(error).__name__)
+            finally:
+                self._current = None

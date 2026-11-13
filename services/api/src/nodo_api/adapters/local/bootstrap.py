@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +65,44 @@ class Unavailable:
         return refuse
 
 
+class EngineAlreadyRunning(RuntimeError):
+    """Another engine holds the lock of this data folder."""
+
+
+class EngineLock:
+    """An exclusive OS lock on a file in the data folder, held while the engine runs.
+
+    The operating system drops it when the process dies, so a crash never leaves it stale."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._file: Any = None
+
+    def acquire(self) -> None:
+        handle = open(self._path, "a+b")  # noqa: SIM115 - held open for the life of the engine
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            handle.close()
+            raise EngineAlreadyRunning(
+                f"Another NODO engine is already using the data folder {self._path.parent}"
+            ) from None
+        self._file = handle
+
+    def release(self) -> None:
+        if self._file is not None:
+            self._file.close()  # closing the handle releases the lock on every platform
+            self._file = None
+
+
 @dataclass
 class LocalRuntime:
     """What has to start and stop with the app: the job thread and the language model server."""
@@ -80,9 +119,20 @@ class LocalRuntime:
     retention: RetentionService
     index: LocalIndexService
     warm_up: bool = False
+    lock: EngineLock | None = None
     _stop: threading.Event = field(default_factory=threading.Event)
 
     def start(self) -> None:
+        # One engine per data folder; the second fails here, before it touches any claim.
+        if self.lock is not None:
+            self.lock.acquire()
+        # Claims still held come from an engine that died: free them before the worker starts.
+        try:
+            released = self.queue.release_claims()
+            if released:
+                logger.warning("released_stale_claims count=%s", released)
+        except Exception as error:  # the one hour stale-claim rule still recovers them later
+            logger.error("release_claims_failed type=%s", type(error).__name__)
         self.loop.start()
         threading.Thread(target=self._retention_loop, name="nodo-retention", daemon=True).start()
         if self.warm_up:
@@ -113,6 +163,8 @@ class LocalRuntime:
         if self.server is not None:
             self.server.stop()
         self.db.close()
+        if self.lock is not None:
+            self.lock.release()
 
 
 # E5 scores are compressed: related and unrelated texts sit between about 0.68 and 0.86. 0.78 sits
@@ -228,6 +280,7 @@ def local_adapters(settings: Settings):
             )
         ),
         settings.local_warm_up,
+        EngineLock(root / "engine.lock"),
     )
     return Adapters(
         meetings,

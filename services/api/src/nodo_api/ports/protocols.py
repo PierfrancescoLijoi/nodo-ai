@@ -323,6 +323,26 @@ class JobQueue(Protocol):
         ...
 
 
+class JobControl(Protocol):
+    """Engine-side control of queued jobs (local engine; Service Bus has its own)."""
+
+    def release_claims(self) -> int:
+        """Hand back jobs a crashed engine left claimed, without charging a delivery. Called once
+        at engine start (engine.json guarantees one engine). Returns how many were released."""
+        ...
+
+    def release_claim(self, message: Any) -> bool:
+        """On a graceful stop, put back the job still running and refund its delivery. Matches
+        only that claim of an open job; a job settled or claimed again meanwhile is untouched."""
+        ...
+
+    def cancel(self, workspace_id: str, job_key: str, job_type: str) -> bool:
+        """Mark an unclaimed open job failed with reason cancelled, so it is never delivered.
+        False for a claimed, finished or unknown job: a running import is cancelled
+        cooperatively through ImportJobRepository.request_cancel."""
+        ...
+
+
 class Retriever(Protocol):
     def index(
         self, workspace_id: str, owner_id: str, segments: Sequence[TranscriptSegment]
