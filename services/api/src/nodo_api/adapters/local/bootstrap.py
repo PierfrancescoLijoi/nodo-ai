@@ -27,6 +27,7 @@ from nodo_api.adapters.local.repos import (
 from nodo_api.adapters.local.reranker import OnnxReranker
 from nodo_api.adapters.local.retention import SqliteRetentionStore
 from nodo_api.adapters.local.search import SqliteRetriever
+from nodo_api.adapters.local.source_blobs import LocalSourceBlobStore
 from nodo_api.adapters.local.sources import SqliteFragmentRepository, SqliteSourceRepository
 from nodo_api.adapters.local.speech import LocalSpeechToText
 from nodo_api.adapters.local.sync import LocalSyncService
@@ -248,4 +249,9 @@ def local_adapters(settings: Settings):
         sources=SqliteSourceRepository(db),
         fragments=SqliteFragmentRepository(db),
         imports=SqliteImportJobRepository(db),
+        source_blobs=LocalSourceBlobStore(
+            root / "sources",
+            max_bytes=settings.local_import_max_bytes,
+            upload_seconds=settings.upload_session_seconds,
+        ),
     )

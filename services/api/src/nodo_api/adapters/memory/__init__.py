@@ -15,6 +15,7 @@ from nodo_api.adapters.memory.adapters import (
 )
 from nodo_api.adapters.memory.graph import MemoryGraphStore
 from nodo_api.adapters.memory.imports import MemoryImportJobRepository
+from nodo_api.adapters.memory.source_blobs import MemorySourceBlobStore
 from nodo_api.adapters.memory.sources import MemoryFragmentRepository, MemorySourceRepository
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "MemoryMaintenanceStore",
     "MemoryMeetingRepository",
     "MemoryRetentionStore",
+    "MemorySourceBlobStore",
     "MemorySourceRepository",
     "MemorySpeech",
     "MemorySpeechJobStore",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
+from contextlib import AbstractContextManager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -30,6 +31,7 @@ from nodo_api.domain.models import (
     TranscriptSegment,
 )
 from nodo_api.domain.retention import AudioDue
+from nodo_api.domain.source_files import UploadSession
 from nodo_api.domain.sources import (
     Clear,
     Fragment,
@@ -264,6 +266,43 @@ class BlobStore(Protocol):
         ...
 
     def get_export(self, workspace_id: str, name: str) -> bytes: ...
+
+
+class SourceBlobStore(Protocol):
+    """Original files of documents (Task 6), stored as <workspace>/<source>/<version>/original.
+
+    The client file name is metadata and never a path part. Refusals raise UploadRejected (with a
+    code: too_large, low_disk, size_mismatch, unknown_token, cancelled) or ValueError for an
+    unsafe id, version or file name; none of their messages contains a name."""
+
+    def create_upload_session(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        source_id: str,
+        filename: str,
+        size_bytes: int,
+        *,
+        version: int = 1,
+    ) -> UploadSession:
+        """A one-time link for one file; refuses a size over the import cap or too little disk."""
+        ...
+
+    def open_upload(self, token: str) -> AbstractContextManager[Any]:
+        """Writer with write(chunk), then size and sha256; the original appears only on success."""
+        ...
+
+    def path_for(self, workspace_id: str, source_id: str, version: int) -> Path: ...
+
+    def adopt(self, workspace_id: str, source_id: str, version: int, src: Path) -> Path:
+        """Copy a watched file into the store."""
+        ...
+
+    def size_and_sha256(self, path: Path) -> tuple[int, str]: ...
+
+    def erase(self, workspace_id: str, source_id: str) -> None:
+        """Remove every version and leftover of a source; no error if there are none."""
+        ...
 
 
 class JobQueue(Protocol):
