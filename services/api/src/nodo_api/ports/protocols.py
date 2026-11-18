@@ -35,7 +35,9 @@ from nodo_api.domain.source_files import UploadSession
 from nodo_api.domain.sources import (
     Clear,
     Fragment,
+    FragmentHit,
     ImportJob,
+    IndexResult,
     Section,
     Source,
     SourceKind,
@@ -369,6 +371,42 @@ class Retriever(Protocol):
         ...
 
     def erase(self, workspace_id: str, meeting_id: str) -> None: ...
+
+
+class FragmentIndex(Protocol):
+    """Search over the fragments of documents and other non-meeting sources. It mirrors the
+    fragments of one version of each source and is a projection: every row can be rebuilt from the
+    fragment repository. Separate from the meeting Retriever, which it never touches."""
+
+    def index(
+        self, workspace_id: str, owner_id: str, source_id: str, fragments: Sequence[Fragment]
+    ) -> IndexResult:
+        """Make the source's rows exactly these fragments, in one step: every earlier row of the
+        source goes, whoever owned it. An empty sequence clears the source. Nothing is written, and
+        the earlier rows stay, when the source is gone (deleted, tombstoned, unknown) or the
+        fragments are not its current version (non-meeting sources); the result says which. The
+        check runs in the write itself, after any embedding, so a delete that arrives meanwhile
+        wins. A fragment over the 512 token embedding ceiling is kept whole in the text index and
+        its vector reads the first 512 tokens; it is counted in `truncated`. Raises ValueError, and
+        changes nothing, for fragments of another source or repeated ids."""
+        ...
+
+    def erase_source(self, workspace_id: str, source_id: str) -> None: ...
+
+    def count_source(self, workspace_id: str, source_id: str) -> int: ...
+
+    def search(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        query: str,
+        limit: int,
+        *,
+        source_ids: frozenset[str] | None = None,
+    ) -> tuple[FragmentHit, ...]:
+        """Best fragments first, only those of this owner. `source_ids` narrows the search (an
+        empty set finds nothing); the owner check is part of the query, not applied afterwards."""
+        ...
 
 
 class GraphStore(Protocol):

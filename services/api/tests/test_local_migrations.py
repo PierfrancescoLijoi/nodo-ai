@@ -542,7 +542,7 @@ def test_0010_creates_import_tables_and_keeps_existing_data(tmp_path):
         "size_bytes",
         "created_at",
     ]
-    assert applied[-1] == 10 and applied == sorted(applied)
+    assert 10 in applied and applied == sorted(applied)
     assert (meetings_after, sources_after, fragments) == (meetings_before, sources_before, 1)
     assert check == []
 

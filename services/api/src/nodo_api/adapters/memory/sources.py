@@ -130,6 +130,21 @@ class MemorySourceRepository:
             return stored.kind
         return SourceKind.MEETING if self._meetings.exists(workspace_id, source_id) else None
 
+    def status(self, workspace_id: str, source_id: str) -> tuple[bool, int | None] | None:
+        """(deleted, current version) of a source of any owner, None if it does not exist. The
+        version is None for a meeting: its versions live in the transcript. The fragment index
+        reads this the way the SQLite index reads the sources table."""
+        stored = self._sources.get((workspace_id, source_id))
+        if stored is not None:
+            return stored.tombstoned_at is not None, stored.version
+        if not self._meetings.exists(workspace_id, source_id):
+            return None
+        try:
+            self._meetings.get_for_processing(workspace_id, source_id)
+        except NotFoundError:
+            return True, None
+        return False, None
+
     def set_version(self, workspace_id: str, source_id: str, version: int) -> None:
         with self._lock:
             stored = self._sources[(workspace_id, source_id)]

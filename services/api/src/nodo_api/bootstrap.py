@@ -43,6 +43,7 @@ class Adapters:
     fragments: Any = None  # sections and fragments of sources; local and memory only
     imports: Any = None  # import jobs of documents (Task 5); local and memory only, None on Azure
     source_blobs: Any = None  # original files of documents (Task 6); local and memory only
+    fragment_index: Any = None  # search over fragments of documents (Task 8); local and memory
 
 
 @dataclass(slots=True)
@@ -81,6 +82,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemoryAuditLog,
         MemoryBlobStore,
         MemoryExportStore,
+        MemoryFragmentIndex,
         MemoryFragmentRepository,
         MemoryGraphStore,
         MemoryImportJobRepository,
@@ -122,6 +124,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         sources=sources,
         fragments=MemoryFragmentRepository(sources, transcripts),
         imports=MemoryImportJobRepository(sources),
+        fragment_index=MemoryFragmentIndex(sources),
         source_blobs=MemorySourceBlobStore(
             max_bytes=settings.local_import_max_bytes,
             upload_seconds=settings.upload_session_seconds,
@@ -289,6 +292,7 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
         fragments=None,
         imports=None,
         source_blobs=None,
+        fragment_index=None,
     )
 
 

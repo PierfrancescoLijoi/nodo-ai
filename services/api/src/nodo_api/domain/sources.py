@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -18,6 +19,8 @@ from typing import Literal, get_args
 from nodo_api.domain.models import Locale, Meeting, TranscriptSegment
 
 MAX_FRAGMENT_CHARS = 20_000
+MAX_EMBEDDING_TOKENS = 512  # the E5 ceiling: the model truncates silently past it
+_PIECE = re.compile(r"\w+|([^\w\s])\1*")
 
 
 class SourceKind(StrEnum):
@@ -312,3 +315,49 @@ def check_version(
     known = {s.id for s in sections}
     if any(f.section_id is not None and f.section_id not in known for f in fragments):
         raise ValueError("A fragment points at a section that is not in this version")
+
+
+@dataclass(frozen=True, slots=True)
+class FragmentHit:
+    """A fragment found by the fragment index; score is the fused rank score, higher is better."""
+
+    fragment: Fragment
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
+class IndexResult:
+    """What FragmentIndex.index did. `indexed` rows were written, `truncated` of them are fragments
+    over the embedding ceiling (their vector stands for the first 512 tokens, their text is whole).
+    `skipped` names why nothing was written: the source is gone (deleted, tombstoned or unknown) or
+    the fragments are not its current version; the earlier rows of the source are then untouched."""
+
+    indexed: int
+    truncated: int
+    skipped: Literal["source_gone", "stale_version"] | None = None
+
+
+def estimate_tokens(text: str) -> int:
+    """A floor of the token count, for when the embedder has no tokenizer of its own: each word is
+    at least one token and a run of one punctuation mark is at least one. Never above the real
+    count, so it can only miss a truncation, never invent one."""
+    return sum(1 for _ in _PIECE.finditer(text))
+
+
+def check_indexable(source_id: str, fragments: Sequence[Fragment]) -> None:
+    """Reject input the fragment index must not take, before any embedding or write. An empty
+    sequence is valid: it clears the source (a scan with no text layer). Length is not checked: a
+    fragment over the embedding ceiling is indexed with a truncated vector."""
+    if any(f.source_id != source_id for f in fragments):
+        raise ValueError("Fragments to index must all belong to the given source")
+    if len({f.id for f in fragments}) != len(fragments):
+        raise ValueError("Fragment ids must be unique within a source")
+
+
+def searchable(query: str) -> bool:
+    """False for a query that can not be encoded as text (a lone surrogate): nothing to look for."""
+    try:
+        query.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True

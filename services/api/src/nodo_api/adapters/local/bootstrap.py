@@ -14,6 +14,7 @@ from nodo_api.adapters.local.blob import LocalBlobStore
 from nodo_api.adapters.local.db import LocalDatabase
 from nodo_api.adapters.local.embedder import DEFAULT_MODEL, LocalEmbedder
 from nodo_api.adapters.local.exports import SqliteExportStore
+from nodo_api.adapters.local.fragment_index import SqliteFragmentIndex
 from nodo_api.adapters.local.graph import SqliteGraphStore
 from nodo_api.adapters.local.imports import SqliteImportJobRepository
 from nodo_api.adapters.local.llm import LocalExtractor, LocalLlm
@@ -301,6 +302,7 @@ def local_adapters(settings: Settings):
         answers=answers,
         sources=SqliteSourceRepository(db),
         fragments=SqliteFragmentRepository(db),
+        fragment_index=SqliteFragmentIndex(db, embedder, min_margin=settings.local_search_margin),
         imports=SqliteImportJobRepository(db),
         source_blobs=LocalSourceBlobStore(
             root / "sources",
