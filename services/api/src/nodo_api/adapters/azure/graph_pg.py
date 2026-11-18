@@ -28,6 +28,7 @@ from nodo_api.domain.graph import (
     Relation,
     RelationKind,
     ReviewStatus,
+    SourceRef,
     Subgraph,
     entity_id,
     meeting_entity_id,
@@ -118,6 +119,18 @@ class PgGraphStore:
         self._db = db
 
     # ------------------------------------------------------------------ writes
+
+    def replace_source_evidence(
+        self,
+        workspace_id: str,
+        user_id: str,
+        source: SourceRef,
+        extraction: Extraction,
+        *,
+        dropped_fragment_ids: frozenset[str] | None = None,
+    ) -> None:
+        """Sources beyond meetings stay local (ADR-029): the cloud engine has none to write."""
+        raise NotImplementedError("Sources are not available on this engine")
 
     def upsert_extraction(
         self, workspace_id: str, owner_id: str, meeting: MeetingRef, extraction: Extraction
@@ -317,7 +330,9 @@ class PgGraphStore:
             (workspace_id, owner_id, decision_ids),
         )
 
-    def pending_review(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+    def pending_review(
+        self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
+    ) -> Subgraph:
         with self._db.workspace(workspace_id) as conn:
             rows = conn.execute(
                 "SELECT r.id, r.source_id, r.target_id, r.kind, r.status, r.confidence,"
@@ -427,7 +442,13 @@ class PgGraphStore:
                 self._sweep(conn, workspace_id, owner_id, list(relation_ids))
 
     def review_relation(
-        self, workspace_id: str, owner_id: str, relation_id_: str, status: ReviewStatus
+        self,
+        workspace_id: str,
+        owner_id: str,
+        relation_id_: str,
+        status: ReviewStatus,
+        *,
+        meetings_only: bool = False,
     ) -> Relation:
         if status is ReviewStatus.PROPOSED:
             raise ValueError("A review is approved or rejected")
@@ -465,6 +486,8 @@ class PgGraphStore:
         terms: Sequence[str],
         limit: int,
         types: frozenset[EntityType] | None = None,
+        *,
+        meetings_only: bool = False,
     ) -> tuple[Entity, ...]:
         patterns = [_like(t) for t in (normalize_label(x) for x in terms) if len(t) >= 3]
         if not patterns:
@@ -487,7 +510,9 @@ class PgGraphStore:
             ).fetchall()
         return tuple(_entity(r) for r in rows)
 
-    def overview(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Entity, ...]:
+    def overview(
+        self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
+    ) -> tuple[Entity, ...]:
         with self._db.workspace(workspace_id) as conn:
             rows = conn.execute(
                 f"SELECT {_ENTITY_COLUMNS} FROM entities WHERE workspace_id = %s AND owner_id = %s"
@@ -516,6 +541,7 @@ class PgGraphStore:
         fanout: int,
         include_proposed: bool,
         as_of: datetime | None,
+        meetings_only: bool = False,
     ) -> Subgraph:
         statuses = ["approved", *(["proposed"] if include_proposed else [])]
         moment = as_of or datetime.now(UTC)
@@ -680,7 +706,9 @@ class PgGraphStore:
         owners = {str(r["source_id"]): r["label"] for r in rows}
         return owners, {str(r["source_id"]): r["status"] for r in rows}
 
-    def recent_changes(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Change, ...]:
+    def recent_changes(
+        self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
+    ) -> tuple[Change, ...]:
         with self._db.workspace(workspace_id) as conn:
             rows = conn.execute(
                 "SELECT r.id, n.label AS new_label, o.label AS old_label, n.effective_at,"

@@ -299,6 +299,7 @@ def graph_subgraph(
         include_proposed=include_proposed,
         as_of=as_of,
         limit=limit,
+        meetings_only=True,  # /v1 is the frozen clients' view
     )
     return subgraph_output(graph, depth)
 
@@ -311,7 +312,7 @@ def graph_reviews(
 ):
     """The inbox: relations the model proposed that nobody has decided yet (ADR-025)."""
     graph = request.app.state.container.graph_service.reviews(
-        actor.workspace_id, actor.user_id, limit
+        actor.workspace_id, actor.user_id, limit, meetings_only=True
     )
     return subgraph_output(graph, 1)
 
@@ -321,7 +322,11 @@ def review_relation(
     relation_id: str, payload: ReviewRelationInput, actor: PrincipalDep, request: Request
 ):
     relation = request.app.state.container.graph_service.review(
-        actor.workspace_id, actor.user_id, relation_id, ReviewStatus(payload.status)
+        actor.workspace_id,
+        actor.user_id,
+        relation_id,
+        ReviewStatus(payload.status),
+        meetings_only=True,  # a relation /v1 never shows answers 404, before any write
     )
     return edge_output(relation)
 
@@ -333,7 +338,7 @@ def graph_changes(
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ):
     changes = request.app.state.container.graph_service.changes(
-        actor.workspace_id, actor.user_id, limit
+        actor.workspace_id, actor.user_id, limit, meetings_only=True
     )
     return ChangesOutput(
         items=tuple(

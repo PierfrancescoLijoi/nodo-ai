@@ -293,7 +293,12 @@ class QueryService:
         terms = tuple(dict.fromkeys(w for w in _WORD.findall(question.lower()) if len(w) >= 3))[
             :MAX_TERMS
         ]
-        seeds = list(self._graph.find_entities(workspace_id, user_id, terms, SEED_ENTITIES))
+        # Answers read meetings only: documents reach them through later routes, not this one.
+        seeds = list(
+            self._graph.find_entities(
+                workspace_id, user_id, terms, SEED_ENTITIES, meetings_only=True
+            )
+        )
         if self._entities is not None:
             # Entities the question means in other words or another language join the ones it names.
             known = {e.id for e in seeds}
@@ -313,4 +318,5 @@ class QueryService:
             fanout=GRAPH_FANOUT,
             include_proposed=False,
             as_of=None,
+            meetings_only=True,
         )

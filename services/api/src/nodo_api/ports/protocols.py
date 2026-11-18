@@ -20,6 +20,7 @@ from nodo_api.domain.graph import (
     MeetingRef,
     Relation,
     ReviewStatus,
+    SourceRef,
     Subgraph,
 )
 from nodo_api.domain.maintenance import MaintenanceMeeting, PendingJob
@@ -423,6 +424,23 @@ class GraphStore(Protocol):
         """Replace this meeting's contribution with `extraction`. Idempotent."""
         ...
 
+    def replace_source_evidence(
+        self,
+        workspace_id: str,
+        user_id: str,
+        source: SourceRef,
+        extraction: Extraction,
+        *,
+        dropped_fragment_ids: frozenset[str] | None = None,
+    ) -> None:
+        """Write what a non-meeting source says, in one atomic step.
+
+        Drops the evidence of `source.id` whose fragment id is in `dropped_fragment_ids` (all of
+        it when None), then writes `extraction` exactly as `upsert_extraction` does for a meeting,
+        with a SOURCE node in place of the meeting node, and sweeps what lost its support.
+        Evidence always names `source.id`; nothing of other sources or meetings is touched."""
+        ...
+
     def find_entities(
         self,
         workspace_id: str,
@@ -430,9 +448,18 @@ class GraphStore(Protocol):
         terms: Sequence[str],
         limit: int,
         types: frozenset[EntityType] | None = None,
-    ) -> tuple[Entity, ...]: ...
+        *,
+        meetings_only: bool = False,
+    ) -> tuple[Entity, ...]:
+        """`meetings_only` (on every read /v1 uses) is the view frozen clients get: relations a
+        meeting evidences (never CHILD_OF) with only their meeting evidence, and entities a meeting
+        mentions. It is applied before limits, fanout and seeds, so documents never displace
+        meeting data. A store that holds no source data may ignore it."""
+        ...
 
-    def overview(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Entity, ...]: ...
+    def overview(
+        self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
+    ) -> tuple[Entity, ...]: ...
 
     def recent_decisions(
         self, workspace_id: str, owner_id: str, limit: int
@@ -449,21 +476,33 @@ class GraphStore(Protocol):
         fanout: int,
         include_proposed: bool,
         as_of: datetime | None,
+        meetings_only: bool = False,
     ) -> Subgraph: ...
 
     def review_relation(
-        self, workspace_id: str, owner_id: str, relation_id: str, status: ReviewStatus
-    ) -> Relation: ...
+        self,
+        workspace_id: str,
+        owner_id: str,
+        relation_id: str,
+        status: ReviewStatus,
+        *,
+        meetings_only: bool = False,
+    ) -> Relation:
+        """With `meetings_only`, a relation that view hides raises NotFoundError before anything
+        is written."""
+        ...
 
     def meeting_digests(
         self, workspace_id: str, owner_id: str, meeting_ids: Sequence[str]
     ) -> dict[str, MeetingDigest]: ...
 
     def recent_changes(
-        self, workspace_id: str, owner_id: str, limit: int
+        self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
     ) -> tuple[Change, ...]: ...
 
-    def pending_review(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+    def pending_review(
+        self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
+    ) -> Subgraph:
         """The relations the model proposed and nobody has decided, newest first, with the entities
         at their ends and their evidence. `truncated` says there are more than `limit`."""
         ...

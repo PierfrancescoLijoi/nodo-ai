@@ -23,7 +23,13 @@ from nodo_api.api.v1.schemas import (
     SpeakerOutput,
     SubgraphOutput,
 )
-from nodo_api.domain.graph import EntityType, MeetingDigest, Relation, Subgraph
+from nodo_api.domain.graph import (
+    EntityType,
+    MeetingDigest,
+    Relation,
+    RelationKind,
+    Subgraph,
+)
 from nodo_api.domain.models import Meeting, SpeakerSummary
 from nodo_api.domain.sources import Fragment, Section, Source
 from nodo_api.errors import ValidationFailed
@@ -162,8 +168,19 @@ def fragment_output(fragment: Fragment) -> FragmentOutput:
 
 
 def subgraph_output(graph: Subgraph, depth: int) -> SubgraphOutput:
+    """The legacy graph view. The store already read it meetings-only; SOURCE nodes, CHILD_OF
+    edges and edges touching a SOURCE node are dropped here too, as a guard, so the frozen
+    clients and the OpenAPI literals never see the source vocabulary."""
+    hidden = {n.id for n in graph.nodes if n.type is EntityType.SOURCE}
+    edges = [
+        edge
+        for edge in graph.edges
+        if edge.kind is not RelationKind.CHILD_OF
+        and edge.source_id not in hidden
+        and edge.target_id not in hidden
+    ]
     meeting_of: dict[str, str] = {}
-    for edge in graph.edges:
+    for edge in edges:
         if edge.evidence:
             first = edge.evidence[0].meeting_id
             meeting_of.setdefault(edge.source_id, first)
@@ -178,8 +195,9 @@ def subgraph_output(graph: Subgraph, depth: int) -> SubgraphOutput:
                 meeting_id=n.meeting_id if n.type is EntityType.MEETING else meeting_of.get(n.id),
             )
             for n in graph.nodes
+            if n.id not in hidden
         ),
-        edges=tuple(edge_output(e) for e in graph.edges),
+        edges=tuple(edge_output(e) for e in edges),
         depth=depth,
         truncated=graph.truncated,
     )

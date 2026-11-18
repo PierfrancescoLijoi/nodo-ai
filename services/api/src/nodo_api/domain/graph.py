@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 
+from nodo_api.domain.sources import SourceKind
+
 NAMESPACE = uuid.UUID("5d3b7a8e-2f1c-4c6a-9a55-3f0e6a1b7c20")
 MAX_LABEL = 120
 MAX_ENTITIES = 60
@@ -196,6 +198,21 @@ class MeetingRef:
     id: str
     title: str
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SourceRef:
+    """A non-meeting source as the graph needs it: the node it hangs its evidence on."""
+
+    id: str
+    title: str | None
+    created_at: datetime
+    kind: SourceKind
+
+    @property
+    def label(self) -> str:
+        """The source node label: the title, or the kind when there is none."""
+        return " ".join((self.title or "").split())[:MAX_LABEL] or self.kind.value
 
 
 @dataclass(frozen=True, slots=True)

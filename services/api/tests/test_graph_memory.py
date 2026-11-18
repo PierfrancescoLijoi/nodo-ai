@@ -34,3 +34,19 @@ class TestMemoryGraph(
                 part.relations[relation.id] = _Row(relation, next(store._clock))
 
         return put
+
+
+def test_a_failed_source_replace_keeps_the_previous_graph() -> None:
+    from tests.source_graph_contract import HANDBOOK, doc
+
+    store, ws = MemoryGraphStore(), "ws-atomic"
+    store.replace_source_evidence(ws, OWNER, doc(), HANDBOOK)
+    before = store.evidence_segment_ids(ws, OWNER, "doc1")
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("write failed")
+
+    store._add_relation = boom
+    with pytest.raises(RuntimeError):
+        store.replace_source_evidence(ws, OWNER, doc(), HANDBOOK)
+    assert store.evidence_segment_ids(ws, OWNER, "doc1") == before == frozenset({"f1", "f2"})

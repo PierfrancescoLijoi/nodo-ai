@@ -83,3 +83,23 @@ class TestSqliteGraph(
                 )
 
         return put
+
+
+def test_a_failed_source_replace_keeps_the_previous_graph(tmp_path) -> None:
+    import sqlite3
+
+    from nodo_api.domain.graph import EntityType, Extraction
+    from tests.graph_contract import ent
+    from tests.source_graph_contract import HANDBOOK, doc
+
+    db = LocalDatabase(tmp_path / "nodo.db")
+    try:
+        store, ws = SqliteGraphStore(db), "ws-atomic"
+        store.replace_source_evidence(ws, OWNER, doc(), HANDBOOK)
+        too_long = Extraction("", (ent("t", EntityType.TOPIC, "x" * 300, "f9"),), ())
+        # The CHECK on the label fails after the old evidence was deleted in the transaction.
+        with pytest.raises(sqlite3.IntegrityError):
+            store.replace_source_evidence(ws, OWNER, doc(), too_long)
+        assert store.evidence_segment_ids(ws, OWNER, "doc1") == frozenset({"f1", "f2"})
+    finally:
+        db.close()

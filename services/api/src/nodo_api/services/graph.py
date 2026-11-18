@@ -39,16 +39,19 @@ class GraphService:
         include_proposed: bool,
         as_of: datetime | None,
         limit: int,
+        meetings_only: bool = False,
     ) -> Subgraph:
+        """`meetings_only` is the view /v1 serves frozen clients (see GraphStore.find_entities)."""
+        only = {"meetings_only": meetings_only}
         if seed_id:
             seeds = [seed_id]
         elif entity:
-            found = self._graph.find_entities(
-                workspace_id, user_id, _WORD.findall(entity.lower()), ENTITY_SEEDS
-            )
+            words = _WORD.findall(entity.lower())
+            found = self._graph.find_entities(workspace_id, user_id, words, ENTITY_SEEDS, **only)
             seeds = [e.id for e in found]
         else:
-            seeds = [e.id for e in self._graph.overview(workspace_id, user_id, OVERVIEW_SEEDS)]
+            overview = self._graph.overview(workspace_id, user_id, OVERVIEW_SEEDS, **only)
+            seeds = [e.id for e in overview]
         return self._graph.neighborhood(
             workspace_id,
             user_id,
@@ -58,16 +61,27 @@ class GraphService:
             fanout=GRAPH_FANOUT,
             include_proposed=include_proposed,
             as_of=as_of,
+            **only,
         )
 
-    def reviews(self, workspace_id: str, user_id: str, limit: int) -> Subgraph:
+    def reviews(
+        self, workspace_id: str, user_id: str, limit: int, *, meetings_only: bool = False
+    ) -> Subgraph:
         """What the model proposed and the person has not decided, newest first."""
-        return self._graph.pending_review(workspace_id, user_id, limit)
+        return self._graph.pending_review(workspace_id, user_id, limit, meetings_only=meetings_only)
 
     def review(
-        self, workspace_id: str, user_id: str, relation_id: str, status: ReviewStatus
+        self,
+        workspace_id: str,
+        user_id: str,
+        relation_id: str,
+        status: ReviewStatus,
+        *,
+        meetings_only: bool = False,
     ) -> Relation:
-        relation = self._graph.review_relation(workspace_id, user_id, relation_id, status)
+        relation = self._graph.review_relation(
+            workspace_id, user_id, relation_id, status, meetings_only=meetings_only
+        )
         invalidate(
             self._answers, workspace_id, user_id
         )  # approved or rejected changes what answers say
@@ -80,8 +94,10 @@ class GraphService:
             )
         return relation
 
-    def changes(self, workspace_id: str, user_id: str, limit: int) -> tuple[Change, ...]:
-        return self._graph.recent_changes(workspace_id, user_id, limit)
+    def changes(
+        self, workspace_id: str, user_id: str, limit: int, *, meetings_only: bool = False
+    ) -> tuple[Change, ...]:
+        return self._graph.recent_changes(workspace_id, user_id, limit, meetings_only=meetings_only)
 
     def digests(
         self, workspace_id: str, user_id: str, meeting_ids: Sequence[str]
