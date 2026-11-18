@@ -17,7 +17,7 @@ from nodo_api.adapters.local.exports import SqliteExportStore
 from nodo_api.adapters.local.fragment_index import SqliteFragmentIndex
 from nodo_api.adapters.local.graph import SqliteGraphStore
 from nodo_api.adapters.local.imports import SqliteImportJobRepository
-from nodo_api.adapters.local.llm import LocalExtractor, LocalLlm
+from nodo_api.adapters.local.llm import LocalExtractor, LocalFragmentExtractor, LocalLlm
 from nodo_api.adapters.local.maintenance import LocalIndexService, SqliteMaintenanceStore
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer, LocalModelPaths, data_dir
 from nodo_api.adapters.local.queue import LocalWorkerLoop, SqliteJobQueue
@@ -40,6 +40,7 @@ from nodo_api.errors import ModelUnavailable
 from nodo_api.services.entity_index import EntityIndexer
 from nodo_api.services.exports import ExportService
 from nodo_api.services.extraction import ChunkedExtractor
+from nodo_api.services.fragment_extraction import ChunkedFragmentExtractor, extraction_version
 from nodo_api.services.index_maintenance import IndexMaintenanceService
 from nodo_api.services.ingestion import IngestionService
 from nodo_api.services.retention import RetentionService
@@ -219,8 +220,13 @@ def local_adapters(settings: Settings):
         extractor: Any = ChunkedExtractor(
             LocalExtractor(server, arbiter), settings.local_extract_window_tokens
         )
+        fragment_extractor: Any = ChunkedFragmentExtractor(
+            LocalFragmentExtractor(server, arbiter), settings.local_extract_window_tokens
+        )
+        doc_version: str | None = extraction_version(models.llm_gguf.stem[:80])
     else:
         llm, extractor = Unavailable("language model"), Unavailable("language model")
+        fragment_extractor, doc_version = Unavailable("language model"), None
 
     entity_indexer = EntityIndexer(
         graph,
@@ -304,6 +310,8 @@ def local_adapters(settings: Settings):
         fragments=SqliteFragmentRepository(db),
         fragment_index=SqliteFragmentIndex(db, embedder, min_margin=settings.local_search_margin),
         imports=SqliteImportJobRepository(db),
+        fragment_extractor=fragment_extractor,
+        extraction_version=doc_version,
         source_blobs=LocalSourceBlobStore(
             root / "sources",
             max_bytes=settings.local_import_max_bytes,

@@ -10,11 +10,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from nodo_api.adapters.azure.openai_extractor import AzureOpenAiExtractor
+from nodo_api.adapters.azure.openai_extractor import (
+    AzureOpenAiExtractor,
+    AzureOpenAiFragmentExtractor,
+)
 from nodo_api.adapters.azure.openai_llm import AzureOpenAiLlm
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer
 from nodo_api.domain.graph import Entity, Extraction, Subgraph
 from nodo_api.domain.models import Locale, TranscriptSegment
+from nodo_api.domain.sources import Fragment
 
 REQUEST_TIMEOUT_SECONDS = 900
 ANSWER_OPTIONS: dict[str, Any] = {
@@ -75,3 +79,18 @@ class LocalExtractor(_LocalServer):
         with self.lease():
             extractor = AzureOpenAiExtractor(self.client(), MODEL_NAME, EXTRACTION_OPTIONS)
             return extractor.extract(segments, locale, known_decisions, speakers)
+
+
+class LocalFragmentExtractor(_LocalServer):
+    """Entities and relations from document fragments, with the same model and options."""
+
+    def extract(
+        self,
+        fragments: tuple[Fragment, ...],
+        section_path: tuple[str, ...],
+        locale: Locale,
+        known_decisions: tuple[Entity, ...] = (),
+    ) -> Extraction:
+        with self.lease():
+            extractor = AzureOpenAiFragmentExtractor(self.client(), MODEL_NAME, EXTRACTION_OPTIONS)
+            return extractor.extract(fragments, section_path, locale, known_decisions)

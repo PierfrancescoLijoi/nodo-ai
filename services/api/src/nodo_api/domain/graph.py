@@ -226,6 +226,20 @@ class Extraction:
 
 
 @dataclass(frozen=True, slots=True)
+class DocumentExtraction:
+    """An extraction of a whole document with the accounting of what could not be read.
+
+    `skipped_windows` counts windows that lost at least one fragment to a model failure and
+    `skipped_fragment_ids` names those fragments (ids only, never text). When it is above zero
+    the extraction is partial and must not be recorded as the current extraction version."""
+
+    extraction: Extraction
+    total_windows: int
+    skipped_windows: int
+    skipped_fragment_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class GraphWriteResult:
     entities: int = 0
     relations: int = 0
@@ -251,7 +265,13 @@ class Change:
 
 
 class ExtractionError(RuntimeError):
-    """The model's answer could not be used (not valid, or cut off before it was complete)."""
+    """The model's answer could not be used (not valid, or cut off before it was complete).
+
+    `code` is a stable machine-readable reason; the message never holds model or document text."""
+
+    def __init__(self, message: str = "", code: str = "extraction_failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 ANONYMOUS_SPEAKER = re.compile(r"s[0-9]+")

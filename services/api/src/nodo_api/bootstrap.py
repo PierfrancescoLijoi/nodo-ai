@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from nodo_api.config import Settings
+from nodo_api.ports import DocumentExtractor
 from nodo_api.resilience import Guarded, RetryPolicy, make_guard
 from nodo_api.services.exports import ExportService
+from nodo_api.services.fragment_extraction import ChunkedFragmentExtractor, extraction_version
 from nodo_api.services.ingestion import IngestionService
 
 COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
@@ -44,6 +46,10 @@ class Adapters:
     imports: Any = None  # import jobs of documents (Task 5); local and memory only, None on Azure
     source_blobs: Any = None  # original files of documents (Task 6); local and memory only
     fragment_index: Any = None  # search over fragments of documents (Task 8); local and memory
+    fragment_extractor: DocumentExtractor | None = (
+        None  # entities from document fragments (Task 9); local and memory
+    )
+    extraction_version: str | None = None  # stored with a source version: prompt and model
 
 
 @dataclass(slots=True)
@@ -99,6 +105,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         seed_memory_adapters,
     )
     from nodo_api.adapters.memory.extractor import KeywordExtractor
+    from nodo_api.adapters.memory.fragment_extractor import KeywordFragmentExtractor
 
     meetings = MemoryMeetingRepository()
     transcripts = MemoryTranscriptRepository()
@@ -125,6 +132,10 @@ def memory_adapters(settings: Settings) -> Adapters:
         fragments=MemoryFragmentRepository(sources, transcripts),
         imports=MemoryImportJobRepository(sources),
         fragment_index=MemoryFragmentIndex(sources),
+        fragment_extractor=ChunkedFragmentExtractor(
+            KeywordFragmentExtractor(), settings.local_extract_window_tokens
+        ),
+        extraction_version=extraction_version("keyword"),
         source_blobs=MemorySourceBlobStore(
             max_bytes=settings.local_import_max_bytes,
             upload_seconds=settings.upload_session_seconds,

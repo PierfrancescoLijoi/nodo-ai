@@ -11,6 +11,7 @@ from nodo_api.domain.documents import ParsedDocument
 from nodo_api.domain.exports import Export, ExportState
 from nodo_api.domain.graph import (
     Change,
+    DocumentExtraction,
     Entity,
     EntityType,
     Extraction,
@@ -512,6 +513,32 @@ class Extractor(Protocol):
         known_decisions: tuple[Entity, ...],
         speakers: Mapping[str, str] | None = None,
     ) -> Extraction: ...
+
+
+class FragmentExtractor(Protocol):
+    """Entities and relations from fragments of one source; evidence ids are fragment ids and
+    only ids of the fragments passed in. `section_path` is the breadcrumb of the window."""
+
+    def extract(
+        self,
+        fragments: tuple[Fragment, ...],
+        section_path: tuple[str, ...],
+        locale: Locale,
+        known_decisions: tuple[Entity, ...] = (),
+    ) -> Extraction: ...
+
+
+class DocumentExtractor(FragmentExtractor, Protocol):
+    """A fragment extractor that also reads a whole document: windows by section, halves a window
+    the model can not answer, and reports what it had to skip (never a silent partial result)."""
+
+    def extract_document(
+        self,
+        sections: Sequence[Section],
+        fragments: Sequence[Fragment],
+        locale: Locale,
+        known_decisions: tuple[Entity, ...] = (),
+    ) -> DocumentExtraction: ...
 
 
 class LlmClient(Protocol):
