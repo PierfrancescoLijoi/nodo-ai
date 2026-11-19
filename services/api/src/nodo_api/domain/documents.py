@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -37,6 +38,7 @@ PARSE_ERROR_CODES = frozenset(
 
 TARGET_FRAGMENT_CHARS = 1100
 ROOT_SECTION_TITLE = "Document"
+MIN_SPLIT_CHARS = 64  # a piece this short is kept even if a tokenizer says it is too long
 
 _BLOCK_SEPARATOR = "\n\n"
 _SENTENCE_END = re.compile(r"[.!?][\"')\]]*\s+")
@@ -228,7 +230,11 @@ def _strip_span(text: str, start: int, end: int) -> tuple[int, int]:
 
 
 def build_sections_and_fragments(
-    doc: ParsedDocument, source_id: str, version: int
+    doc: ParsedDocument,
+    source_id: str,
+    version: int,
+    *,
+    fits: Callable[[str], bool] | None = None,
 ) -> tuple[tuple[Section, ...], tuple[Fragment, ...]]:
     """Sections from the headings, fragments from every other block.
 
@@ -242,7 +248,10 @@ def build_sections_and_fragments(
       (two "Introduction" headings under one parent) the n-th repeat adds `n` to the hash input,
       so ids are distinct while the first occurrence keeps the plain path hash.
     - Fragment id: see `fragment_id`; the occurrence index counts identical text under an identical
-      path anywhere in the document, so ids stay distinct and stable for unchanged text."""
+      path anywhere in the document, so ids stay distinct and stable for unchanged text.
+    - `fits` (optional) says whether a fragment text fits the embedding model. A fragment that does
+      not is cut in two at the best boundary, again and again, down to MIN_SPLIT_CHARS; each piece
+      keeps the locator contract above (a later table part keeps its repeated header)."""
     text, spans = stable_text(doc.blocks)
     sections: list[Section] = []
     fragments: list[Fragment] = []
@@ -283,6 +292,16 @@ def build_sections_and_fragments(
             )
         )
 
+    def emit(block: Block, a: int, z: int, header: str) -> None:
+        body = f"{header}\n{text[a:z]}" if header else text[a:z]
+        if fits is None or z - a <= MIN_SPLIT_CHARS or fits(body):
+            add_fragment(block, body, (a, z))
+            return
+        for pa, pz in split_text(text[a:z], target_chars=max(2, (z - a) // 2)):
+            pa, pz = _strip_span(text, a + pa, a + pz)
+            if pa < pz:
+                emit(block, pa, pz, header)
+
     for block, (block_start, _) in zip(doc.blocks, spans, strict=True):
         if block.kind == "heading":
             assert block.heading_level is not None
@@ -303,10 +322,7 @@ def build_sections_and_fragments(
             a, z = _strip_span(text, block_start + a, block_start + z)
             if a == z:
                 continue
-            body = text[a:z]
-            if header and index > 0:
-                body = header + "\n" + body
-            add_fragment(block, body, (a, z))
+            emit(block, a, z, header if index > 0 else "")
 
     if not sections:
         open_section(ROOT_SECTION_TITLE, 1)

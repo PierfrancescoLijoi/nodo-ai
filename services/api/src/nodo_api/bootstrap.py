@@ -50,6 +50,7 @@ class Adapters:
         None  # entities from document fragments (Task 9); local and memory
     )
     extraction_version: str | None = None  # stored with a source version: prompt and model
+    source_import: Any = None  # the import service (Task 11); local and memory, None on Azure
 
 
 @dataclass(slots=True)
@@ -104,8 +105,10 @@ def memory_adapters(settings: Settings) -> Adapters:
         MockRetriever,
         seed_memory_adapters,
     )
+    from nodo_api.adapters.memory.documents import MemoryDocumentParser
     from nodo_api.adapters.memory.extractor import KeywordExtractor
     from nodo_api.adapters.memory.fragment_extractor import KeywordFragmentExtractor
+    from nodo_api.services.source_import import SourceImportService
 
     meetings = MemoryMeetingRepository()
     transcripts = MemoryTranscriptRepository()
@@ -114,32 +117,55 @@ def memory_adapters(settings: Settings) -> Adapters:
     sources = MemorySourceRepository(meetings)
     if settings.seed_demo_data:
         seed_memory_adapters(meetings, transcripts, retriever, graph)
+    queue = MemoryJobQueue()
+    audit = MemoryAuditLog()
+    fragments = MemoryFragmentRepository(sources, transcripts)
+    imports = MemoryImportJobRepository(sources)
+    fragment_index = MemoryFragmentIndex(sources)
+    fragment_extractor = ChunkedFragmentExtractor(
+        KeywordFragmentExtractor(), settings.local_extract_window_tokens
+    )
+    doc_version = extraction_version("keyword")
+    source_blobs = MemorySourceBlobStore(
+        max_bytes=settings.local_import_max_bytes,
+        upload_seconds=settings.upload_session_seconds,
+    )
+    source_import = SourceImportService(
+        sources,
+        fragments,
+        imports,
+        source_blobs,
+        MemoryDocumentParser(),  # tests register parse results; files are never opened here
+        fragment_index,
+        fragment_extractor,
+        graph,
+        queue,
+        audit,
+        extraction_version=doc_version,
+        control=queue,
+    )
     return Adapters(
         meetings,
         transcripts,
         MemoryBlobStore(),
-        MemoryJobQueue(),
+        queue,
         retriever,
         graph,
         MockLlm(),
-        MemoryAuditLog(),
+        audit,
         MemorySpeech(),
         KeywordExtractor(),
         retention=MemoryRetentionStore(meetings),
         exports=MemoryExportStore(),
         maintenance=MemoryMaintenanceStore(meetings),
         sources=sources,
-        fragments=MemoryFragmentRepository(sources, transcripts),
-        imports=MemoryImportJobRepository(sources),
-        fragment_index=MemoryFragmentIndex(sources),
-        fragment_extractor=ChunkedFragmentExtractor(
-            KeywordFragmentExtractor(), settings.local_extract_window_tokens
-        ),
-        extraction_version=extraction_version("keyword"),
-        source_blobs=MemorySourceBlobStore(
-            max_bytes=settings.local_import_max_bytes,
-            upload_seconds=settings.upload_session_seconds,
-        ),
+        fragments=fragments,
+        imports=imports,
+        fragment_index=fragment_index,
+        fragment_extractor=fragment_extractor,
+        extraction_version=doc_version,
+        source_blobs=source_blobs,
+        source_import=source_import,
     )
 
 

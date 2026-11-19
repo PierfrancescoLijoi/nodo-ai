@@ -61,12 +61,14 @@ class MemorySourceRepository:
             raise NotFoundError
         return source
 
-    def save(self, workspace_id: str, source: Source) -> Source:
+    def save(self, workspace_id: str, source: Source, *, live_only: bool = False) -> Source:
         if source.kind is SourceKind.MEETING:
             raise ValueError("Meetings are saved through the meeting repository")
         with self._lock:
             stored = self._sources.get((workspace_id, source.id))
             if stored is None or stored.kind is not source.kind:
+                raise NotFoundError
+            if live_only and stored.tombstoned_at is not None:
                 raise NotFoundError
             # The owner never moves and the version belongs to the fragment repository.
             saved = replace(source, owner_id=stored.owner_id, version=stored.version)

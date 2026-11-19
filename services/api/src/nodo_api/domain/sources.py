@@ -206,6 +206,7 @@ ImportState = Literal[
     "awaiting_confirmation",
 ]
 IMPORT_STATES: tuple[str, ...] = get_args(ImportState)
+ACTIVE_STATES = ("queued", "parsing", "indexing", "extracting")  # not ended yet
 
 
 class Clear:

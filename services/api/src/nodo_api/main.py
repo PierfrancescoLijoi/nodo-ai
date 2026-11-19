@@ -31,6 +31,7 @@ from nodo_api.services import (
     GraphService,
     MeetingService,
     QueryService,
+    SourceImportService,
     SourceService,
 )
 from nodo_api.services.exports import ExportService
@@ -70,6 +71,10 @@ class AppContainer:
     sources: Any = None
     fragments: Any = None
     source_service: SourceService | None = None
+    # Local and memory engines only; None on Azure (routes answer 501 there, Task 13).
+    imports: Any = None
+    source_blobs: Any = None
+    source_import: SourceImportService | None = None
 
 
 @asynccontextmanager
@@ -253,6 +258,9 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.sources,
         a.fragments,
         source_service,
+        a.imports,
+        a.source_blobs,
+        a.source_import,
     )
 
 

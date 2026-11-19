@@ -8,7 +8,14 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from nodo_api.adapters.memory.sources import MemorySourceRepository
-from nodo_api.domain.sources import CLEAR, Clear, ImportJob, SourceKind, check_job_update
+from nodo_api.domain.sources import (
+    ACTIVE_STATES,
+    CLEAR,
+    Clear,
+    ImportJob,
+    SourceKind,
+    check_job_update,
+)
 from nodo_api.errors import ConflictError, NotFoundError
 
 
@@ -99,6 +106,11 @@ class MemoryImportJobRepository:
     def is_cancel_requested(self, workspace_id: str, source_id: str) -> bool:
         job = self._jobs.get((workspace_id, source_id))
         return job is not None and job.cancel_requested
+
+    def in_progress(self, limit: int) -> tuple[ImportJob, ...]:
+        with self._lock:
+            running = [j for j in self._jobs.values() if j.state in ACTIVE_STATES]
+        return tuple(sorted(running, key=lambda j: j.updated_at)[:limit])
 
     def delete(self, workspace_id: str, source_id: str) -> None:
         self._jobs.pop((workspace_id, source_id), None)

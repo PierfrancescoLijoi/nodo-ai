@@ -131,9 +131,11 @@ class SourceRepository(Protocol):
         """System access for the ingestion worker, which acts for the owner and has no user."""
         ...
 
-    def save(self, workspace_id: str, source: Source) -> Source:
+    def save(self, workspace_id: str, source: Source, *, live_only: bool = False) -> Source:
         """Update title, state, origin, language, hash and tombstone. Owner and version stay.
-        Raises DuplicateContentError if another live source of the same owner has the hash."""
+        Raises DuplicateContentError if another live source of the same owner has the hash. With
+        live_only the write happens only while the stored source is not deleted, tested and written
+        together (NotFoundError otherwise), so a late writer can not bring a deleted source back."""
         ...
 
     def find_by_hash(self, workspace_id: str, user_id: str, content_hash: str) -> Source | None:
@@ -250,6 +252,12 @@ class ImportJobRepository(Protocol):
         ...
 
     def is_cancel_requested(self, workspace_id: str, source_id: str) -> bool: ...
+
+    def in_progress(self, limit: int) -> tuple[ImportJob, ...]:
+        """Jobs of every workspace that have not ended (queued, parsing, indexing, extracting),
+        least recently updated first: at engine start these are imports a crash interrupted or
+        whose queue message may never have been published."""
+        ...
 
     def delete(self, workspace_id: str, source_id: str) -> None:
         """Remove the job; no error if there is none."""

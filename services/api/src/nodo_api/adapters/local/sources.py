@@ -106,7 +106,7 @@ class SqliteSourceRepository:
             raise NotFoundError
         return _source(row)
 
-    def save(self, workspace_id: str, source: Source) -> Source:
+    def save(self, workspace_id: str, source: Source, *, live_only: bool = False) -> Source:
         if source.kind is SourceKind.MEETING:
             raise ValueError("Meetings are saved through the meeting repository")
         try:
@@ -114,7 +114,7 @@ class SqliteSourceRepository:
                 cursor = conn.execute(
                     "UPDATE sources SET title = ?, state = ?, origin = ?, language = ?,"
                     " content_hash = ?, tombstoned_at = ? WHERE workspace_id = ? AND id = ?"
-                    " AND kind = ?",
+                    " AND kind = ?" + (" AND tombstoned_at IS NULL" if live_only else ""),
                     (
                         source.title,
                         source.state,

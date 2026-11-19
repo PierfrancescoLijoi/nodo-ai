@@ -7,7 +7,7 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 
 from nodo_api.adapters.local.db import LocalDatabase, from_text, to_text
-from nodo_api.domain.sources import CLEAR, Clear, ImportJob, check_job_update
+from nodo_api.domain.sources import ACTIVE_STATES, CLEAR, Clear, ImportJob, check_job_update
 from nodo_api.errors import ConflictError, NotFoundError
 
 _COLUMNS = (
@@ -135,6 +135,15 @@ class SqliteImportJobRepository:
                 (workspace_id, source_id),
             ).fetchone()
         return bool(row and row["cancel_requested"])
+
+    def in_progress(self, limit: int) -> tuple[ImportJob, ...]:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                f"SELECT {_COLUMNS} FROM import_jobs WHERE state IN (?, ?, ?, ?)"
+                " ORDER BY updated_at LIMIT ?",
+                (*ACTIVE_STATES, limit),
+            ).fetchall()
+        return tuple(_job(row) for row in rows)
 
     def delete(self, workspace_id: str, source_id: str) -> None:
         with self._db.transaction() as conn:

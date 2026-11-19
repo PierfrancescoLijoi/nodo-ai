@@ -12,6 +12,8 @@ from typing import Any
 from nodo_api.adapters.local.answers import SqliteAnswerStore
 from nodo_api.adapters.local.blob import LocalBlobStore
 from nodo_api.adapters.local.db import LocalDatabase
+from nodo_api.adapters.local.documents.parser import SubprocessDocumentParser
+from nodo_api.adapters.local.documents.sniff import check_limits, sniff
 from nodo_api.adapters.local.embedder import DEFAULT_MODEL, LocalEmbedder
 from nodo_api.adapters.local.exports import SqliteExportStore
 from nodo_api.adapters.local.fragment_index import SqliteFragmentIndex
@@ -44,6 +46,7 @@ from nodo_api.services.fragment_extraction import ChunkedFragmentExtractor, extr
 from nodo_api.services.index_maintenance import IndexMaintenanceService
 from nodo_api.services.ingestion import IngestionService
 from nodo_api.services.retention import RetentionService
+from nodo_api.services.source_import import SourceImportService
 from nodo_api.worker import Worker
 
 logger = logging.getLogger("nodo_local")
@@ -122,6 +125,7 @@ class LocalRuntime:
     index: LocalIndexService
     warm_up: bool = False
     lock: EngineLock | None = None
+    imports: SourceImportService | None = None
     _stop: threading.Event = field(default_factory=threading.Event)
 
     def start(self) -> None:
@@ -135,6 +139,12 @@ class LocalRuntime:
                 logger.warning("released_stale_claims count=%s", released)
         except Exception as error:  # the one hour stale-claim rule still recovers them later
             logger.error("release_claims_failed type=%s", type(error).__name__)
+        # Imports a crash left running are queued again (their stages are idempotent).
+        if self.imports is not None:
+            try:
+                self.imports.resume_interrupted()
+            except Exception as error:
+                logger.error("resume_imports_failed type=%s", type(error).__name__)
         self.loop.start()
         threading.Thread(target=self._retention_loop, name="nodo-retention", daemon=True).start()
         if self.warm_up:
@@ -167,6 +177,23 @@ class LocalRuntime:
         self.db.close()
         if self.lock is not None:
             self.lock.release()
+
+
+def document_screen(settings: Settings):
+    """sniff and limits before every parse (Task 4): nothing heavy runs on a refused file."""
+
+    def screen(path: Path, name: str) -> None:
+        check_limits(
+            path,
+            sniff(path, name),
+            max_bytes=settings.local_import_max_bytes,
+            max_pages=settings.local_import_max_pages,
+            max_ratio=settings.local_import_max_ratio,
+            max_uncompressed_bytes=settings.local_import_max_uncompressed_bytes,
+            memory_mb=settings.local_parser_memory_mb,
+        )
+
+    return screen
 
 
 # E5 scores are compressed: related and unrelated texts sit between about 0.68 and 0.86. 0.78 sits
@@ -258,6 +285,35 @@ def local_adapters(settings: Settings):
         entity_indexer=entity_indexer,
         answers=answers,
     )
+    sources = SqliteSourceRepository(db)
+    fragments = SqliteFragmentRepository(db)
+    imports = SqliteImportJobRepository(db)
+    fragment_index = SqliteFragmentIndex(db, embedder, min_margin=settings.local_search_margin)
+    source_blobs = LocalSourceBlobStore(
+        root / "sources",
+        max_bytes=settings.local_import_max_bytes,
+        upload_seconds=settings.upload_session_seconds,
+    )
+
+    source_import = SourceImportService(
+        sources,
+        fragments,
+        imports,
+        source_blobs,
+        SubprocessDocumentParser(
+            settings.local_parser_timeout_seconds, settings.local_parser_memory_mb
+        ),
+        fragment_index,
+        fragment_extractor,
+        graph,
+        queue,
+        audit,
+        extraction_version=doc_version,
+        answers=answers,
+        control=queue,
+        screen=document_screen(settings),
+        token_fits=embedder.within_ceiling,
+    )
     source = SyncSource(
         engine="local",
         speech=f"whisper-{models.whisper_model}",
@@ -273,6 +329,7 @@ def local_adapters(settings: Settings):
             Worker(
                 ingestion,
                 exports=ExportService(exports, meetings, transcripts, graph, blobs, queue, audit),
+                imports=source_import,
             ),
         ),
         models,
@@ -288,6 +345,7 @@ def local_adapters(settings: Settings):
         ),
         settings.local_warm_up,
         EngineLock(root / "engine.lock"),
+        source_import,
     )
     return Adapters(
         meetings,
@@ -306,15 +364,12 @@ def local_adapters(settings: Settings):
         maintenance=maintenance,
         entity_indexer=entity_indexer,
         answers=answers,
-        sources=SqliteSourceRepository(db),
-        fragments=SqliteFragmentRepository(db),
-        fragment_index=SqliteFragmentIndex(db, embedder, min_margin=settings.local_search_margin),
-        imports=SqliteImportJobRepository(db),
+        sources=sources,
+        fragments=fragments,
+        fragment_index=fragment_index,
+        imports=imports,
         fragment_extractor=fragment_extractor,
         extraction_version=doc_version,
-        source_blobs=LocalSourceBlobStore(
-            root / "sources",
-            max_bytes=settings.local_import_max_bytes,
-            upload_seconds=settings.upload_session_seconds,
-        ),
+        source_blobs=source_blobs,
+        source_import=source_import,
     )
