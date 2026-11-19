@@ -1834,6 +1834,67 @@
         ],
         "title": "VoiceQueryInput",
         "type": "object"
+      },
+      "WatchFolderCreate": {
+        "properties": {
+          "path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "WatchFolderCreate",
+        "type": "object"
+      },
+      "WatchFolderList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WatchFolderOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "WatchFolderList",
+        "type": "object"
+      },
+      "WatchFolderOutput": {
+        "description": "A watched folder; its path is answered to its owner only.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "enabled",
+          "created_at"
+        ],
+        "title": "WatchFolderOutput",
+        "type": "object"
       }
     }
   },
@@ -2863,6 +2924,94 @@
           }
         },
         "summary": "Create Source"
+      }
+    },
+    "/v1/sources/watch-folders": {
+      "get": {
+        "operationId": "list_watch_folders_v1_sources_watch_folders_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchFolderList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Watch Folders"
+      },
+      "post": {
+        "description": "Watch a folder on this computer: supported files in it (down to five folder levels) are imported once they stop changing, a changed file becomes a new version, and recordings wait for a processing confirmation. 422 for a relative path, a missing folder, a network share, a link or a folder that overlaps the NODO data folder; 409 when it is watched already.",
+        "operationId": "add_watch_folder_v1_sources_watch_folders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchFolderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchFolderOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Watch Folder"
+      }
+    },
+    "/v1/sources/watch-folders/{folder_id}": {
+      "delete": {
+        "description": "Stop watching. Sources already imported from the folder stay.",
+        "operationId": "delete_watch_folder_v1_sources_watch_folders__folder_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "title": "Folder Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Watch Folder"
       }
     },
     "/v1/sources/{source_id}": {

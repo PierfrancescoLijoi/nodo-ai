@@ -130,6 +130,23 @@ class SourceCreate(FrozenModel):
     origin_note: str | None = Field(default=None, max_length=500)
 
 
+class WatchFolderCreate(FrozenModel):
+    path: str = Field(min_length=1, max_length=1024)
+
+
+class WatchFolderOutput(FrozenModel):
+    """A watched folder; its path is answered to its owner only."""
+
+    id: str
+    path: str
+    enabled: bool
+    created_at: datetime
+
+
+class WatchFolderList(FrozenModel):
+    items: tuple[WatchFolderOutput, ...]
+
+
 class SourceCreateOutput(FrozenModel):
     source: SourceOutput
     upload_url: str

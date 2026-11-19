@@ -51,6 +51,7 @@ class Adapters:
     )
     extraction_version: str | None = None  # stored with a source version: prompt and model
     source_import: Any = None  # the import service (Task 11); local and memory, None on Azure
+    folder_watcher: Any = None  # watched folders (Task 15); local and memory, None on Azure
 
 
 @dataclass(slots=True)
@@ -101,6 +102,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemorySourceRepository,
         MemorySpeech,
         MemoryTranscriptRepository,
+        MemoryWatchFolderRepository,
         MockLlm,
         MockRetriever,
         seed_memory_adapters,
@@ -108,6 +110,7 @@ def memory_adapters(settings: Settings) -> Adapters:
     from nodo_api.adapters.memory.documents import MemoryDocumentParser
     from nodo_api.adapters.memory.extractor import KeywordExtractor
     from nodo_api.adapters.memory.fragment_extractor import KeywordFragmentExtractor
+    from nodo_api.services.folder_watch import FolderWatcher
     from nodo_api.services.source_import import SourceImportService
 
     meetings = MemoryMeetingRepository()
@@ -168,6 +171,10 @@ def memory_adapters(settings: Settings) -> Adapters:
         extraction_version=doc_version,
         source_blobs=source_blobs,
         source_import=source_import,
+        # No poll thread here: nothing scans unless a caller runs scan_once.
+        folder_watcher=FolderWatcher(
+            MemoryWatchFolderRepository(), source_import, source_blobs, source_blobs.root
+        ),
     )
 
 

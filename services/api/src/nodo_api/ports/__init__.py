@@ -25,6 +25,7 @@ from nodo_api.ports.protocols import (
     SpeechToText,
     StagedSpeechToText,
     TranscriptRepository,
+    WatchFolderRepository,
 )
 
 __all__ = [
@@ -54,4 +55,5 @@ __all__ = [
     "SpeechToText",
     "StagedSpeechToText",
     "TranscriptRepository",
+    "WatchFolderRepository",
 ]

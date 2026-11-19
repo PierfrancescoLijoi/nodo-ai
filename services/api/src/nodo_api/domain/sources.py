@@ -32,6 +32,29 @@ class SourceKind(StrEnum):
     AUDIO = "audio"
 
 
+@dataclass(frozen=True, slots=True)
+class WatchFolder:
+    id: str
+    workspace_id: str
+    owner_id: str
+    path: str
+    enabled: bool
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WatchFile:
+    folder_id: str
+    rel_path: str
+    size: int
+    mtime_ns: int
+    sha256: str | None = None
+    source_id: str | None = None
+    seen_stable_count: int = 1
+    # The source is another path's or an upload's with the same bytes: never reimported here.
+    linked_only: bool = False
+
+
 def _check_range(name: str, value: tuple[int, int]) -> None:
     start, end = value
     if start < 0 or end < start:

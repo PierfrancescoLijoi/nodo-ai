@@ -35,6 +35,7 @@ from nodo_api.adapters.local.source_blobs import LocalSourceBlobStore
 from nodo_api.adapters.local.sources import SqliteFragmentRepository, SqliteSourceRepository
 from nodo_api.adapters.local.speech import LocalSpeechToText
 from nodo_api.adapters.local.sync import LocalSyncService
+from nodo_api.adapters.local.watch_folders import SqliteWatchFolderRepository
 from nodo_api.api.v1.sync_schemas import SyncSource
 from nodo_api.auth import LOCAL_USER, LOCAL_WORKSPACE
 from nodo_api.config import Settings
@@ -42,6 +43,7 @@ from nodo_api.errors import ModelUnavailable
 from nodo_api.services.entity_index import EntityIndexer
 from nodo_api.services.exports import ExportService
 from nodo_api.services.extraction import ChunkedExtractor
+from nodo_api.services.folder_watch import FolderWatcher
 from nodo_api.services.fragment_extraction import ChunkedFragmentExtractor, extraction_version
 from nodo_api.services.index_maintenance import IndexMaintenanceService
 from nodo_api.services.ingestion import IngestionService
@@ -126,7 +128,10 @@ class LocalRuntime:
     warm_up: bool = False
     lock: EngineLock | None = None
     imports: SourceImportService | None = None
+    watcher: FolderWatcher | None = None
+    watch_poll_seconds: float = 30.0
     _stop: threading.Event = field(default_factory=threading.Event)
+    _watch_thread: threading.Thread | None = None
 
     def start(self) -> None:
         # One engine per data folder; the second fails here, before it touches any claim.
@@ -147,6 +152,14 @@ class LocalRuntime:
                 logger.error("resume_imports_failed type=%s", type(error).__name__)
         self.loop.start()
         threading.Thread(target=self._retention_loop, name="nodo-retention", daemon=True).start()
+        if self.watcher is not None:  # after the engine lock: one engine scans a data folder
+            self._watch_thread = threading.Thread(
+                target=self.watcher.run,
+                args=(self._stop, self.watch_poll_seconds),
+                name="nodo-watch",
+                daemon=True,
+            )
+            self._watch_thread.start()
         if self.warm_up:
             threading.Thread(target=self._warm, name="nodo-warm-up", daemon=True).start()
 
@@ -172,6 +185,8 @@ class LocalRuntime:
     def stop(self) -> None:
         self._stop.set()
         self.loop.stop()
+        if self._watch_thread is not None:  # a scan in progress ends its file, then the loop
+            self._watch_thread.join(timeout=30)
         if self.server is not None:
             self.server.stop()
         self.db.close()
@@ -316,6 +331,7 @@ def local_adapters(settings: Settings):
         speech=speech,
         speech_locales=settings.speech_candidate_locales,
     )
+    watcher = FolderWatcher(SqliteWatchFolderRepository(db), source_import, source_blobs, root)
     source = SyncSource(
         engine="local",
         speech=f"whisper-{models.whisper_model}",
@@ -354,6 +370,8 @@ def local_adapters(settings: Settings):
         settings.local_warm_up,
         EngineLock(root / "engine.lock"),
         source_import,
+        watcher,
+        settings.watch_poll_seconds,
     )
     return Adapters(
         meetings,
@@ -380,4 +398,5 @@ def local_adapters(settings: Settings):
         extraction_version=doc_version,
         source_blobs=source_blobs,
         source_import=source_import,
+        folder_watcher=watcher,
     )

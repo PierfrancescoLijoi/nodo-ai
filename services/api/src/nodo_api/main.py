@@ -81,6 +81,7 @@ class AppContainer:
     imports: Any = None
     source_blobs: Any = None
     source_import: SourceImportService | None = None
+    folder_watcher: Any = None
 
 
 @asynccontextmanager
@@ -291,6 +292,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.imports,
         a.source_blobs,
         a.source_import,
+        a.folder_watcher,
     )
 
 

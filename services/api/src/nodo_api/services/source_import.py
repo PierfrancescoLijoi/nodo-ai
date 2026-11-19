@@ -110,6 +110,7 @@ _KINDS = {
     ".md": SourceKind.NOTE,
     ".markdown": SourceKind.NOTE,
 }
+SUPPORTED_EXTENSIONS = frozenset(_KINDS)
 
 
 class _Stop(Exception):
@@ -121,6 +122,12 @@ def job_key(source_id: str, content_hash: str, attempt: int) -> str:
     resume adds its attempt number, because a finished or cancelled key is never delivered again."""
     key = f"{source_id}:{content_hash[:16]}"
     return f"{key}:{attempt}" if attempt else key
+
+
+def source_id_for_key(workspace_id: str, user_id: str, idempotency_key: str) -> str:
+    """The id of the source an idempotency key names, so a replay finds it without a key table."""
+    key = "\x00".join((workspace_id, user_id, idempotency_key)).encode("utf-8", "replace")
+    return f"src_{hashlib.sha256(key).hexdigest()[:32]}"
 
 
 def _kind_for(name: str, kind: SourceKind | None, *, audio: bool) -> SourceKind:
@@ -222,9 +229,7 @@ class SourceImportService:
         if idempotency_key is None:
             source_id = f"src_{uuid.uuid4().hex}"
         else:
-            # The key names the source, so a replay finds it without a separate key table.
-            key = "\x00".join((workspace_id, user_id, idempotency_key)).encode("utf-8", "replace")
-            source_id = f"src_{hashlib.sha256(key).hexdigest()[:32]}"
+            source_id = source_id_for_key(workspace_id, user_id, idempotency_key)
         created_at = self._clock()
         source = Source(
             source_id,
@@ -334,10 +339,17 @@ class SourceImportService:
         raise ConflictError
 
     def reimport(
-        self, workspace_id: str, user_id: str, source_id: str, new_file: Path
+        self,
+        workspace_id: str,
+        user_id: str,
+        source_id: str,
+        new_file: Path,
+        *,
+        expected_sha256: str | None = None,
     ) -> ImportJob:
         """New bytes for an existing source: the same bytes are a no-op, bytes of another live
-        source answer with that source, different bytes become the next version."""
+        source answer with that source, different bytes become the next version. With
+        expected_sha256 (a watched file) a copy with other bytes is dropped: ConflictError."""
         source = self._owned(workspace_id, user_id, source_id)
         path = Path(new_file)
         is_junction = getattr(path, "is_junction", lambda: False)
@@ -393,6 +405,9 @@ class SourceImportService:
             version = len(self._file_versions(workspace_id, source_id)) + 1
             stored = self._blobs.adopt(workspace_id, source_id, version, path)
             _, digest = self._blobs.size_and_sha256(stored)  # what was copied is what counts
+            if expected_sha256 is not None and digest != expected_sha256:
+                stored.unlink(missing_ok=True)  # changed while copied: no version is made
+                raise ConflictError
             source = self._sources.update(
                 workspace_id,
                 source_id,

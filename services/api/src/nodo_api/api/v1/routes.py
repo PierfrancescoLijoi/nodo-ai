@@ -59,6 +59,9 @@ from nodo_api.api.v1.schemas import (
     TranscriptPage,
     UploadSessionOutput,
     VoiceQueryInput,
+    WatchFolderCreate,
+    WatchFolderList,
+    WatchFolderOutput,
 )
 from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
@@ -236,6 +239,53 @@ def list_sources(
         items=tuple(source_output(item) for item in items),
         next_cursor=encode_cursor(items[-1]) if has_more and items else None,
     )
+
+
+def _folder_watcher(container):
+    if getattr(container, "folder_watcher", None) is None:
+        raise NotAvailableOnEngine
+    return container.folder_watcher
+
+
+def _watch_folder_output(folder) -> WatchFolderOutput:
+    return WatchFolderOutput(
+        id=folder.id, path=folder.path, enabled=folder.enabled, created_at=folder.created_at
+    )
+
+
+# Before /sources/{source_id}: these paths would otherwise be read as a source id.
+@router.get("/sources/watch-folders", response_model=WatchFolderList)
+def list_watch_folders(actor: PrincipalDep, request: Request):
+    watcher = _folder_watcher(request.app.state.container)
+    folders = watcher.list_folders(actor.workspace_id, actor.user_id)
+    return WatchFolderList(items=tuple(_watch_folder_output(f) for f in folders))
+
+
+@router.post(
+    "/sources/watch-folders",
+    response_model=WatchFolderOutput,
+    status_code=status.HTTP_201_CREATED,
+    description="Watch a folder on this computer: supported files in it (down to five folder "
+    "levels) are imported once they stop changing, a changed file becomes a new version, and "
+    "recordings wait for a processing confirmation. 422 for a relative path, a missing folder, a "
+    "network share, a link or a folder that overlaps the NODO data folder; 409 when it is "
+    "watched already.",
+)
+def add_watch_folder(payload: WatchFolderCreate, actor: PrincipalDep, request: Request):
+    watcher = _folder_watcher(request.app.state.container)
+    folder = watcher.add_folder(actor.workspace_id, actor.user_id, payload.path)
+    return _watch_folder_output(folder)
+
+
+@router.delete(
+    "/sources/watch-folders/{folder_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    description="Stop watching. Sources already imported from the folder stay.",
+)
+def delete_watch_folder(folder_id: str, actor: PrincipalDep, request: Request) -> Response:
+    watcher = _folder_watcher(request.app.state.container)
+    watcher.delete_folder(actor.workspace_id, actor.user_id, folder_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _import_status(job, *, requested_source_id: str | None = None) -> ImportStatusOutput:

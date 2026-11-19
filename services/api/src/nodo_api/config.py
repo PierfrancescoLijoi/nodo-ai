@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     local_import_max_uncompressed_bytes: int = Field(default=512 * 1024 * 1024, ge=1)
     local_parser_timeout_seconds: float = Field(default=300.0, gt=0)
     local_parser_memory_mb: int = Field(default=2048, ge=64)
+    watch_poll_seconds: float = Field(default=30.0, ge=5.0)  # a floor: each scan walks the tree
 
     azure_storage_account: str | None = None
     azure_servicebus_fqdn: str | None = None

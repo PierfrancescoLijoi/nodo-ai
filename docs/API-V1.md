@@ -105,6 +105,28 @@ and versions routes return `404`. `DELETE /v1/sources/{id}` returns `204` after 
 the source and its derived data. Meetings must be deleted through `/v1/meetings/{id}`; using the
 source delete returns `422` with `use the meetings API`.
 
+### Watched folders
+
+`POST /v1/sources/watch-folders` with `{ path }` watches a folder on the engine's computer and
+returns `201` with `WatchFolder { id, path, enabled, created_at }`. The path must be absolute, an
+existing folder on a local fixed drive (no network share or UNC path), not a symbolic link or
+junction, and must not overlap the NODO data folder in any spelling; otherwise `422`. The same folder twice returns `409`. `GET /v1/sources/watch-folders` returns
+`{ items: WatchFolder[] }` for the caller only; `DELETE /v1/sources/watch-folders/{id}` returns
+`204` and stops watching (sources already imported stay), `404` for another user's folder. The
+path is stored in the local database, returned only to its owner and never logged.
+
+The engine scans every `watch_poll_seconds` (default 30, at least 5) down to five folder levels
+and at most 5,000 entries per folder. A supported file is imported once two scans in a row see
+the same size and modification time and it did not change while it was copied; a changed file
+becomes a new version of the same source, and a recording waits in `awaiting_confirmation` as
+above, also after a change. Each watched path owns its source: a file whose bytes another source
+already holds (another watched file or an upload) is linked to it without a duplicate, and when
+that file later changes it starts its own source; the other source is never changed by it. Links, junctions, hidden and
+system files, OneDrive files that are not on this computer (never downloaded by the scan), and
+`~$*`, `.~lock*`, `*.tmp`, `*.crdownload`, `*.part` are skipped. A source deleted by its owner
+is imported again only when the file content changes. Removing a watch folder and adding it again
+starts afresh: every file is imported again, also ones whose source was deleted.
+
 Non-meeting sources are available on the local engine. On an engine without source-import
 adapters the import, status, version and delete routes return `501` with error code
 `not_available_on_engine`. Source responses never expose `workspace_id`, `owner_id`, a full

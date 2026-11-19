@@ -18,6 +18,7 @@ from nodo_api.adapters.memory.graph import MemoryGraphStore
 from nodo_api.adapters.memory.imports import MemoryImportJobRepository
 from nodo_api.adapters.memory.source_blobs import MemorySourceBlobStore
 from nodo_api.adapters.memory.sources import MemoryFragmentRepository, MemorySourceRepository
+from nodo_api.adapters.memory.watch_folders import MemoryWatchFolderRepository
 
 __all__ = [
     "MemoryAuditLog",
@@ -36,6 +37,7 @@ __all__ = [
     "MemorySpeech",
     "MemorySpeechJobStore",
     "MemoryTranscriptRepository",
+    "MemoryWatchFolderRepository",
     "MockLlm",
     "MockRetriever",
     "seed_memory_adapters",

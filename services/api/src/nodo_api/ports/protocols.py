@@ -44,6 +44,8 @@ from nodo_api.domain.sources import (
     Source,
     SourceKind,
     SourceVersion,
+    WatchFile,
+    WatchFolder,
 )
 
 # Every method takes workspace_id (and, where data belongs to a person, the user or the set of
@@ -194,6 +196,51 @@ class SourceRepository(Protocol):
     ) -> tuple[Source, ...]:
         """Newest first, never tombstoned. Optional state is exact and title query is a
         case-insensitive substring. Pass the last (created_at, id) seen as `cursor`."""
+        ...
+
+
+class WatchFolderRepository(Protocol):
+    """Watched folders (Task 15) and what each scan saw of their files. Local and memory only."""
+
+    def add(self, folder: WatchFolder) -> WatchFolder:
+        """ValueError when the owner already watches this path."""
+        ...
+
+    def list_owned(self, workspace_id: str, owner_id: str) -> tuple[WatchFolder, ...]: ...
+
+    def list_enabled(self) -> tuple[WatchFolder, ...]:
+        """Every enabled folder of every owner: for the scan, never for a request."""
+        ...
+
+    def delete_owned(self, workspace_id: str, owner_id: str, folder_id: str) -> None:
+        """Forget the folder and its files (not the sources); NotFoundError if not the owner's."""
+        ...
+
+    def observe_file(self, folder_id: str, rel_path: str, size: int, mtime_ns: int) -> WatchFile:
+        """Record one scan: seen_stable_count grows while size and mtime stay, else restarts at
+        1. sha256 and source_id are kept."""
+        ...
+
+    def get_file(self, folder_id: str, rel_path: str) -> WatchFile | None: ...
+
+    def mark_imported(
+        self,
+        folder_id: str,
+        rel_path: str,
+        sha256: str,
+        source_id: str | None,
+        linked_only: bool = False,
+    ) -> None:
+        """The bytes this file had when it was last handled and the source holding them;
+        linked_only when that source belongs to another path or an upload. No error if gone."""
+        ...
+
+    def prune(self, folder_id: str, keep: frozenset[str]) -> None:
+        """Forget the files of a folder that a complete scan did not see."""
+        ...
+
+    def reset_stable(self, folder_id: str, rel_path: str) -> None:
+        """Handle the file again at the next stable scan (after a failure worth retrying)."""
         ...
 
 

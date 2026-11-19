@@ -147,6 +147,8 @@ def test_openapi_lists_source_paths(app) -> None:
         "/v1/sources/{source_id}/import",
         "/v1/sources/{source_id}/retry",
         "/v1/sources/{source_id}/versions",
+        "/v1/sources/watch-folders",
+        "/v1/sources/watch-folders/{folder_id}",
     }
 
 
