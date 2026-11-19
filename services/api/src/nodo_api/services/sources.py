@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from nodo_api.domain.sources import SourceKind
-from nodo_api.errors import NotFoundError, ValidationFailed
+from nodo_api.errors import NotFoundError, UseMeetingsApi
 from nodo_api.ports import (
     AuditLog,
     FragmentIndex,
@@ -67,7 +67,7 @@ class SourceService:
         and an unfinished delete is run again at engine start (`finish_deletes`)."""
         source = self._sources.get_owned(workspace_id, user_id, source_id, include_tombstoned=True)
         if source.kind is SourceKind.MEETING:
-            raise ValidationFailed("use the meetings API")
+            raise UseMeetingsApi("use the meetings API")
 
         if source.tombstoned_at is None or source.state != DELETED:
             self._sources.save(

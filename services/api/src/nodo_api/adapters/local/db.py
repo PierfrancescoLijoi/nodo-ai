@@ -41,6 +41,11 @@ def now_text() -> str:
     return datetime.now(UTC).strftime(TIME_FORMAT)
 
 
+def _casefold(value: object) -> str:
+    """Unicode case folding shared by SQLite title filters and the memory repository."""
+    return value.casefold() if isinstance(value, str) else ""
+
+
 class LocalDatabase:
     def __init__(self, path: Path | str) -> None:
         self._path = str(path)
@@ -61,6 +66,7 @@ class LocalDatabase:
                 check_same_thread=False,  # each thread keeps its own; close() runs elsewhere
             )
             conn.row_factory = sqlite3.Row
+            conn.create_function("nodo_casefold", 1, _casefold, deterministic=True)
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
             conn.execute("PRAGMA foreign_keys = ON")

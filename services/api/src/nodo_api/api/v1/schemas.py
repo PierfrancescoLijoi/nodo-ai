@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from nodo_api.domain.models import Answerability, Locale, MeetingState
-from nodo_api.domain.sources import SourceKind
+from nodo_api.domain.sources import ImportState, SourceKind
 
 
 class FrozenModel(BaseModel):
@@ -121,6 +121,46 @@ class SourceOutput(FrozenModel):
 class SourceList(FrozenModel):
     items: tuple[SourceOutput, ...]
     next_cursor: str | None
+
+
+class SourceCreate(FrozenModel):
+    filename: str = Field(min_length=1, max_length=200)
+    size_bytes: int = Field(ge=1)
+    kind: SourceKind | None = None
+    origin_note: str | None = Field(default=None, max_length=500)
+
+
+class SourceCreateOutput(FrozenModel):
+    source: SourceOutput
+    upload_url: str
+    expires_in_seconds: int
+
+
+class ImportOutput(FrozenModel):
+    state: ImportState
+    step: str | None
+    done: int
+    total: int
+    attempt: int
+    error_code: str | None
+    unchanged: bool = False
+    existing_source_id: str | None = None
+
+
+class ImportStatusOutput(FrozenModel):
+    import_: ImportOutput = Field(alias="import", serialization_alias="import")
+
+
+class SourceVersionOutput(FrozenModel):
+    version: int
+    content_hash_prefix: str
+    parser: str
+    created_at: datetime
+    size_bytes: int
+
+
+class SourceVersionList(FrozenModel):
+    items: tuple[SourceVersionOutput, ...]
 
 
 class SectionOutput(FrozenModel):

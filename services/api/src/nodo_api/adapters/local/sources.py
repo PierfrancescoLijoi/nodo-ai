@@ -23,7 +23,7 @@ from nodo_api.domain.sources import (
     check_version,
     outline_order,
 )
-from nodo_api.errors import NotFoundError
+from nodo_api.errors import ConflictError, NotFoundError
 
 _SOURCE_COLUMNS = (
     "workspace_id, owner_id, id, kind, title, state, origin, language, content_hash, version,"
@@ -137,6 +137,43 @@ class SqliteSourceRepository:
             raise DuplicateContentError("This owner already has a source with this hash") from error
         return _source(row)
 
+    def update(
+        self,
+        workspace_id: str,
+        source_id: str,
+        *,
+        state: str | None = None,
+        content_hash: str | None = None,
+        title: str | None = None,
+        expected_state: str | None = None,
+    ) -> Source:
+        changes = {"state": state, "content_hash": content_hash, "title": title}
+        columns = [name for name, value in changes.items() if value is not None]
+        where = "workspace_id = ? AND id = ? AND kind != 'meeting' AND tombstoned_at IS NULL"
+        try:
+            with self._db.transaction() as conn:
+                row = conn.execute(
+                    f"SELECT {_SOURCE_COLUMNS} FROM sources WHERE {where}",
+                    (workspace_id, source_id),
+                ).fetchone()
+                if row is None:
+                    raise NotFoundError
+                if expected_state is not None and row["state"] != expected_state:
+                    raise ConflictError
+                if columns:  # names come from the fixed dict above, never from the caller
+                    conn.execute(
+                        f"UPDATE sources SET {', '.join(f'{c} = ?' for c in columns)}"
+                        f" WHERE {where}",
+                        (*(changes[c] for c in columns), workspace_id, source_id),
+                    )
+                row = conn.execute(
+                    f"SELECT {_SOURCE_COLUMNS} FROM sources WHERE workspace_id = ? AND id = ?",
+                    (workspace_id, source_id),
+                ).fetchone()
+        except sqlite3.IntegrityError as error:
+            raise DuplicateContentError("This owner already has a source with this hash") from error
+        return _source(row)
+
     def find_by_hash(self, workspace_id: str, user_id: str, content_hash: str) -> Source | None:
         with self._db.transaction(write=False) as conn:
             row = conn.execute(
@@ -162,6 +199,8 @@ class SqliteSourceRepository:
         limit: int,
         cursor: tuple[datetime, str] | None,
         kinds: frozenset[SourceKind] | None = None,
+        state: str | None = None,
+        title_query: str | None = None,
     ) -> tuple[Source, ...]:
         where = "workspace_id = ? AND owner_id = ? AND tombstoned_at IS NULL"
         params: list[object] = [workspace_id, user_id]
@@ -169,6 +208,14 @@ class SqliteSourceRepository:
             ordered = sorted(kind.value for kind in kinds)
             where += f" AND kind IN ({', '.join('?' * len(ordered))})"
             params.extend(ordered)
+        if state is not None:
+            where += " AND state = ?"
+            params.append(state)
+        if title_query is not None:
+            # ponytail: nodo_casefold runs on every row of the owner (a full scan per query); add
+            # a casefolded title column with an index, or FTS, if libraries reach many thousands
+            where += " AND instr(nodo_casefold(COALESCE(title, '')), nodo_casefold(?)) > 0"
+            params.append(title_query)
         if cursor is not None:
             where += " AND (created_at, id) < (?, ?)"
             params.extend((to_text(cursor[0]), cursor[1]))

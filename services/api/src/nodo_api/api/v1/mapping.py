@@ -12,6 +12,7 @@ from nodo_api.api.v1.schemas import (
     FragmentOutput,
     GraphEdgeOutput,
     GraphNodeOutput,
+    ImportOutput,
     InsightAction,
     InsightDecision,
     InsightNode,
@@ -20,6 +21,7 @@ from nodo_api.api.v1.schemas import (
     MeetingOutput,
     SectionOutput,
     SourceOutput,
+    SourceVersionOutput,
     SpeakerOutput,
     SubgraphOutput,
 )
@@ -31,7 +33,7 @@ from nodo_api.domain.graph import (
     Subgraph,
 )
 from nodo_api.domain.models import Meeting, SpeakerSummary
-from nodo_api.domain.sources import Fragment, Section, Source
+from nodo_api.domain.sources import Fragment, ImportJob, Section, Source, SourceVersion
 from nodo_api.errors import ValidationFailed
 from nodo_api.services.ingestion import default_title
 
@@ -142,6 +144,34 @@ def source_output(source: Source) -> SourceOutput:
         origin=source.origin,
         language=source.language,
         version=source.version,
+    )
+
+
+def import_output(
+    job: ImportJob,
+    *,
+    unchanged: bool = False,
+    existing_source_id: str | None = None,
+) -> ImportOutput:
+    return ImportOutput(
+        state=job.state,
+        step=job.step,
+        done=job.done,
+        total=job.total,
+        attempt=job.attempt,
+        error_code=job.error_code,
+        unchanged=unchanged,
+        existing_source_id=existing_source_id,
+    )
+
+
+def source_version_output(version: SourceVersion) -> SourceVersionOutput:
+    return SourceVersionOutput(
+        version=version.version,
+        content_hash_prefix=version.content_hash[:12],
+        parser=version.parser,
+        created_at=version.created_at,
+        size_bytes=version.size_bytes,
     )
 
 

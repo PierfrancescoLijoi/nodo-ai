@@ -208,8 +208,14 @@ class SourceImportService:
                 raise ConflictError from None
             if (source.kind, source.title, source.origin) != (kind, name, origin_note):
                 raise ConflictError from None  # same key, another request
-            if source.content_hash is not None:
+            if (
+                source.content_hash is not None
+                or self._blobs.path_for(workspace_id, source_id, 1).is_file()
+            ):
                 raise ConflictError from None  # uploaded already: no new link for version 1
+            with suppress(NotFoundError):  # no job yet: created below
+                if self._imports.get_owned(workspace_id, user_id, source_id).state not in ACTIVE:
+                    raise ConflictError from None  # cancelled: no link writes for it again
             created = False
         try:
             self._imports.create(workspace_id, user_id, source_id)
@@ -243,14 +249,15 @@ class SourceImportService:
         original = self._blobs.path_for(workspace_id, source_id, 1)
         if not original.is_file():
             raise ConflictError  # the upload has not finished
+        # No other link (an idempotent replay) may write once the bytes are hashed; the store
+        # also never replaces a stored original.
+        self._blobs.revoke_links(workspace_id, source_id)
         _, digest = self._blobs.size_and_sha256(original)
         for _ in range(3):  # each turn follows a race: a twin that appears or one that vanishes
             twin = self._sources.find_by_hash(workspace_id, user_id, digest)
             if twin is None:
-                try:
-                    source = self._sources.save(
-                        workspace_id, replace(source, content_hash=digest), live_only=True
-                    )
+                try:  # the hash column only: a cancel or an edit meanwhile is kept
+                    source = self._sources.update(workspace_id, source_id, content_hash=digest)
                 except NotFoundError:
                     self._blobs.erase(workspace_id, source_id)  # deleted meanwhile
                     raise
@@ -301,11 +308,8 @@ class SourceImportService:
             version = len(self._file_versions(workspace_id, source_id)) + 1
             stored = self._blobs.adopt(workspace_id, source_id, version, path)
             _, digest = self._blobs.size_and_sha256(stored)  # what was copied is what counts
-            fresh = self._sources.get_for_processing(workspace_id, source_id)
-            source = self._sources.save(
-                workspace_id,
-                replace(fresh, content_hash=digest, title=name, state="queued"),
-                live_only=True,
+            source = self._sources.update(
+                workspace_id, source_id, content_hash=digest, title=name, state="queued"
             )
         except NotFoundError:
             self._blobs.erase(workspace_id, source_id)  # deleted during the copy
@@ -331,6 +335,7 @@ class SourceImportService:
         job = self._imports.get_owned(workspace_id, user_id, source_id)
         if job.state not in ACTIVE:
             raise ConflictError
+        self._blobs.revoke_links(workspace_id, source_id)  # a later PUT writes nothing
         self._imports.request_cancel(workspace_id, user_id, source_id)
         unclaimed = source.content_hash is None or (
             self._control is not None
@@ -707,9 +712,12 @@ class SourceImportService:
         invalidate(self._answers, workspace_id, owner)
 
     def _save_state(self, workspace_id: str, source_id: str, owner: str, state: str) -> None:
+        """Mirror an ended job on the source. Only from queued (the state of every active
+        import): another writer that already moved it on is not overwritten."""
         try:
-            fresh = self._sources.get_for_processing(workspace_id, source_id)
-            self._sources.save(workspace_id, replace(fresh, state=state), live_only=True)
+            self._sources.update(workspace_id, source_id, state=state, expected_state="queued")
+        except ConflictError:
+            logger.info("source_state_kept state=%s", state)
         except NotFoundError:
             self._gone(workspace_id, source_id, owner)
 
@@ -791,8 +799,7 @@ class SourceImportService:
             expected_state=job.state,
         )
         try:
-            fresh = self._sources.get_for_processing(workspace_id, source.id)
-            self._sources.save(workspace_id, replace(fresh, state="queued"), live_only=True)
+            self._sources.update(workspace_id, source.id, state="queued")
             self._publish(workspace_id, source.id, source.content_hash, attempt)
         except Exception:
             # Not queued after all: end the job failed with a retryable code, never leave it
@@ -806,9 +813,12 @@ class SourceImportService:
                     expected_state="queued",
                 )
                 kept = bool(self._fragments.latest(workspace_id, source.id))
-                fresh = self._sources.get_for_processing(workspace_id, source.id)
-                state = "ready" if kept else "failed"
-                self._sources.save(workspace_id, replace(fresh, state=state), live_only=True)
+                self._sources.update(
+                    workspace_id,
+                    source.id,
+                    state="ready" if kept else "failed",
+                    expected_state="queued",
+                )
             raise
         return job
 

@@ -138,6 +138,22 @@ class SourceRepository(Protocol):
         together (NotFoundError otherwise), so a late writer can not bring a deleted source back."""
         ...
 
+    def update(
+        self,
+        workspace_id: str,
+        source_id: str,
+        *,
+        state: str | None = None,
+        content_hash: str | None = None,
+        title: str | None = None,
+        expected_state: str | None = None,
+    ) -> Source:
+        """Write only the given columns of a live non-meeting source, so a concurrent edit of the
+        others (title, language, origin) is never lost. With expected_state the write happens only
+        while the stored state equals it (ConflictError otherwise). NotFoundError for a missing,
+        deleted or meeting source; DuplicateContentError as for save."""
+        ...
+
     def find_by_hash(self, workspace_id: str, user_id: str, content_hash: str) -> Source | None:
         """The owner's live source with this content hash, or None. Meetings never match."""
         ...
@@ -154,8 +170,11 @@ class SourceRepository(Protocol):
         limit: int,
         cursor: tuple[datetime, str] | None,
         kinds: frozenset[SourceKind] | None = None,
+        state: str | None = None,
+        title_query: str | None = None,
     ) -> tuple[Source, ...]:
-        """Newest first, never tombstoned. Pass the last (created_at, id) seen as `cursor`."""
+        """Newest first, never tombstoned. Optional state is exact and title query is a
+        case-insensitive substring. Pass the last (created_at, id) seen as `cursor`."""
         ...
 
 
@@ -319,6 +338,10 @@ class SourceBlobStore(Protocol):
 
     def erase(self, workspace_id: str, source_id: str) -> None:
         """Remove every version and leftover of a source; no error if there are none."""
+        ...
+
+    def revoke_links(self, workspace_id: str, source_id: str) -> None:
+        """End every open upload link of a source and refuse an upload still streaming."""
         ...
 
 

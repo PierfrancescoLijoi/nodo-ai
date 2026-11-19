@@ -20,7 +20,7 @@ from nodo_api.domain.sources import (
     check_version,
     outline_order,
 )
-from nodo_api.errors import NotFoundError
+from nodo_api.errors import ConflictError, NotFoundError
 
 
 class MemorySourceRepository:
@@ -76,6 +76,28 @@ class MemorySourceRepository:
             self._sources[(workspace_id, source.id)] = saved
         return saved
 
+    def update(
+        self,
+        workspace_id: str,
+        source_id: str,
+        *,
+        state: str | None = None,
+        content_hash: str | None = None,
+        title: str | None = None,
+        expected_state: str | None = None,
+    ) -> Source:
+        with self._lock:
+            stored = self._sources.get((workspace_id, source_id))
+            if stored is None or stored.tombstoned_at is not None:
+                raise NotFoundError
+            if expected_state is not None and stored.state != expected_state:
+                raise ConflictError
+            changes = {"state": state, "content_hash": content_hash, "title": title}
+            saved = replace(stored, **{k: v for k, v in changes.items() if v is not None})
+            self._check_hash_free(workspace_id, saved)
+            self._sources[(workspace_id, source_id)] = saved
+        return saved
+
     def find_by_hash(self, workspace_id: str, user_id: str, content_hash: str) -> Source | None:
         return next(
             (
@@ -114,6 +136,8 @@ class MemorySourceRepository:
         limit: int,
         cursor: tuple[datetime, str] | None,
         kinds: frozenset[SourceKind] | None = None,
+        state: str | None = None,
+        title_query: str | None = None,
     ) -> tuple[Source, ...]:
         owned = [
             source
@@ -129,6 +153,12 @@ class MemorySourceRepository:
         )
         if kinds is not None:
             owned = [source for source in owned if source.kind in kinds]
+        if state is not None:
+            owned = [source for source in owned if source.state == state]
+        if title_query is not None:
+            # ponytail: full scan of the owner's sources per query, a title index if libraries grow
+            query = title_query.casefold()
+            owned = [source for source in owned if query in (source.title or "").casefold()]
         owned.sort(key=lambda s: (s.created_at, s.id), reverse=True)
         if cursor is not None:
             owned = [s for s in owned if (s.created_at, s.id) < cursor]

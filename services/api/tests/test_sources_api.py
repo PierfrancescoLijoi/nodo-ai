@@ -139,8 +139,13 @@ def test_openapi_lists_source_paths(app) -> None:
     assert {path for path in paths if path.startswith("/v1/sources")} == {
         "/v1/sources",
         "/v1/sources/{source_id}",
+        "/v1/sources/{source_id}/cancel",
+        "/v1/sources/{source_id}/complete",
         "/v1/sources/{source_id}/outline",
         "/v1/sources/{source_id}/fragments",
+        "/v1/sources/{source_id}/import",
+        "/v1/sources/{source_id}/retry",
+        "/v1/sources/{source_id}/versions",
     }
 
 

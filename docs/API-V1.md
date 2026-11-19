@@ -38,10 +38,11 @@ MeetingOutput {
 
 ## Sources
 
-A source is a meeting, document, deck, web page, note or imported audio item. Phase 1 exposes a
-read-only view. `GET /v1/sources?kind=&limit=20&cursor=<opaque>` returns
+A source is a meeting, document, deck, web page, note or imported audio item.
+`GET /v1/sources?kind=&state=&q=&limit=20&cursor=<opaque>` returns
 `{ items: SourceOutput[], next_cursor: string | null }`, newest first. `limit` is 1 to 100 and
-`kind`, when present, is one of `meeting`, `document`, `deck`, `web`, `note`, `audio`.
+`kind`, when present, is one of `meeting`, `document`, `deck`, `web`, `note`, `audio`. `state`
+matches the exact processing state and `q` is a case-insensitive title substring.
 
 ```
 SourceOutput {
@@ -59,8 +60,46 @@ return 404. `GET /v1/sources/{id}/outline` returns
 ranges are two-element arrays. For a meeting, fragment ids are transcript segment ids and locators
 contain `time_ms`; the existing `/v1/meetings*` contract is unchanged.
 
-Non-meeting sources are local-only in Phase 1. On an engine without source adapters all four routes
-return 501 with error code `not_available_on_engine`.
+### Importing a local source
+
+1. `POST /v1/sources` needs an `Idempotency-Key` header (8 to 128 letters, digits, `_` or `-`) and
+   body `{ filename, size_bytes, kind?, origin_note? }`. It returns `201` with
+   `{ source: SourceOutput, upload_url, expires_in_seconds }`. A repeated key with the same name,
+   kind and origin note returns the same source and a fresh upload link until bytes have been
+   uploaded; another value for one of those fields, a replay after the bytes are stored or after
+   a cancel, and too many open upload links on the engine return `409`. The declared size is not
+   stored before upload, so a replay may change only `size_bytes`; the new link enforces the new
+   size. `413` means the declared size is above the import cap, `507` that the disk is too full.
+2. Send exactly `size_bytes` raw bytes to `upload_url` with `PUT`. The local capability URL does
+   not use a bearer token and works once. It returns `204`; `400` for a body shorter than
+   `size_bytes` (the link stays usable for another try); `403` for an unknown, used or expired
+   link, or one revoked because the source was completed, cancelled or deleted; `413` for a body
+   above `size_bytes` or the import cap; `507` when there is not enough disk space. Request logs
+   and traces record the route with `{token}` in place of the link token.
+3. `POST /v1/sources/{id}/complete` returns `202` with `{ import: ImportOutput }`. Poll
+   `GET /v1/sources/{id}/import` until `state` is `ready`, `failed` or `cancelled`.
+4. `POST /v1/sources/{id}/cancel` and `POST /v1/sources/{id}/retry` return `202` with the same
+   import shape. Retry is valid for failed or cancelled work and stale extraction.
+
+```
+ImportOutput {
+  state, step: string|null, done, total, attempt, error_code: string|null,
+  unchanged: boolean, existing_source_id: string|null
+}
+```
+
+When the bytes already belong to another live source, `unchanged` is true and
+`existing_source_id` identifies it. `GET /v1/sources/{id}/versions` returns
+`{ items: { version, content_hash_prefix, parser, created_at, size_bytes }[] }`; it never returns
+the original file name or full content hash. For a meeting id the complete, import, cancel, retry
+and versions routes return `404`. `DELETE /v1/sources/{id}` returns `204` after erasing
+the source and its derived data. Meetings must be deleted through `/v1/meetings/{id}`; using the
+source delete returns `422` with `use the meetings API`.
+
+Non-meeting sources are available on the local engine. On an engine without source-import
+adapters the import, status, version and delete routes return `501` with error code
+`not_available_on_engine`. Source responses never expose `workspace_id`, `owner_id`, a full
+content hash or an original file name.
 
 ## Questions
 

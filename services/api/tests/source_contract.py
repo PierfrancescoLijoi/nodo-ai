@@ -22,7 +22,7 @@ from nodo_api.domain.sources import (
     Source,
     SourceKind,
 )
-from nodo_api.errors import NotFoundError
+from nodo_api.errors import ConflictError, NotFoundError
 
 OWNER = "user-a"
 OTHER = "user-b"
@@ -130,6 +130,22 @@ class SourceContract:
         kept = sources.get_owned(ws, OWNER, "d2", include_tombstoned=True)
         assert kept.tombstoned_at is not None
 
+    def test_list_filters_state_and_title_substring(self, sources, ws) -> None:
+        sources.add(ws, replace(source("d1", minutes=1, ws=ws), title="Alpha Plan"))
+        sources.add(
+            ws,
+            replace(source("d2", minutes=2, ws=ws), title="Beta ALPHA Notes", state="failed"),
+        )
+        sources.add(ws, replace(source("d3", minutes=3, ws=ws), title=None, state="failed"))
+        sources.add(ws, replace(source("d4", minutes=4, ws=ws), title="Żółć Plan"))
+
+        found = sources.list_owned(ws, OWNER, 10, None, None, "failed", "alpha")
+
+        assert [item.id for item in found] == ["d2"]
+        assert [
+            item.id for item in sources.list_owned(ws, OWNER, 10, None, None, None, "żÓŁĆ")
+        ] == ["d4"]
+
     def test_list_pages_with_cursor(self, sources, ws) -> None:
         for n in range(5):
             sources.add(ws, source(f"d{n}", minutes=n, ws=ws))
@@ -165,6 +181,44 @@ class SourceContract:
         assert got.owner_id == OWNER
         with pytest.raises(NotFoundError):
             sources.save(ws, source("missing", ws=ws))
+
+    def test_update_writes_only_the_named_columns(self, sources, ws) -> None:
+        sources.add(ws, replace(source("d1", ws=ws, origin="note"), state="queued"))
+        stale = sources.get_owned(ws, OWNER, "d1")
+        # an edit lands between the import's read and its writes
+        sources.save(ws, replace(stale, title="renamed", language=Locale.PL))
+        sources.update(ws, "d1", content_hash="h1")
+        sources.update(ws, "d1", state="ready", expected_state="queued")
+        got = sources.get_owned(ws, OWNER, "d1")
+        assert (got.title, got.language, got.origin) == ("renamed", Locale.PL, "note")
+        assert (got.content_hash, got.state) == ("h1", "ready")
+        sources.update(ws, "d1", title="next.md", state="queued", content_hash="h2")
+        got = sources.get_owned(ws, OWNER, "d1")
+        assert (got.title, got.state, got.content_hash, got.language) == (
+            "next.md",
+            "queued",
+            "h2",
+            Locale.PL,
+        )
+
+    def test_update_compares_the_state_and_refuses_deleted_meeting_or_clashing_rows(
+        self, sources, seed_meeting, ws
+    ) -> None:
+        sources.add(ws, replace(source("d1", ws=ws), state="cancelled"))
+        with pytest.raises(ConflictError):
+            sources.update(ws, "d1", state="ready", expected_state="queued")
+        assert sources.get_owned(ws, OWNER, "d1").state == "cancelled"
+        sources.add(ws, source("d2", ws=ws, content_hash="h2"))
+        with pytest.raises(DuplicateContentError):
+            sources.update(ws, "d1", content_hash="h2")
+        dead = sources.add(ws, source("d3", ws=ws))
+        sources.save(ws, _tombstoned(dead))
+        seed_meeting(ws, OWNER, "m1", ())
+        for missing in ("d3", "m1", "nope"):
+            with pytest.raises(NotFoundError):
+                sources.update(ws, missing, state="ready")
+        with pytest.raises(NotFoundError):
+            sources.update(f"{ws}-other", "d1", state="ready")
 
     def test_meetings_appear_as_sources(self, sources, seed_meeting, ws) -> None:
         seed_meeting(ws, OWNER, "m1", (segment("m1", "s1", 0, "hello"),), minutes=10)

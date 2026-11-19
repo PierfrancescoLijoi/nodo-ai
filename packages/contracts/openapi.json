@@ -507,6 +507,96 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ImportOutput": {
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "existing_source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Existing Source Id"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "parsing",
+              "indexing",
+              "extracting",
+              "ready",
+              "failed",
+              "cancelled",
+              "awaiting_confirmation"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unchanged": {
+            "default": false,
+            "title": "Unchanged",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state",
+          "step",
+          "done",
+          "total",
+          "attempt",
+          "error_code"
+        ],
+        "title": "ImportOutput",
+        "type": "object"
+      },
+      "ImportStatusOutput": {
+        "properties": {
+          "import": {
+            "$ref": "#/components/schemas/ImportOutput"
+          }
+        },
+        "required": [
+          "import"
+        ],
+        "title": "ImportStatusOutput",
+        "type": "object"
+      },
       "InsightAction": {
         "properties": {
           "due_at": {
@@ -1212,6 +1302,71 @@
         "title": "SegmentOutput",
         "type": "object"
       },
+      "SourceCreate": {
+        "properties": {
+          "filename": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin_note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Note"
+          },
+          "size_bytes": {
+            "minimum": 1.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "size_bytes"
+        ],
+        "title": "SourceCreate",
+        "type": "object"
+      },
+      "SourceCreateOutput": {
+        "properties": {
+          "expires_in_seconds": {
+            "title": "Expires In Seconds",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceOutput"
+          },
+          "upload_url": {
+            "title": "Upload Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "upload_url",
+          "expires_in_seconds"
+        ],
+        "title": "SourceCreateOutput",
+        "type": "object"
+      },
       "SourceFragments": {
         "properties": {
           "fragments": {
@@ -1355,6 +1510,56 @@
           "version"
         ],
         "title": "SourceOutput",
+        "type": "object"
+      },
+      "SourceVersionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceVersionOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SourceVersionList",
+        "type": "object"
+      },
+      "SourceVersionOutput": {
+        "properties": {
+          "content_hash_prefix": {
+            "title": "Content Hash Prefix",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "parser": {
+            "title": "Parser",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "content_hash_prefix",
+          "parser",
+          "created_at",
+          "size_bytes"
+        ],
+        "title": "SourceVersionOutput",
         "type": "object"
       },
       "SpeakerNameInput": {
@@ -1987,6 +2192,39 @@
         "summary": "Graph Subgraph"
       }
     },
+    "/v1/local/source-uploads/{token}": {
+      "put": {
+        "description": "The random one-use link is the credential; document bytes never need a bearer token.",
+        "operationId": "source_upload_v1_local_source_uploads__token__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Upload"
+      }
+    },
     "/v1/meetings": {
       "get": {
         "operationId": "list_meetings_v1_meetings_get",
@@ -2473,6 +2711,42 @@
           },
           {
             "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -2524,9 +2798,89 @@
           }
         },
         "summary": "List Sources"
+      },
+      "post": {
+        "operationId": "create_source_v1_sources_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceCreateOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Source"
       }
     },
     "/v1/sources/{source_id}": {
+      "delete": {
+        "operationId": "delete_source_v1_sources__source_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Source"
+      },
       "get": {
         "operationId": "get_source_v1_sources__source_id__get",
         "parameters": [
@@ -2563,6 +2917,84 @@
           }
         },
         "summary": "Get Source"
+      }
+    },
+    "/v1/sources/{source_id}/cancel": {
+      "post": {
+        "operationId": "cancel_source_import_v1_sources__source_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportStatusOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Source Import"
+      }
+    },
+    "/v1/sources/{source_id}/complete": {
+      "post": {
+        "operationId": "complete_source_v1_sources__source_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportStatusOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Source"
       }
     },
     "/v1/sources/{source_id}/fragments": {
@@ -2604,6 +3036,45 @@
         "summary": "Get Source Fragments"
       }
     },
+    "/v1/sources/{source_id}/import": {
+      "get": {
+        "operationId": "source_import_status_v1_sources__source_id__import_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportStatusOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Import Status"
+      }
+    },
     "/v1/sources/{source_id}/outline": {
       "get": {
         "operationId": "get_source_outline_v1_sources__source_id__outline_get",
@@ -2641,6 +3112,84 @@
           }
         },
         "summary": "Get Source Outline"
+      }
+    },
+    "/v1/sources/{source_id}/retry": {
+      "post": {
+        "operationId": "retry_source_import_v1_sources__source_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportStatusOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Source Import"
+      }
+    },
+    "/v1/sources/{source_id}/versions": {
+      "get": {
+        "operationId": "source_versions_v1_sources__source_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceVersionList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Versions"
       }
     },
     "/v1/sync/meetings/{meeting_id}": {

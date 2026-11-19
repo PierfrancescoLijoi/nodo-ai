@@ -36,6 +36,10 @@ class ValidationFailed(NodoError):
     public_message = "Request validation failed"
 
 
+class UseMeetingsApi(ValidationFailed):
+    public_message = "use the meetings API"
+
+
 class NotAvailableOnEngine(NodoError):
     code = "not_available_on_engine"
     status_code = 501

@@ -36,7 +36,13 @@ from nodo_api.services import (
 )
 from nodo_api.services.exports import ExportService
 from nodo_api.services.sync_import import SyncImportService
-from nodo_api.telemetry import configure, configure_logging, instrument_app, request_id_var
+from nodo_api.telemetry import (
+    configure,
+    configure_logging,
+    instrument_app,
+    redact_path,
+    request_id_var,
+)
 
 logger = logging.getLogger("nodo_api")
 
@@ -125,6 +131,11 @@ def create_app(
     instrument_app(app)
     app.state.container = _container(effective_settings, oidc_key_provider)
     app.include_router(router)
+    # The capability route also serves the in-memory development engine. Other local-only routes
+    # need a LocalRuntime and remain mounted below only for backend=local.
+    from nodo_api.api import local
+
+    app.include_router(local.source_upload_router)
     _configure_voice(app, effective_settings, voice_factory)
     _configure_cors(app, effective_settings)
     _configure_middleware(app)
@@ -135,6 +146,7 @@ def create_app(
         body_limits=(
             ("/v1/sync/", SYNC_BODY_LIMIT),
             ("/v1/local/uploads/", LOCAL_UPLOAD_LIMIT),
+            ("/v1/local/source-uploads/", effective_settings.local_import_max_bytes),
         ),
         # The local engine also serves the web app, which needs scripts and styles.
         security_headers=effective_settings.backend != "local",
@@ -170,8 +182,6 @@ def create_app(
         return {"status": "ready"}
 
     if effective_settings.backend == "local":
-        from nodo_api.api import local
-
         _only_loopback_hosts(app, effective_settings)
 
         app.include_router(local.router)
@@ -328,7 +338,7 @@ def _configure_middleware(app: FastAPI) -> None:
                 {
                     "event": "http_request",
                     "method": request.method,
-                    "path": request.url.path,
+                    "path": redact_path(request.url.path),  # never an upload token
                     "status_code": response.status_code,
                     "request_id": request_id,
                 }

@@ -278,7 +278,7 @@ class LocalSourceBlobStore:
 
         def still_open() -> None:  # called with the lock held
             if self._links.get(token) is not link:
-                raise UploadRejected("cancelled")  # the source was erased meanwhile
+                raise UploadRejected("cancelled")  # revoked or erased meanwhile
 
         try:
             with self._lock:
@@ -360,6 +360,15 @@ class LocalSourceBlobStore:
         folder = self._source_dir(workspace_id, source_id)
         with self._lock:  # bookkeeping only
             self._erased.add((workspace_id, source_id))
+            self.revoke_links(workspace_id, source_id)
+        _retry_while_locked(lambda: _remove_tree(folder), self._lock_wait)
+        with self._lock:
+            self._prune(folder)
+
+    def revoke_links(self, workspace_id: str, source_id: str) -> None:
+        """End every upload link of a source (an upload still streaming is refused and leaves no
+        file). Stored files stay. Safe to repeat."""
+        with self._lock:
             for token in [
                 t
                 for t, link in self._links.items()
@@ -369,9 +378,6 @@ class LocalSourceBlobStore:
                 running = self._running.pop(token, None)
                 if running is not None:
                     running.abort()  # close its handle so the folder can go
-        _retry_while_locked(lambda: _remove_tree(folder), self._lock_wait)
-        with self._lock:
-            self._prune(folder)
 
     # helpers ---------------------------------------------------------------------------------
 

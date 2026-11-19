@@ -42,6 +42,8 @@ from nodo_api.domain.documents import (
     build_sections_and_fragments,
 )
 from nodo_api.domain.graph import ExtractionError, source_entity_id
+from nodo_api.domain.models import Locale
+from nodo_api.domain.source_files import UploadRejected
 from nodo_api.domain.sources import MAX_EMBEDDING_TOKENS, SourceKind, estimate_tokens
 from nodo_api.errors import ConflictError, ModelUnavailable, NotFoundError, ValidationFailed
 from nodo_api.services.fragment_extraction import ChunkedFragmentExtractor
@@ -962,22 +964,21 @@ def test_delete_during_complete_is_not_undone(stack: Stack, monkeypatch) -> None
 
 def test_delete_after_the_reimport_copy_is_read_is_not_undone(stack, tmp_path, monkeypatch):
     source = stack.imported("plan.md", b"v1")
-    adopt, read = stack.blobs.adopt, stack.sources.get_for_processing
+    adopt, write = stack.blobs.adopt, stack.sources.update
     copied = []
 
     def remember_copy(*args):
         copied.append(1)
         return adopt(*args)
 
-    def read_then_delete(workspace_id, source_id):
-        found = read(workspace_id, source_id)
+    def delete_then_write(workspace_id, source_id, **changes):
         if copied and len(copied) == 1:
             copied.append(2)
-            deleter(stack, source.id)()  # between the fresh read and the save
-        return found
+            deleter(stack, source.id)()  # between the copy and the write
+        return write(workspace_id, source_id, **changes)
 
     monkeypatch.setattr(stack.blobs, "adopt", remember_copy)
-    monkeypatch.setattr(stack.sources, "get_for_processing", read_then_delete)
+    monkeypatch.setattr(stack.sources, "update", delete_then_write)
     with pytest.raises(NotFoundError):
         reimport(stack, source.id, tmp_path, b"v2", DOC_B)
     with pytest.raises(NotFoundError):
@@ -1004,16 +1005,16 @@ def test_delete_during_the_reimport_copy_is_not_undone(stack, tmp_path, monkeypa
 def test_delete_while_the_state_is_written_is_not_undone(stack: Stack, monkeypatch) -> None:
     source = stack.upload("plan.md", b"v1", DOC_A)
     stack.service.complete(stack.ws, OWNER, source.id)
-    original = stack.sources.save
+    original = stack.sources.update
     fired = []
 
-    def delete_first(workspace_id, value, *, live_only=False):
-        if live_only and value.state == "ready" and not fired:
+    def delete_first(workspace_id, source_id, **changes):
+        if changes.get("state") == "ready" and not fired:
             fired.append(1)
             deleter(stack, source.id)()
-        return original(workspace_id, value, live_only=live_only)
+        return original(workspace_id, source_id, **changes)
 
-    monkeypatch.setattr(stack.sources, "save", delete_first)
+    monkeypatch.setattr(stack.sources, "update", delete_first)
     stack.service.process(stack.ws, source.id)
     assert fired
     with pytest.raises(NotFoundError):
@@ -1244,3 +1245,89 @@ def test_local_engine_imports_through_the_real_store_parser_and_limits(tmp_path)
         assert broken.state == "failed" and broken.error_code in PARSE_ERROR_CODES
     finally:
         db.close()
+
+
+# --------------------------------------------------------------------------- races (Task 13 review)
+
+
+def _during_hash(stack: Stack, action) -> None:
+    """Run `action` once while complete() hashes the upload: the widest stale-read window."""
+    original = stack.blobs.size_and_sha256
+
+    def hashing(path):
+        result = original(path)
+        stack.blobs.size_and_sha256 = original
+        action()
+        return result
+
+    stack.blobs.size_and_sha256 = hashing
+
+
+def test_cancel_while_complete_hashes_leaves_job_and_source_agreeing(stack: Stack) -> None:
+    source = stack.upload("plan.md", b"v1", DOC_A)
+    _during_hash(stack, lambda: stack.service.cancel(stack.ws, OWNER, source.id))
+    stack.service.complete(stack.ws, OWNER, source.id)
+    stack.service.process(stack.ws, source.id)  # a late message changes nothing
+    row = stack.sources.get_owned(stack.ws, OWNER, source.id)
+    assert stack.job(source.id).state == row.state == "cancelled"
+    assert row.content_hash is not None  # the bytes are known, so retry can resume
+    stack.service.retry(stack.ws, OWNER, source.id)
+    stack.service.process(stack.ws, source.id)
+    assert stack.job(source.id).state == "ready"
+    assert stack.sources.get_owned(stack.ws, OWNER, source.id).state == "ready"
+
+
+def test_title_and_language_edits_during_an_import_survive(stack: Stack) -> None:
+    source = stack.upload("plan.md", b"v1", DOC_A)
+
+    def edit(title: str, language: Locale) -> None:
+        live = stack.sources.get_owned(stack.ws, OWNER, source.id)
+        stack.sources.save(stack.ws, replace(live, title=title, language=language))
+
+    _during_hash(stack, lambda: edit("Renamed", Locale.PL))
+    stack.service.complete(stack.ws, OWNER, source.id)
+    row = stack.sources.get_owned(stack.ws, OWNER, source.id)
+    assert (row.title, row.language) == ("Renamed", Locale.PL)
+    stack.inner.hook = lambda: edit("Renamed again", Locale.DA)  # during extraction
+    stack.service.process(stack.ws, source.id)
+    row = stack.sources.get_owned(stack.ws, OWNER, source.id)
+    assert (row.state, row.title, row.language) == ("ready", "Renamed again", Locale.DA)
+
+
+def test_cancel_revokes_the_upload_link_and_leaves_no_file(stack: Stack) -> None:
+    source, session = stack.service.create(
+        stack.ws, OWNER, filename="plan.md", size_bytes=2, kind=None, origin_note=None,
+        idempotency_key="cancel-before-upload",
+    )  # fmt: skip
+    stack.service.cancel(stack.ws, OWNER, source.id)
+    with pytest.raises(UploadRejected), stack.blobs.open_upload(session.token) as writer:
+        writer.write(b"v1")
+    assert not stack.blobs.path_for(stack.ws, source.id, 1).exists()
+    with pytest.raises(ConflictError):  # a replay of the create gives no new link either
+        stack.service.create(
+            stack.ws, OWNER, filename="plan.md", size_bytes=2, kind=None, origin_note=None,
+            idempotency_key="cancel-before-upload",
+        )  # fmt: skip
+
+
+def test_a_replayed_link_can_not_overwrite_the_original(stack: Stack) -> None:
+    def create():
+        return stack.service.create(
+            stack.ws, OWNER, filename="plan.md", size_bytes=2, kind=None, origin_note=None,
+            idempotency_key="replayed-link",
+        )  # fmt: skip
+
+    source, first = create()
+    _, second = create()  # a replay before the upload: a second live link
+    with stack.blobs.open_upload(first.token) as writer:
+        writer.write(b"v1")
+    stack.register(source.id, 1, DOC_A)
+    with pytest.raises(ConflictError):  # once the bytes are stored a replay gives no link
+        create()
+    stack.service.complete(stack.ws, OWNER, source.id)
+    # after complete the hashed original can not be replaced through the earlier link
+    with pytest.raises(UploadRejected), stack.blobs.open_upload(second.token) as writer:
+        writer.write(b"xx")
+    stack.service.process(stack.ws, source.id)
+    assert stack.job(source.id).state == "ready"
+    assert stack.blobs.path_for(stack.ws, source.id, 1).read_bytes() == b"v1"
