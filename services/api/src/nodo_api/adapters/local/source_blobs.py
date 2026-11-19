@@ -365,6 +365,13 @@ class LocalSourceBlobStore:
         with self._lock:
             self._prune(folder)
 
+    def erase_originals(self, workspace_id: str, source_id: str) -> None:
+        """Remove every stored version but, unlike erase, keep the source writable."""
+        folder = self._source_dir(workspace_id, source_id)
+        _retry_while_locked(lambda: _remove_tree(folder), self._lock_wait)
+        with self._lock:
+            self._prune(folder)
+
     def revoke_links(self, workspace_id: str, source_id: str) -> None:
         """End every upload link of a source (an upload still streaming is refused and leaves no
         file). Stored files stay. Safe to repeat."""

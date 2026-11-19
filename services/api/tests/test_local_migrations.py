@@ -511,7 +511,10 @@ def test_0010_creates_import_tables_and_keeps_existing_data(tmp_path):
             versions = [r["name"] for r in conn.execute("PRAGMA table_info(source_versions)")]
             applied = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
             meetings_after = [tuple(r) for r in conn.execute("SELECT * FROM meetings")]
-            sources_after = [tuple(r) for r in conn.execute("SELECT * FROM sources ORDER BY id")]
+            sources_after = [
+                tuple(r)[: len(sources_before[0])]
+                for r in conn.execute("SELECT * FROM sources ORDER BY id")
+            ]
             fragments = conn.execute("SELECT count(*) FROM fragments").fetchone()[0]
             check = conn.execute("PRAGMA foreign_key_check").fetchall()
     finally:

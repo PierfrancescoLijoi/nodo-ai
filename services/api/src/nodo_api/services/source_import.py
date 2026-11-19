@@ -9,7 +9,14 @@ fragments; for a deletion also the original file and the file name). Job state c
 compare-and-set, so a late worker write never turns a cancelled or failed job back.
 
 Nothing here logs or audits document text, a title or a file name: logs carry states, codes and
-counts, the audit carries the kind."""
+counts, the audit carries the kind.
+
+Audio and video (FR-5) wait in `awaiting_confirmation` until the owner confirms "I may process
+this recording" (`confirm`); every new or retried recording asks again. They are transcribed with
+the meeting speech pipeline (SpeechToText, build_segments) into timed fragments under one root
+section, then indexed and extracted like a document. Their stored original is erased 30 days after
+the upload by the retention sweep (fragments stay); a cancel before confirmation erases it at
+once."""
 
 from __future__ import annotations
 
@@ -34,7 +41,8 @@ from nodo_api.domain.graph import (
     validate_extraction,
 )
 from nodo_api.domain.models import Locale
-from nodo_api.domain.source_files import safe_filename
+from nodo_api.domain.retention import audio_expires_at
+from nodo_api.domain.source_files import looks_like_media, safe_filename
 from nodo_api.domain.sources import (
     ACTIVE_STATES,
     CLEAR,
@@ -47,7 +55,7 @@ from nodo_api.domain.sources import (
     SourceKind,
     estimate_tokens,
 )
-from nodo_api.errors import ConflictError, NotFoundError, ValidationFailed
+from nodo_api.errors import ConflictError, NotFoundError, OriginalMissing, ValidationFailed
 from nodo_api.ports import (
     AuditLog,
     DocumentExtractor,
@@ -60,9 +68,11 @@ from nodo_api.ports import (
     JobQueue,
     SourceBlobStore,
     SourceRepository,
+    SpeechToText,
 )
 from nodo_api.services.answer_cache import AnswerCache, invalidate
 from nodo_api.services.extraction import merge
+from nodo_api.services.ingestion import build_segments
 
 logger = logging.getLogger("nodo_import")
 
@@ -76,8 +86,16 @@ KNOWN_DECISIONS = 20
 BATCH_FRAGMENTS = 8
 MAX_ORIGIN_CHARS = 500
 _CODE = re.compile(r"[a-z0-9_]{1,64}")
-# Audio and video are Task 14; meetings are created by the meeting service.
+AWAITING = "awaiting_confirmation"
+# What the owner of an imported recording confirms (FR-5). The audit event stands for it; neither
+# the text nor anything about the recording is written into the event.
+CONFIRMATION_TEXT = "I may process this recording"
+AUDIO_RETENTION_POLICY = "retention-30d"  # the meeting default (ADR-019)
+TRANSCRIPT_SECTION = "Transcript"
+_AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv", ".mov", ".webm")
+# Meetings are created by the meeting service.
 _KINDS = {
+    **dict.fromkeys(_AUDIO_EXTENSIONS, SourceKind.AUDIO),
     ".pdf": SourceKind.DOCUMENT,
     ".docx": SourceKind.DOCUMENT,
     ".xlsx": SourceKind.DOCUMENT,
@@ -101,9 +119,14 @@ def job_key(source_id: str, content_hash: str, attempt: int) -> str:
     return f"{key}:{attempt}" if attempt else key
 
 
-def _kind_for(name: str, kind: SourceKind | None) -> SourceKind:
+def _kind_for(name: str, kind: SourceKind | None, *, audio: bool) -> SourceKind:
+    """The kind of a file name. Audio is decided by the extension both ways, and only an engine
+    that can transcribe (`audio`) takes it."""
     inferred = _KINDS.get(Path(name).suffix.lower())
-    if inferred is None or kind in (SourceKind.MEETING, SourceKind.AUDIO):
+    is_audio = inferred is SourceKind.AUDIO
+    if inferred is None or kind is SourceKind.MEETING or (is_audio and not audio):
+        raise ValidationFailed
+    if kind is not None and (kind is SourceKind.AUDIO) != is_audio:
         raise ValidationFailed
     return kind or inferred
 
@@ -136,6 +159,8 @@ class SourceImportService:
         control: JobControl | None = None,
         screen: Callable[[Path, str], None] | None = None,
         token_fits: Callable[[list[str]], list[bool]] | None = None,
+        speech: SpeechToText | None = None,
+        speech_locales: tuple[str, ...] = (),
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._sources = sources
@@ -155,6 +180,9 @@ class SourceImportService:
         # sniff and check_limits (Task 4): they run before every parse, never inside the worker.
         self._screen = screen
         self._token_fits = token_fits
+        # The meeting speech engine; None: audio and video are refused at create.
+        self._speech = speech
+        self._speech_locales = speech_locales
         # Times this service writes (created_at, tombstones). Job and version rows keep the wall
         # clock of their stores (Task 5 decision): they are progress, not facts a test fakes.
         self._clock = clock
@@ -179,7 +207,7 @@ class SourceImportService:
             name = safe_filename(filename)
         except ValueError:
             raise ValidationFailed from None
-        kind = _kind_for(name, kind)
+        kind = _kind_for(name, kind, audio=self._speech is not None)
         if type(size_bytes) is not int or size_bytes < 1:
             raise ValidationFailed
         if origin_note is not None and (
@@ -193,8 +221,17 @@ class SourceImportService:
             # The key names the source, so a replay finds it without a separate key table.
             key = "\x00".join((workspace_id, user_id, idempotency_key)).encode("utf-8", "replace")
             source_id = f"src_{hashlib.sha256(key).hexdigest()[:32]}"
+        created_at = self._clock()
         source = Source(
-            source_id, workspace_id, user_id, kind, name, "queued", self._clock(), origin_note
+            source_id,
+            workspace_id,
+            user_id,
+            kind,
+            name,
+            "queued",
+            created_at,
+            origin_note,
+            retention_until=self._retention(kind, created_at),
         )
         created = True
         try:
@@ -253,9 +290,18 @@ class SourceImportService:
         # also never replaces a stored original.
         self._blobs.revoke_links(workspace_id, source_id)
         _, digest = self._blobs.size_and_sha256(original)
+        audio = source.kind is SourceKind.AUDIO
         for _ in range(3):  # each turn follows a race: a twin that appears or one that vanishes
             twin = self._sources.find_by_hash(workspace_id, user_id, digest)
             if twin is None:
+                if audio:  # before the hash: a crash never leaves it queued unconfirmed
+                    with suppress(ConflictError):  # cancelled meanwhile: it stays cancelled
+                        self._imports.update(
+                            workspace_id,
+                            source_id,
+                            state=AWAITING,
+                            expected_state=("queued", AWAITING),
+                        )
                 try:  # the hash column only: a cancel or an edit meanwhile is kept
                     source = self._sources.update(workspace_id, source_id, content_hash=digest)
                 except NotFoundError:
@@ -264,7 +310,8 @@ class SourceImportService:
                 except DuplicateContentError:
                     continue  # the same bytes completed at the same moment: answer with them
                 job = self._imports.get_owned(workspace_id, user_id, source_id)
-                self._publish(workspace_id, source_id, digest, job.attempt)
+                if not audio:  # a recording is published by confirm
+                    self._publish(workspace_id, source_id, digest, job.attempt)
                 return job
             try:
                 answer = self._unchanged(workspace_id, user_id, twin)
@@ -288,33 +335,61 @@ class SourceImportService:
             name = safe_filename(path.name)
         except ValueError:
             raise ValidationFailed from None
-        _kind_for(name, None)
+        audio = source.kind is SourceKind.AUDIO
+        if (_kind_for(name, None, audio=self._speech is not None) is SourceKind.AUDIO) != audio:
+            raise ValidationFailed  # a recording stays a recording, a document a document
         job = self._imports.get_owned(workspace_id, user_id, source_id)
         if job.state in ACTIVE:
             raise ConflictError  # one import of a source at a time
         _, digest = self._blobs.size_and_sha256(path)
-        if digest == source.content_hash:
+        # The same recording after retention erased its original is stored again.
+        restore = audio and not self._file_versions(workspace_id, source_id)
+        if digest == source.content_hash and not restore:
             stale = self._stale(workspace_id, user_id, source, job)
             return self._rerun(workspace_id, source, job) if stale else job
         twin = self._sources.find_by_hash(workspace_id, user_id, digest)
-        if twin is not None:
+        if twin is not None and twin.id != source_id:
             return self._unchanged(workspace_id, user_id, twin)
         # Reserve the source first: a second reimport now gets ConflictError, so two copies
         # never race for the same file version.
+        previous_source = source
         reserved = self._imports.update(
             workspace_id, source_id, state="queued", expected_state=job.state
         )
         try:
+            # Move the source revision before copying. The retention repository makes this update
+            # and its erase claim mutually exclusive, so an expired old original can never erase
+            # the new one after it is adopted.
+            source = self._sources.update(
+                workspace_id,
+                source_id,
+                state="queued",
+                retention_until=self._retention(source.kind, self._clock()),
+                expected_state=source.state,
+            )
             version = len(self._file_versions(workspace_id, source_id)) + 1
             stored = self._blobs.adopt(workspace_id, source_id, version, path)
             _, digest = self._blobs.size_and_sha256(stored)  # what was copied is what counts
             source = self._sources.update(
-                workspace_id, source_id, content_hash=digest, title=name, state="queued"
+                workspace_id,
+                source_id,
+                content_hash=digest,
+                title=name,
+                state="queued",
+                retention_until=self._retention(source.kind, self._clock()),
             )
         except NotFoundError:
             self._blobs.erase(workspace_id, source_id)  # deleted during the copy
             raise
         except BaseException as error:
+            with suppress(ConflictError, NotFoundError):
+                self._sources.update(
+                    workspace_id,
+                    source_id,
+                    state=previous_source.state,
+                    retention_until=previous_source.retention_until or CLEAR,
+                    expected_state="queued",
+                )
             with suppress(ConflictError, NotFoundError):  # give the source back as it was
                 self._imports.update(
                     workspace_id, source_id, state=job.state, expected_state="queued"
@@ -333,6 +408,8 @@ class SourceImportService:
         one stops at its next check and compensates."""
         source = self._owned(workspace_id, user_id, source_id)
         job = self._imports.get_owned(workspace_id, user_id, source_id)
+        if job.state == AWAITING:
+            return self._cancel_unconfirmed(workspace_id, user_id, source)
         if job.state not in ACTIVE:
             raise ConflictError
         self._blobs.revoke_links(workspace_id, source_id)  # a later PUT writes nothing
@@ -349,6 +426,71 @@ class SourceImportService:
         self._audit.append(workspace_id, "source_import_cancelled", {"kind": source.kind.value})
         return self._imports.get_owned(workspace_id, user_id, source_id)
 
+    def _cancel_unconfirmed(self, workspace_id: str, user_id: str, source: Source) -> ImportJob:
+        """Nothing was processed: end cancelled and erase the original at once (no consent)."""
+        if source.state != "cancelling":
+            self._sources.update(
+                workspace_id, source.id, state="cancelling", expected_state=source.state
+            )
+        self._blobs.revoke_links(workspace_id, source.id)
+        self._blobs.erase_originals(workspace_id, source.id)
+        try:
+            self._imports.update(
+                workspace_id, source.id, state="cancelled", step=CLEAR, expected_state=AWAITING
+            )
+        except ConflictError:
+            with suppress(ConflictError, NotFoundError):
+                self._sources.update(
+                    workspace_id, source.id, state=source.state, expected_state="cancelling"
+                )
+            return self.cancel(workspace_id, user_id, source.id)  # confirmed meanwhile
+        self._sources.update(
+            workspace_id,
+            source.id,
+            state="cancelled",
+            retention_until=CLEAR,
+            expected_state="cancelling",
+        )
+        invalidate(self._answers, workspace_id, user_id)
+        self._audit.append(workspace_id, "source_import_cancelled", {"kind": source.kind.value})
+        return self._imports.get_owned(workspace_id, user_id, source.id)
+
+    def confirm(self, workspace_id: str, user_id: str, source_id: str) -> ImportJob:
+        """The owner confirms CONFIRMATION_TEXT for a recording awaiting it: audit (kind only,
+        once per attempt) and queue the transcription. A recording already confirmed answers its
+        current state; a cancelled or failed one, or a document, is a conflict."""
+        source = self._owned(workspace_id, user_id, source_id)
+        job = self._imports.get_owned(workspace_id, user_id, source_id)
+        if (
+            source.kind is not SourceKind.AUDIO
+            or job.state in ENDED
+            or source.state == "cancelling"
+        ):
+            raise ConflictError
+        if job.state != AWAITING:
+            return job  # confirmed already
+        if self._original_gone(workspace_id, user_id, source):
+            raise OriginalMissing
+        # Keyed by the attempt: two confirmations at the same moment write one event, and the
+        # event exists before any processing starts.
+        event = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"nodo:source_processing_confirmed:{workspace_id}:{source_id}:{job.attempt}",
+        )
+        self._audit.append(
+            workspace_id,
+            "source_processing_confirmed",
+            {"kind": source.kind.value},
+            event_id=str(event),
+        )
+        try:
+            return self._rerun(workspace_id, source, job, confirmed=True)
+        except ConflictError:
+            job = self._imports.get_owned(workspace_id, user_id, source_id)
+            if job.state == AWAITING or job.state in ENDED:
+                raise
+            return job  # the other confirmation won
+
     def retry(self, workspace_id: str, user_id: str, source_id: str) -> ImportJob:
         """Queue a failed or cancelled import again (also a ready one whose extraction is not
         current). The stored original is parsed again unless its version is already stored."""
@@ -357,6 +499,8 @@ class SourceImportService:
         allowed = job.state in ENDED or self._stale(workspace_id, user_id, source, job)
         if source.content_hash is None or not allowed:
             raise ConflictError
+        if self._original_gone(workspace_id, user_id, source):
+            raise OriginalMissing
         job = self._rerun(workspace_id, source, job)
         self._audit.append(workspace_id, "source_import_retried", {"kind": source.kind.value})
         return job
@@ -448,7 +592,10 @@ class SourceImportService:
                 self._enter(workspace_id, source_id, "indexing", total=len(fragments))
                 self._index_fragments(workspace_id, source_id, owner, fragments)
         else:
-            parsed = self._parse(workspace_id, source_id, owner, source)
+            if source.kind is SourceKind.AUDIO:
+                parsed = self._transcribe(workspace_id, source_id, owner, source)
+            else:
+                parsed = self._parse(workspace_id, source_id, owner, source)
             if parsed is None:
                 return
             sections, fragments, parser, size = parsed
@@ -507,6 +654,41 @@ class SourceImportService:
                 self.mark_failed(workspace_id, source_id, "empty")
             return None
         return sections, fragments, parsed.parser, size
+
+    def _transcribe(self, workspace_id: str, source_id: str, owner: str, source: Source):
+        """(sections, fragments, parser, size) from the meeting speech pipeline, or None when the
+        import already ended. The engine transcribes the whole file in one call, so a delete or
+        cancel during it is honoured right after it, before anything is written."""
+        assert source.content_hash is not None
+        self._enter(workspace_id, source_id, "parsing")
+        found = self._original(workspace_id, source_id, source.content_hash)
+        code = "original_missing" if found is None else None
+        if found is not None and self._speech is None:
+            code = "speech_unavailable"
+        elif found is not None and not looks_like_media(found[0]):
+            code = "unsupported"  # sniffed by content, whatever the extension says
+        phrases = ()
+        if code is None:
+            assert found is not None and self._speech is not None
+            try:
+                phrases = self._speech.transcribe(str(found[0]), self._speech_locales)
+            except ValueError:  # the recording could not be decoded: retrying will not help
+                code = "damaged"
+        self._check(workspace_id, source_id, owner)
+        locale = source.language or Locale.EN
+        segments = [s for s in build_segments(source_id, phrases, locale, None) if s.text.strip()]
+        if code is None and not segments:
+            code = "no_speech"
+        if code is not None:
+            self.mark_failed(workspace_id, source_id, code)
+            return None
+        assert found is not None
+        root = Section("s_transcript", source_id, None, 0, 1, TRANSCRIPT_SECTION)
+        fragments = tuple(
+            replace(Fragment.from_segment(segment, ordinal), section_id=root.id)
+            for ordinal, segment in enumerate(segments)
+        )
+        return (root,), fragments, "speech", found[1]
 
     def _no_text_layer(
         self, workspace_id: str, source: Source, owner: str, parser: str, size: int
@@ -662,6 +844,20 @@ class SourceImportService:
             raise NotFoundError
         return source
 
+    @staticmethod
+    def _retention(kind: SourceKind, stored_at: datetime) -> datetime | None:
+        """When a stored original is erased: recordings after the meeting default, else never."""
+        if kind is SourceKind.AUDIO:
+            return audio_expires_at(stored_at, AUDIO_RETENTION_POLICY)
+        return None
+
+    def _original_gone(self, workspace_id: str, owner: str, source: Source) -> bool:
+        """No stored file left and no stored version of these bytes to resume from."""
+        return (
+            not self._file_versions(workspace_id, source.id)
+            and self._persisted(workspace_id, owner, source) is None
+        )
+
     def _fits(self, text: str) -> bool:
         if self._token_fits is not None:
             return self._token_fits([text])[0]
@@ -783,13 +979,17 @@ class SourceImportService:
         records = self._fragments.versions(workspace_id, user_id, source.id)
         return bool(records) and records[0].extraction_version != self._version
 
-    def _rerun(self, workspace_id: str, source: Source, job: ImportJob) -> ImportJob:
+    def _rerun(
+        self, workspace_id: str, source: Source, job: ImportJob, *, confirmed: bool = False
+    ) -> ImportJob:
+        """Queue the import again; a recording waits for a new confirmation unless `confirmed`."""
         assert source.content_hash is not None
         attempt = job.attempt + 1
+        wait = source.kind is SourceKind.AUDIO and not confirmed
         job = self._imports.update(
             workspace_id,
             source.id,
-            state="queued",
+            state=AWAITING if wait else "queued",
             step=CLEAR,
             done=0,
             total=0,
@@ -798,6 +998,8 @@ class SourceImportService:
             cancel_requested=False,
             expected_state=job.state,
         )
+        if wait:
+            return job
         try:
             self._sources.update(workspace_id, source.id, state="queued")
             self._publish(workspace_id, source.id, source.content_hash, attempt)

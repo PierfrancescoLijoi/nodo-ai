@@ -22,6 +22,13 @@ class ConflictError(NodoError):
     public_message = "Request conflicts with current state"
 
 
+class OriginalMissing(ConflictError):
+    """The stored original is gone (retention or a cancel erased it): upload the file again."""
+
+    code = "original_missing"
+    public_message = "The original file is no longer stored"
+
+
 class ModelUnavailable(NodoError):
     """A local model the request needs is not installed or could not start."""
 

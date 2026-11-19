@@ -40,6 +40,7 @@ from nodo_api.api.v1.schemas import (
     MeetingCreate,
     MeetingList,
     MeetingOutput,
+    ProcessingConfirmation,
     QueryFiltersInput,
     QueryInput,
     QueryOutput,
@@ -288,6 +289,24 @@ def cancel_source_import(source_id: str, actor: PrincipalDep, request: Request):
 )
 def retry_source_import(source_id: str, actor: PrincipalDep, request: Request):
     job = _source_import(request.app.state.container).retry(
+        actor.workspace_id, actor.user_id, source_id
+    )
+    return _import_status(job)
+
+
+@router.post(
+    "/sources/{source_id}/confirm-processing",
+    response_model=ImportStatusOutput,
+    status_code=status.HTTP_202_ACCEPTED,
+    description="Imported audio or video waits in awaiting_confirmation until its owner confirms "
+    '"I may process this recording". The confirmation is audited (kind only) and starts the '
+    "transcription. A second call answers the current state; a cancelled, failed or deleted "
+    "import, or a document, is refused. 409 original_missing once the original was erased.",
+)
+def confirm_source_processing(
+    source_id: str, payload: ProcessingConfirmation, actor: PrincipalDep, request: Request
+):
+    job = _source_import(request.app.state.container).confirm(
         actor.workspace_id, actor.user_id, source_id
     )
     return _import_status(job)

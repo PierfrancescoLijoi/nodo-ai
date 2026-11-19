@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from nodo_api.adapters.memory.adapters import MemoryMeetingRepository, MemoryTranscriptRepository
 from nodo_api.domain.sources import (
+    Clear,
     DuplicateContentError,
     Fragment,
     Section,
@@ -27,6 +28,7 @@ class MemorySourceRepository:
     def __init__(self, meetings: MemoryMeetingRepository) -> None:
         self._meetings = meetings
         self._sources: dict[tuple[str, str], Source] = {}
+        self._erase_claims: dict[tuple[str, str], tuple[datetime, str, str, str]] = {}
         # The check for a clash and the write must not be separated by another thread.
         self._lock = threading.RLock()
 
@@ -70,8 +72,14 @@ class MemorySourceRepository:
                 raise NotFoundError
             if live_only and stored.tombstoned_at is not None:
                 raise NotFoundError
-            # The owner never moves and the version belongs to the fragment repository.
-            saved = replace(source, owner_id=stored.owner_id, version=stored.version)
+            # The owner never moves, the version belongs to the fragment repository and the
+            # retention date is written by update and the sweep only (as on SQLite).
+            saved = replace(
+                source,
+                owner_id=stored.owner_id,
+                version=stored.version,
+                retention_until=stored.retention_until,
+            )
             self._check_hash_free(workspace_id, saved)
             self._sources[(workspace_id, source.id)] = saved
         return saved
@@ -84,6 +92,7 @@ class MemorySourceRepository:
         state: str | None = None,
         content_hash: str | None = None,
         title: str | None = None,
+        retention_until: datetime | Clear | None = None,
         expected_state: str | None = None,
     ) -> Source:
         with self._lock:
@@ -92,8 +101,18 @@ class MemorySourceRepository:
                 raise NotFoundError
             if expected_state is not None and stored.state != expected_state:
                 raise ConflictError
-            changes = {"state": state, "content_hash": content_hash, "title": title}
-            saved = replace(stored, **{k: v for k, v in changes.items() if v is not None})
+            if (workspace_id, source_id) in self._erase_claims:
+                raise ConflictError
+            changes = {
+                "state": state,
+                "content_hash": content_hash,
+                "title": title,
+                "retention_until": None if isinstance(retention_until, Clear) else retention_until,
+            }
+            provided = {k: v for k, v in changes.items() if v is not None}
+            if isinstance(retention_until, Clear):
+                provided["retention_until"] = None
+            saved = replace(stored, **provided)
             self._check_hash_free(workspace_id, saved)
             self._sources[(workspace_id, source_id)] = saved
         return saved
@@ -110,6 +129,77 @@ class MemorySourceRepository:
             ),
             None,
         )
+
+    def originals_due(self, now: datetime, limit: int) -> tuple[Source, ...]:
+        with self._lock:
+            due = [
+                s
+                for s in self._sources.values()
+                if s.kind is SourceKind.AUDIO
+                and s.tombstoned_at is None
+                and s.retention_until is not None
+                and s.retention_until <= now
+                and s.content_hash is not None
+                and s.state != "cancelling"
+            ]
+        return tuple(sorted(due, key=lambda s: s.retention_until or now)[:limit])
+
+    @staticmethod
+    def _erase_revision(source: Source) -> tuple[datetime, str, str]:
+        assert source.retention_until is not None and source.content_hash is not None
+        return source.retention_until, source.content_hash, source.state
+
+    def claim_original_erase(self, source: Source) -> str | None:
+        with self._lock:
+            key = (source.workspace_id, source.id)
+            stored = self._sources.get(key)
+            revision = self._erase_revision(source)
+            claim = self._erase_claims.get(key)
+            if claim is not None:
+                return claim[3] if claim[:3] == revision else None
+            if (
+                stored is None
+                or stored.tombstoned_at is not None
+                or stored.content_hash is None
+                or stored.state == "cancelling"
+                or self._erase_revision(stored) != revision
+            ):
+                return None
+            self._erase_claims[key] = (*revision, "erase")
+            return "erase"
+
+    def prepare_original_erased(self, source: Source) -> bool:
+        with self._lock:
+            key = (source.workspace_id, source.id)
+            stored = self._sources.get(key)
+            revision = self._erase_revision(source)
+            if (
+                stored is None
+                or stored.tombstoned_at is not None
+                or stored.content_hash is None
+                or self._erase_revision(stored) != revision
+                or self._erase_claims.get(key) != (*revision, "erase")
+            ):
+                return False
+            self._erase_claims[key] = (*revision, "audit")
+            return True
+
+    def mark_original_erased(self, source: Source) -> bool:
+        with self._lock:
+            key = (source.workspace_id, source.id)
+            stored = self._sources.get(key)
+            revision = self._erase_revision(source)
+            if (
+                stored is None
+                or stored.tombstoned_at is not None
+                or stored.content_hash is None
+                or self._erase_revision(stored) != revision
+                or self._erase_claims.get(key) != (*revision, "audit")
+            ):
+                return False
+            self._sources[key] = replace(stored, retention_until=None)
+            self._erase_claims.pop(key, None)
+            return True
 
     def unfinished_deletes(self, limit: int) -> tuple[Source, ...]:
         with self._lock:

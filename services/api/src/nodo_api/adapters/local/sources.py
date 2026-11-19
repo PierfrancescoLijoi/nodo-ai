@@ -13,6 +13,7 @@ from nodo_api.adapters.local.db import LocalDatabase, from_text, to_text
 from nodo_api.adapters.local.repos import SqliteTranscriptRepository
 from nodo_api.domain.models import Locale
 from nodo_api.domain.sources import (
+    Clear,
     DuplicateContentError,
     Fragment,
     Locator,
@@ -27,7 +28,7 @@ from nodo_api.errors import ConflictError, NotFoundError
 
 _SOURCE_COLUMNS = (
     "workspace_id, owner_id, id, kind, title, state, origin, language, content_hash, version,"
-    " created_at, tombstoned_at"
+    " created_at, tombstoned_at, retention_until"
 )
 
 
@@ -45,6 +46,7 @@ def _source(row: sqlite3.Row) -> Source:
         content_hash=row["content_hash"],
         version=row["version"],
         tombstoned_at=from_text(row["tombstoned_at"]),
+        retention_until=from_text(row["retention_until"]),
     )
 
 
@@ -59,7 +61,7 @@ class SqliteSourceRepository:
             with self._db.transaction() as conn:
                 conn.execute(
                     f"INSERT INTO sources ({_SOURCE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                    " ?, ?)",
+                    " ?, ?, ?)",
                     (
                         workspace_id,
                         source.owner_id,
@@ -73,6 +75,7 @@ class SqliteSourceRepository:
                         source.version,
                         to_text(source.created_at),
                         to_text(source.tombstoned_at),
+                        to_text(source.retention_until),
                     ),
                 )
         except sqlite3.IntegrityError as error:
@@ -145,10 +148,20 @@ class SqliteSourceRepository:
         state: str | None = None,
         content_hash: str | None = None,
         title: str | None = None,
+        retention_until: datetime | Clear | None = None,
         expected_state: str | None = None,
     ) -> Source:
-        changes = {"state": state, "content_hash": content_hash, "title": title}
+        changes = {
+            "state": state,
+            "content_hash": content_hash,
+            "title": title,
+            "retention_until": (
+                None if isinstance(retention_until, Clear) else to_text(retention_until)
+            ),
+        }
         columns = [name for name, value in changes.items() if value is not None]
+        if isinstance(retention_until, Clear):
+            columns.append("retention_until")
         where = "workspace_id = ? AND id = ? AND kind != 'meeting' AND tombstoned_at IS NULL"
         try:
             with self._db.transaction() as conn:
@@ -159,6 +172,12 @@ class SqliteSourceRepository:
                 if row is None:
                     raise NotFoundError
                 if expected_state is not None and row["state"] != expected_state:
+                    raise ConflictError
+                claim = conn.execute(
+                    "SELECT retention_erase_phase FROM sources WHERE workspace_id = ? AND id = ?",
+                    (workspace_id, source_id),
+                ).fetchone()
+                if claim["retention_erase_phase"] is not None:
                     raise ConflictError
                 if columns:  # names come from the fixed dict above, never from the caller
                     conn.execute(
@@ -182,6 +201,74 @@ class SqliteSourceRepository:
                 (workspace_id, user_id, content_hash),
             ).fetchone()
         return _source(row) if row else None
+
+    def originals_due(self, now: datetime, limit: int) -> tuple[Source, ...]:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                f"SELECT {_SOURCE_COLUMNS} FROM sources WHERE retention_until IS NOT NULL"
+                " AND content_hash IS NOT NULL AND tombstoned_at IS NULL AND kind = 'audio'"
+                " AND state != 'cancelling'"
+                " AND retention_until <= ?"
+                " ORDER BY retention_until LIMIT ?",
+                (to_text(now), limit),
+            ).fetchall()
+        return tuple(_source(row) for row in rows)
+
+    @staticmethod
+    def _erase_params(source: Source) -> tuple[str, str, str, str, str]:
+        assert source.retention_until is not None and source.content_hash is not None
+        return (
+            source.workspace_id,
+            source.id,
+            to_text(source.retention_until),
+            source.content_hash,
+            source.state,
+        )
+
+    def claim_original_erase(self, source: Source) -> str | None:
+        workspace_id, source_id, due, content_hash, state = self._erase_params(source)
+        with self._db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE sources SET retention_erase_phase = 'erase'"
+                " WHERE workspace_id = ? AND id = ? AND retention_until = ?"
+                " AND content_hash = ? AND state = ? AND tombstoned_at IS NULL"
+                " AND state != 'cancelling'"
+                " AND retention_erase_phase IS NULL",
+                (workspace_id, source_id, due, content_hash, state),
+            )
+            if cursor.rowcount == 1:
+                return "erase"
+            row = conn.execute(
+                "SELECT retention_erase_phase FROM sources WHERE workspace_id = ? AND id = ?"
+                " AND retention_until = ? AND content_hash = ? AND state = ?"
+                " AND tombstoned_at IS NULL",
+                (workspace_id, source_id, due, content_hash, state),
+            ).fetchone()
+        return row["retention_erase_phase"] if row is not None else None
+
+    def prepare_original_erased(self, source: Source) -> bool:
+        workspace_id, source_id, due, content_hash, state = self._erase_params(source)
+        with self._db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE sources SET retention_erase_phase = 'audit'"
+                " WHERE workspace_id = ? AND id = ? AND retention_until = ?"
+                " AND content_hash = ? AND state = ? AND tombstoned_at IS NULL"
+                " AND retention_erase_phase = 'erase'",
+                (workspace_id, source_id, due, content_hash, state),
+            )
+        return cursor.rowcount == 1
+
+    def mark_original_erased(self, source: Source) -> bool:
+        workspace_id, source_id, due, content_hash, state = self._erase_params(source)
+        with self._db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE sources SET retention_until = NULL, retention_erase_phase = NULL"
+                " WHERE workspace_id = ? AND id = ? AND retention_until = ?"
+                " AND content_hash = ? AND state = ? AND tombstoned_at IS NULL"
+                " AND retention_erase_phase = 'audit'",
+                (workspace_id, source_id, due, content_hash, state),
+            )
+        return cursor.rowcount == 1
 
     def unfinished_deletes(self, limit: int) -> tuple[Source, ...]:
         with self._db.transaction(write=False) as conn:

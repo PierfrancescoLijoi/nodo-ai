@@ -532,7 +532,10 @@ def test_0011_adds_the_index_tables_and_keeps_existing_data(tmp_path) -> None:
             }
             applied = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
             after = {
-                table: [tuple(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY 1, 2, 3")]
+                table: [
+                    tuple(r)[: len(before[table][0])]
+                    for r in conn.execute(f"SELECT * FROM {table} ORDER BY 1, 2, 3")
+                ]
                 for table in before
             }
             empty = conn.execute("SELECT count(*) FROM search_fragments").fetchone()[0]

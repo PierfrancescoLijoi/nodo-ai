@@ -80,6 +80,15 @@ contain `time_ms`; the existing `/v1/meetings*` contract is unchanged.
    `GET /v1/sources/{id}/import` until `state` is `ready`, `failed` or `cancelled`.
 4. `POST /v1/sources/{id}/cancel` and `POST /v1/sources/{id}/retry` return `202` with the same
    import shape. Retry is valid for failed or cancelled work and stale extraction.
+5. Audio and video (`.mp3 .wav .m4a .flac .ogg .mp4 .mkv .mov .webm`, kind `audio`) stop after
+   complete in `awaiting_confirmation`. `POST /v1/sources/{id}/confirm-processing` with
+   `{ confirmed: true }` is the owner stating "I may process this recording"; it is audited (kind
+   only) and starts the transcription. It returns `202` with the import shape; a second call
+   returns the current state; another user gets `404`; a cancelled, failed or deleted import, or
+   a document, gets `409`. Cancel while awaiting erases the original at once. A retry of a
+   recording asks for a new confirmation. The original is erased 30 days after upload (the
+   transcript fragments stay); after that a retry or confirmation that needs it returns `409`
+   with code `original_missing`, and a reimport of the file stores it again.
 
 ```
 ImportOutput {

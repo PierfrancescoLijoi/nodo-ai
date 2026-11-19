@@ -1,6 +1,7 @@
 """Rules for original files (Task 6): which names and ids are safe, and the upload link record.
 
-Pure code, no disk access, shared by the disk store and its memory twin. Every message here is
+Pure code, shared by the disk store and its memory twin; only looks_like_media reads a file (its
+first 16 bytes). Every message here is
 fixed text: a refused file name or title never appears in an error."""
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 MAX_FILENAME_CHARS = 200
 MAX_VERSION = 1_000_000
@@ -85,3 +87,25 @@ def check_version(value: int) -> int:
     if type(value) is not int or not 1 <= value <= MAX_VERSION:
         raise ValueError("Unsafe version")
     return value
+
+
+# Signatures of the audio and video containers a recording can be in. Anything else (a playlist, a
+# concat script, text that ffmpeg would interpret as a list of other files) is refused before ffmpeg
+# sees it: the upload is an untrusted file.
+CONTAINER_SIGNATURES = (
+    (0, b"RIFF"),  # WAV
+    (0, b"OggS"),
+    (0, bytes([0x1A, 0x45, 0xDF, 0xA3])),  # Matroska and WebM
+    (0, b"fLaC"),
+    (0, b"ID3"),
+    (4, b"ftyp"),  # MP4 and M4A
+    (0, bytes([0xFF, 0xFB])),  # MP3 frame
+    (0, bytes([0xFF, 0xF3])),
+    (0, bytes([0xFF, 0xF1])),  # AAC (ADTS)
+)
+
+
+def looks_like_media(path: Path | str) -> bool:
+    with Path(path).open("rb") as handle:
+        head = handle.read(16)
+    return any(head[offset : offset + len(sig)] == sig for offset, sig in CONTAINER_SIGNATURES)

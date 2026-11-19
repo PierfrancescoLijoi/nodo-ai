@@ -141,6 +141,7 @@ def test_openapi_lists_source_paths(app) -> None:
         "/v1/sources/{source_id}",
         "/v1/sources/{source_id}/cancel",
         "/v1/sources/{source_id}/complete",
+        "/v1/sources/{source_id}/confirm-processing",
         "/v1/sources/{source_id}/outline",
         "/v1/sources/{source_id}/fragments",
         "/v1/sources/{source_id}/import",

@@ -180,6 +180,8 @@ class Source:
     content_hash: str | None = None
     version: int = 1
     tombstoned_at: datetime | None = None
+    # When the stored original is erased (imported audio); None keeps it until deletion.
+    retention_until: datetime | None = None
 
     @classmethod
     def from_meeting(cls, meeting: Meeting) -> Source:

@@ -146,16 +146,35 @@ class SourceRepository(Protocol):
         state: str | None = None,
         content_hash: str | None = None,
         title: str | None = None,
+        retention_until: datetime | Clear | None = None,
         expected_state: str | None = None,
     ) -> Source:
         """Write only the given columns of a live non-meeting source, so a concurrent edit of the
-        others (title, language, origin) is never lost. With expected_state the write happens only
+        others (title, language, origin) is never lost. CLEAR removes the retention date. With
+        expected_state the write happens only
         while the stored state equals it (ConflictError otherwise). NotFoundError for a missing,
         deleted or meeting source; DuplicateContentError as for save."""
         ...
 
     def find_by_hash(self, workspace_id: str, user_id: str, content_hash: str) -> Source | None:
         """The owner's live source with this content hash, or None. Meetings never match."""
+        ...
+
+    def originals_due(self, now: datetime, limit: int) -> tuple[Source, ...]:
+        """Uploaded live audio sources whose retention_until has passed, oldest first."""
+        ...
+
+    def claim_original_erase(self, source: Source) -> str | None:
+        """Claim this exact source revision for retention. Return `erase`, `audit`, or None when
+        another source change won. A persisted phase makes a crashed sweep resumable."""
+        ...
+
+    def prepare_original_erased(self, source: Source) -> bool:
+        """Advance this exact claim from file erasure to its idempotent audit step."""
+        ...
+
+    def mark_original_erased(self, source: Source) -> bool:
+        """After audit, clear retention and its claim while this exact live revision remains."""
         ...
 
     def unfinished_deletes(self, limit: int) -> tuple[Source, ...]:
@@ -338,6 +357,11 @@ class SourceBlobStore(Protocol):
 
     def erase(self, workspace_id: str, source_id: str) -> None:
         """Remove every version and leftover of a source; no error if there are none."""
+        ...
+
+    def erase_originals(self, workspace_id: str, source_id: str) -> None:
+        """Remove every stored version of a live source (retention, a cancel before processing)
+        and keep it writable: a later reimport may store a new original. Safe to repeat."""
         ...
 
     def revoke_links(self, workspace_id: str, source_id: str) -> None:

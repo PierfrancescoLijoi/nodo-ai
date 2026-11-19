@@ -143,6 +143,8 @@ def memory_adapters(settings: Settings) -> Adapters:
         audit,
         extraction_version=doc_version,
         control=queue,
+        speech=MemorySpeech(),
+        speech_locales=settings.speech_candidate_locales,
     )
     return Adapters(
         meetings,

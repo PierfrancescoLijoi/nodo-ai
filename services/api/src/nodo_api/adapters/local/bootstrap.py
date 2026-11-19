@@ -313,6 +313,8 @@ def local_adapters(settings: Settings):
         control=queue,
         screen=document_screen(settings),
         token_fits=embedder.within_ceiling,
+        speech=speech,
+        speech_locales=settings.speech_candidate_locales,
     )
     source = SyncSource(
         engine="local",
@@ -337,7 +339,13 @@ def local_adapters(settings: Settings):
         sync,
         embedder,
         reranker,
-        RetentionService(SqliteRetentionStore(db), blobs, SqliteAuditLog(db)),
+        RetentionService(
+            SqliteRetentionStore(db),
+            blobs,
+            SqliteAuditLog(db),
+            sources=sources,
+            source_blobs=source_blobs,
+        ),
         LocalIndexService(
             IndexMaintenanceService(
                 maintenance, transcripts, retriever, graph, queue, audit, entity_indexer, answers

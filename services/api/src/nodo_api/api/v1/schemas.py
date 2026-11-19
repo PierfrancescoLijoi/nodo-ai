@@ -147,6 +147,12 @@ class ImportOutput(FrozenModel):
     existing_source_id: str | None = None
 
 
+class ProcessingConfirmation(FrozenModel):
+    """The owner of an imported recording states "I may process this recording"."""
+
+    confirmed: Literal[True]
+
+
 class ImportStatusOutput(FrozenModel):
     import_: ImportOutput = Field(alias="import", serialization_alias="import")
 
