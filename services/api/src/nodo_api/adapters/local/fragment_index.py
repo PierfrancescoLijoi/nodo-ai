@@ -156,6 +156,13 @@ class SqliteFragmentIndex:
                 "DELETE FROM search_fragments WHERE workspace_id = ? AND source_id = ?",
                 (workspace_id, source_id),
             )
+            # An FTS5 delete only marks the terms; they stay in older segments until a merge.
+            # ponytail: optimize rewrites the whole text index (fine for one person's library);
+            # use an incremental 'merge' if deletes of a large index get slow.
+            conn.execute("INSERT INTO fragment_fts (fragment_fts) VALUES ('optimize')")
+
+    def compact(self) -> None:
+        self._db.truncate_wal()
 
     def count_source(self, workspace_id: str, source_id: str) -> int:
         with self._db.transaction(write=False) as conn:

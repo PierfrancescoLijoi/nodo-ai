@@ -8,6 +8,7 @@ with another writer. Transactions nest by joining the outer one."""
 from __future__ import annotations
 
 import contextlib
+import logging
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -15,6 +16,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
+
+logger = logging.getLogger("nodo_db")
 
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f+00:00"
 BUSY_TIMEOUT_MS = 30_000
@@ -61,6 +64,8 @@ class LocalDatabase:
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
             conn.execute("PRAGMA foreign_keys = ON")
+            # Deleted rows are overwritten with zeros, so erased text does not linger in free pages.
+            conn.execute("PRAGMA secure_delete = ON")
             conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
             self._threads.conn = conn
             self._threads.depth = 0
@@ -89,6 +94,22 @@ class LocalDatabase:
             conn.execute("COMMIT")
         finally:
             self._threads.depth = 0
+
+    def truncate_wal(self, busy_ms: int = 200) -> bool:
+        """Copy the write-ahead log into the file and empty it, so old page images (deleted text)
+        are gone from disk. Best effort on its own short-lived connection: a reader that holds the
+        log open makes it give up after `busy_ms`; the next delete or checkpoint tries again.
+        Returns whether it finished; logs only a code."""
+        try:
+            with contextlib.closing(sqlite3.connect(self._path, timeout=busy_ms / 1000)) as conn:
+                conn.execute(f"PRAGMA busy_timeout = {int(busy_ms)}")
+                busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+        except sqlite3.Error as error:
+            logger.warning("wal_truncate_failed type=%s", type(error).__name__)
+            return False
+        if busy:
+            logger.warning("wal_truncate_incomplete")
+        return not busy
 
     def _migrate(self) -> None:
         conn = self.connection()

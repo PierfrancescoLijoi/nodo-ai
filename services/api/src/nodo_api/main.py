@@ -85,6 +85,12 @@ async def _lifespan(app: FastAPI):
         await voice.startup()
     if runtime is not None:
         runtime.start()
+    sources = app.state.container.source_service
+    if sources is not None:  # after the engine lock: deletes a failure or crash left unfinished
+        try:
+            sources.finish_deletes()
+        except Exception as error:
+            logger.error("finish_deletes_failed type=%s", type(error).__name__)
     try:
         yield
     finally:
@@ -223,8 +229,22 @@ def _container(settings: Settings, key_provider) -> AppContainer:
             answers=a.answers,
             audit=a.audit,
             clock=lambda: datetime.now(UTC),
+            fragment_index=a.fragment_index,
+            blobs=a.source_blobs,
+            imports=a.imports,
+            jobs=a.jobs,
         )
-        if a.sources is not None and a.fragments is not None
+        if all(
+            port is not None
+            for port in (
+                a.sources,
+                a.fragments,
+                a.fragment_index,
+                a.source_blobs,
+                a.imports,
+                a.jobs,
+            )
+        )
         else None
     )
     return AppContainer(

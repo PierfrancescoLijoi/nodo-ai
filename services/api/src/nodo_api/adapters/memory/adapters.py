@@ -314,6 +314,19 @@ class MemoryJobQueue:
         self.cancelled.add(key)
         return True
 
+    def discard(self, workspace_id: str, job_type: str, key_prefix: str) -> int:
+        gone = [
+            k
+            for k in self._jobs
+            if (k[0], k[2]) == (workspace_id, job_type) and k[1].startswith(key_prefix)
+        ]
+        for key in gone:
+            for table in (self._jobs, self._created, self.claimed):
+                table.pop(key, None)
+            self.cancelled.discard(key)
+            self._released.discard(key)
+        return len(gone)
+
 
 class MockRetriever:
     def __init__(self) -> None:
@@ -480,9 +493,16 @@ class MemoryAuditLog:
     def __init__(self) -> None:
         self._events: dict[tuple[str, str], tuple[str, dict[str, str]]] = {}
 
-    def append(self, workspace_id: str, event_type: str, metadata: dict[str, str]) -> str:
-        event_id = str(uuid4())
-        self._events[(workspace_id, event_id)] = (event_type, dict(metadata))
+    def append(
+        self,
+        workspace_id: str,
+        event_type: str,
+        metadata: dict[str, str],
+        *,
+        event_id: str | None = None,
+    ) -> str:
+        event_id = event_id or str(uuid4())
+        self._events.setdefault((workspace_id, event_id), (event_type, dict(metadata)))
         return event_id
 
 

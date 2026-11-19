@@ -142,6 +142,11 @@ class SourceRepository(Protocol):
         """The owner's live source with this content hash, or None. Meetings never match."""
         ...
 
+    def unfinished_deletes(self, limit: int) -> tuple[Source, ...]:
+        """Deleted non-meeting sources of every workspace whose erase has not finished (state
+        `deleting`): at engine start the delete is run again for each."""
+        ...
+
     def list_owned(
         self,
         workspace_id: str,
@@ -354,6 +359,11 @@ class JobControl(Protocol):
         cooperatively through ImportJobRepository.request_cancel."""
         ...
 
+    def discard(self, workspace_id: str, job_type: str, key_prefix: str) -> int:
+        """Remove every job of this type whose key starts with `key_prefix`, in any state. A
+        worker still running one settles nothing afterwards. Returns how many went."""
+        ...
+
 
 class Retriever(Protocol):
     def index(
@@ -402,6 +412,11 @@ class FragmentIndex(Protocol):
         ...
 
     def erase_source(self, workspace_id: str, source_id: str) -> None: ...
+
+    def compact(self) -> None:
+        """After a delete: make erased rows unrecoverable from the store files (SQLite: truncate
+        the write-ahead log). Best effort: never raises, logs a code when it can not finish."""
+        ...
 
     def count_source(self, workspace_id: str, source_id: str) -> int: ...
 
@@ -651,7 +666,18 @@ class MaintenanceStore(Protocol):
 
 
 class AuditLog(Protocol):
-    def append(self, workspace_id: str, event_type: str, metadata: dict[str, str]) -> str: ...
+    def append(
+        self,
+        workspace_id: str,
+        event_type: str,
+        metadata: dict[str, str],
+        *,
+        event_id: str | None = None,
+    ) -> str:
+        """Record one event and return its id. With `event_id` the append is idempotent: an event
+        with that id already in the workspace is kept and nothing is written (a retried delete
+        audits once). The local and memory logs take it; the Azure engine has no caller."""
+        ...
 
 
 class SpeechToText(Protocol):

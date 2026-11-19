@@ -89,6 +89,16 @@ class MemorySourceRepository:
             None,
         )
 
+    def unfinished_deletes(self, limit: int) -> tuple[Source, ...]:
+        with self._lock:
+            return tuple(
+                s
+                for s in self._sources.values()
+                if s.tombstoned_at is not None
+                and s.kind is not SourceKind.MEETING
+                and s.state == "deleting"
+            )[:limit]
+
     def _check_hash_free(self, workspace_id: str, source: Source) -> None:
         """The rule schema 0010 enforces: one live source per owner and file hash."""
         if source.content_hash is None or source.tombstoned_at is not None:

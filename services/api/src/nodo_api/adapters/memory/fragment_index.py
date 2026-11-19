@@ -51,6 +51,9 @@ class MemoryFragmentIndex:
         with self._lock:
             self._sources.pop((workspace_id, source_id), None)
 
+    def compact(self) -> None:
+        """Nothing is kept on disk."""
+
     def count_source(self, workspace_id: str, source_id: str) -> int:
         with self._lock:
             return len(self._sources.get((workspace_id, source_id), ("", ()))[1])

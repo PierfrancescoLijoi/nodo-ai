@@ -177,6 +177,15 @@ class SqliteJobQueue:
             )
         return cursor.rowcount == 1
 
+    def discard(self, workspace_id: str, job_type: str, key_prefix: str) -> int:
+        with self._db.transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM jobs WHERE workspace_id = ? AND job_type = ?"
+                " AND substr(job_key, 1, ?) = ?",
+                (workspace_id, job_type, len(key_prefix), key_prefix),
+            )
+        return cursor.rowcount
+
     def _update(self, message: LocalMessage, sql: str, params: tuple) -> None:
         with self._db.transaction() as conn:
             conn.execute(

@@ -146,6 +146,15 @@ class SqliteSourceRepository:
             ).fetchone()
         return _source(row) if row else None
 
+    def unfinished_deletes(self, limit: int) -> tuple[Source, ...]:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                f"SELECT {_SOURCE_COLUMNS} FROM sources WHERE tombstoned_at IS NOT NULL"
+                " AND kind != 'meeting' AND state = 'deleting' LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return tuple(_source(row) for row in rows)
+
     def list_owned(
         self,
         workspace_id: str,
