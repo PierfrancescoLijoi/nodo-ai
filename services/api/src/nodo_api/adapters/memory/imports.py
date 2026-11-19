@@ -24,6 +24,12 @@ class MemoryImportJobRepository:
         self._sources = sources
         self._jobs: dict[tuple[str, str], ImportJob] = {}
         self._lock = threading.RLock()  # each change reads a job and writes it back
+        sources.import_running = self._running
+
+    def _running(self, workspace_id: str, source_id: str) -> bool:
+        # No lock: a dict read is atomic, and the caller may hold the source lock.
+        job = self._jobs.get((workspace_id, source_id))
+        return job is not None and job.state in ACTIVE_STATES
 
     def create(self, workspace_id: str, owner_id: str, source_id: str) -> ImportJob:
         key = (workspace_id, source_id)
@@ -69,6 +75,7 @@ class MemoryImportJobRepository:
         error_code: str | Clear | None = None,
         cancel_requested: bool | None = None,
         expected_state: str | Collection[str] | None = None,
+        expected_attempt: int | None = None,
     ) -> ImportJob:
         wanted = check_job_update(state, step, (done, total, attempt), error_code, expected_state)
         # None leaves a field as it is; CLEAR sets step or error_code to None.
@@ -88,6 +95,8 @@ class MemoryImportJobRepository:
         with self._lock:
             job = self.get_for_processing(workspace_id, source_id)
             if wanted is not None and job.state not in wanted:
+                raise ConflictError
+            if expected_attempt is not None and job.attempt != expected_attempt:
                 raise ConflictError
             job = replace(job, **changes, updated_at=datetime.now(UTC))
             self._jobs[(workspace_id, source_id)] = job

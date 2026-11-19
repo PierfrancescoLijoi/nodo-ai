@@ -97,15 +97,22 @@ CONTAINER_SIGNATURES = (
     (0, b"OggS"),
     (0, bytes([0x1A, 0x45, 0xDF, 0xA3])),  # Matroska and WebM
     (0, b"fLaC"),
-    (0, b"ID3"),
-    (4, b"ftyp"),  # MP4 and M4A
-    (0, bytes([0xFF, 0xFB])),  # MP3 frame
-    (0, bytes([0xFF, 0xF3])),
-    (0, bytes([0xFF, 0xF1])),  # AAC (ADTS)
+    (0, b"ID3"),  # MP3 with a tag
 )
+# Second byte after 0xFF: MPEG layer III frames (MPEG 1, 2 and 2.5, with and without CRC) and AAC
+# in ADTS (MPEG 4 and 2, with and without CRC). 0xFE and 0xFF are not here (UTF-16 byte marks).
+FRAME_SYNC = frozenset({0xFB, 0xFA, 0xF3, 0xF2, 0xE3, 0xE2, 0xF1, 0xF0, 0xF9, 0xF8})
+# ISO and QuickTime boxes a MP4, M4A or MOV file starts with. The four bytes before the name are
+# the box size: a real first box is far below 512 MB, so its first byte is a control byte, while
+# text has a printable one there.
+FIRST_BOXES = frozenset({b"ftyp", b"wide", b"mdat", b"moov", b"free", b"skip"})
 
 
 def looks_like_media(path: Path | str) -> bool:
     with Path(path).open("rb") as handle:
         head = handle.read(16)
-    return any(head[offset : offset + len(sig)] == sig for offset, sig in CONTAINER_SIGNATURES)
+    if any(head[offset : offset + len(sig)] == sig for offset, sig in CONTAINER_SIGNATURES):
+        return True
+    if len(head) >= 2 and head[0] == 0xFF and head[1] in FRAME_SYNC:
+        return True
+    return len(head) >= 8 and head[0] < 0x20 and head[4:8] in FIRST_BOXES

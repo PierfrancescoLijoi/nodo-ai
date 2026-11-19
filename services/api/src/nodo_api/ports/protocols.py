@@ -282,12 +282,14 @@ class ImportJobRepository(Protocol):
         error_code: str | Clear | None = None,
         cancel_requested: bool | None = None,
         expected_state: str | Collection[str] | None = None,
+        expected_attempt: int | None = None,
     ) -> ImportJob:
         """Change the fields given. None leaves a field alone; CLEAR empties step or error_code
         (an empty string is refused). ValueError for an unknown state, a negative counter or an
         empty string. With expected_state (a state or several) the write happens only if the job
         is in one of them, tested and written together: otherwise nothing is written and
-        ConflictError is raised. NotFoundError if there is no job."""
+        ConflictError is raised. expected_attempt works the same way on the attempt number.
+        NotFoundError if there is no job."""
         ...
 
     def request_cancel(self, workspace_id: str, user_id: str, source_id: str) -> ImportJob:

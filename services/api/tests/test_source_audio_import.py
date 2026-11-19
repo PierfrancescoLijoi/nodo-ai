@@ -15,18 +15,22 @@ from typing import Any
 
 import pytest
 
+from nodo_api.adapters.local.db import LocalDatabase
+from nodo_api.adapters.local.sources import SqliteSourceRepository
 from nodo_api.adapters.memory import (
     MemoryBlobStore,
     MemoryMeetingRepository,
     MemoryRetentionStore,
 )
 from nodo_api.domain.models import Locale, SpokenPhrase
+from nodo_api.domain.source_files import looks_like_media
 from nodo_api.domain.sources import SourceKind
 from nodo_api.errors import ConflictError, NotFoundError, OriginalMissing, ValidationFailed
 from nodo_api.services.ingestion import build_segments
 from nodo_api.services.retention import RetentionService
 from nodo_api.services.source_import import CONFIRMATION_TEXT
 from nodo_api.services.sources import SourceService
+from tests.test_local_migrations import _insert_document, migrate_to
 from tests.test_source_import import OWNER, Stack, _stack
 
 T0 = datetime(2026, 11, 1, 9, 0, tzinfo=UTC)
@@ -522,3 +526,251 @@ def test_original_missing_is_a_coded_409(app, client, auth_headers) -> None:
     response = client.post(f"/v1/sources/{source_id}/retry", headers=auth_headers)
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "original_missing"
+
+
+# --------------------------------------------------------------------------- review fixes
+
+
+@pytest.mark.parametrize("start", ["awaiting", "ready"])
+def test_a_complete_replay_during_the_reimport_copy_transcribes_nothing(
+    stack: Stack, tmp_path, start: str
+) -> None:
+    source = upload_audio(stack) if start == "awaiting" else confirmed_audio(stack)
+    calls = len(stack.speech.calls)  # type: ignore[attr-defined]
+    new_file = tmp_path / "standup-2.wav"
+    new_file.write_bytes(wav(3200))
+    adopt = stack.blobs.adopt
+    seen: list[str] = []
+
+    def replay_while_copying(workspace_id, source_id, version, path):
+        stored = adopt(workspace_id, source_id, version, path)
+        stack.service.complete(stack.ws, OWNER, source.id)  # the owner client retries
+        stack.service.process(stack.ws, source.id)
+        seen.append(stack.job(source.id).state)
+        with pytest.raises(ConflictError):  # nothing to confirm until the copy is done
+            stack.service.confirm(stack.ws, OWNER, source.id)
+        return stored
+
+    stack.blobs.adopt = replay_while_copying  # type: ignore[method-assign]
+    job = stack.service.reimport(stack.ws, OWNER, source.id, new_file)
+    assert seen == ["awaiting_confirmation"]
+    assert job.state == "awaiting_confirmation" and job.step is None
+    assert len(stack.speech.calls) == calls  # type: ignore[attr-defined]
+    confirmed = 0 if start == "awaiting" else 1
+    assert len(events(stack, "source_processing_confirmed")) == confirmed
+
+
+def test_a_restart_during_the_reimport_copy_transcribes_nothing(stack: Stack, tmp_path) -> None:
+    source = confirmed_audio(stack)
+    new_file = tmp_path / "standup-2.wav"
+    new_file.write_bytes(wav(3200))
+    adopt = stack.blobs.adopt
+    resumed: list[int] = []
+
+    def restart_after_copy(workspace_id, source_id, version, path):
+        stored = adopt(workspace_id, source_id, version, path)
+        # What a crash here leaves, seen by the next process: the start sweep, then a delivery.
+        resumed.append(stack.service.resume_interrupted())
+        stack.service.process(stack.ws, source.id)
+        assert stack.job(source.id).state == "awaiting_confirmation"
+        return stored
+
+    stack.blobs.adopt = restart_after_copy  # type: ignore[method-assign]
+    stack.service.reimport(stack.ws, OWNER, source.id, new_file)
+    assert resumed == [0]
+    assert len(stack.speech.calls) == 1  # type: ignore[attr-defined]  # the first import only
+    assert stack.job(source.id).state == "awaiting_confirmation"
+
+
+def test_a_crash_after_the_reimport_copy_waits_and_can_be_recovered(stack: Stack, tmp_path) -> None:
+    source = confirmed_audio(stack)
+    new_file = tmp_path / "standup-2.wav"
+    new_file.write_bytes(wav(3200))
+    append = stack.audit.append
+
+    class Crash(BaseException):
+        pass
+
+    def crash_on_reimport(workspace_id, event_type, metadata, *, event_id=None):
+        if event_type == "source_reimported":
+            raise Crash  # the new hash is written, the process dies before anything else
+        return append(workspace_id, event_type, metadata, event_id=event_id)
+
+    stack.audit.append = crash_on_reimport  # type: ignore[method-assign]
+    with pytest.raises(Crash):
+        stack.service.reimport(stack.ws, OWNER, source.id, new_file)
+    stack.audit.append = append  # type: ignore[method-assign]
+    assert stack.service.resume_interrupted() == 0
+    stack.service.complete(stack.ws, OWNER, source.id)
+    stack.service.process(stack.ws, source.id)
+    assert stack.job(source.id).state == "awaiting_confirmation"
+    assert len(stack.speech.calls) == 1  # type: ignore[attr-defined]
+    # The owner imports the same file again: it now waits for a confirmation that works.
+    job = stack.service.reimport(stack.ws, OWNER, source.id, new_file)
+    assert (job.state, job.step) == ("awaiting_confirmation", None)
+    stack.service.confirm(stack.ws, OWNER, source.id)
+    stack.service.process(stack.ws, source.id)
+    assert stack.job(source.id).state == "ready"
+    assert len(stack.speech.calls) == 2  # type: ignore[attr-defined]
+    assert len(events(stack, "source_processing_confirmed")) == 2
+
+
+def test_the_sweep_skips_a_recording_whose_import_is_running(stack: Stack) -> None:
+    source = upload_audio(stack)
+    stack.service.confirm(stack.ws, OWNER, source.id)  # queued, not yet processed
+    sweeper = retention(stack)
+    assert sweeper.sweep(T0 + timedelta(days=31)).erased == 0
+    assert original(stack, source.id).is_file()
+    stack.service.process(stack.ws, source.id)
+    assert stack.job(source.id).state == "ready"
+    assert stack.sources.get_owned(stack.ws, OWNER, source.id).state == "ready"
+    assert sweeper.sweep(T0 + timedelta(days=31)).erased == 1
+
+
+def test_a_file_that_is_not_media_is_refused_before_asking(stack: Stack, tmp_path) -> None:
+    bad = upload_audio(stack, "fake.wav", b"just some text, not a recording")
+    job = stack.job(bad.id)
+    assert (job.state, job.error_code) == ("failed", "unsupported")
+    assert stack.sources.get_owned(stack.ws, OWNER, bad.id).state == "failed"
+    assert events(stack, "source_processing_confirmed") == []
+    good = upload_audio(stack)
+    text = tmp_path / "notes.wav"
+    text.write_bytes(b"#EXTM3U\nfile:///etc/passwd\n")
+    with pytest.raises(ValidationFailed):
+        stack.service.reimport(stack.ws, OWNER, good.id, text)
+    assert stack.job(good.id).state == "awaiting_confirmation"
+    assert stack.speech.calls == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        b"ID3\x04\x00",
+        b"\xff\xfb\x90\x00",
+        b"\xff\xfa\x90\x00",
+        b"\xff\xf3\x90\x00",
+        b"\xff\xf2\x90\x00",
+        b"\xff\xe3\x90\x00",
+        b"\xff\xe2\x90\x00",
+        b"\xff\xf1\x50\x80",
+        b"\xff\xf9\x50\x80",
+        b"\x00\x00\x00\x20ftypqt  ",
+        b"\x00\x00\x00\x08wide",
+        b"\x00\x00\x10\x00mdat",
+        b"\x00\x00\x00\x6cmoov",
+        b"\x00\x00\x00\x08free",
+        b"\x00\x00\x00\x08skip",
+        b"RIFF\x24\x00\x00\x00WAVE",
+    ],
+)
+def test_media_signatures_cover_common_recordings(tmp_path, head: bytes) -> None:
+    path = tmp_path / "clip"
+    path.write_bytes(head + bytes(32))
+    assert looks_like_media(path)
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        b"",
+        b"\xff\xfeh\x00i\x00",  # UTF-16 text
+        b"#EXTM3U\n",
+        b"ffconcat version 1.0\n",
+        b"abcdfree text",  # a box name inside text is not a box
+        b"long mdat text",
+    ],
+)
+def test_text_is_not_media(tmp_path, head: bytes) -> None:
+    path = tmp_path / "clip"
+    path.write_bytes(head)
+    assert not looks_like_media(path)
+
+
+def test_an_audit_failure_on_confirm_processes_nothing_and_can_be_retried(stack: Stack) -> None:
+    source = upload_audio(stack)
+    append = stack.audit.append
+
+    def failing(workspace_id, event_type, metadata, *, event_id=None):
+        if event_type == "source_processing_confirmed":
+            raise OSError("audit unavailable")
+        return append(workspace_id, event_type, metadata, event_id=event_id)
+
+    stack.audit.append = failing  # type: ignore[method-assign]
+    with pytest.raises(OSError):
+        stack.service.confirm(stack.ws, OWNER, source.id)
+    stack.service.process(stack.ws, source.id)
+    assert stack.job(source.id).state == "awaiting_confirmation"
+    assert stack.published.keys == [] and stack.speech.calls == []  # type: ignore[attr-defined]
+    stack.audit.append = append  # type: ignore[method-assign]
+    assert stack.service.confirm(stack.ws, OWNER, source.id).state == "queued"
+    stack.service.process(stack.ws, source.id)
+    assert stack.job(source.id).state == "ready"
+
+
+def test_the_same_recording_uploaded_twice_is_not_asked_or_processed_twice(stack: Stack) -> None:
+    data = wav(400)
+    first = upload_audio(stack, "a.wav", data)
+    second = upload_audio(stack, "b.wav", data)
+    assert stack.job(first.id).state == "awaiting_confirmation"
+    with pytest.raises(NotFoundError):
+        stack.sources.get_owned(stack.ws, OWNER, second.id)
+    assert stack.published.keys == []
+    stack.service.confirm(stack.ws, OWNER, first.id)
+    stack.service.process(stack.ws, first.id)
+    third = upload_audio(stack, "c.wav", data)  # once processed: the ready job answers
+    assert stack.job(first.id).state == "ready"
+    with pytest.raises(NotFoundError):
+        stack.sources.get_owned(stack.ws, OWNER, third.id)
+    assert len(stack.speech.calls) == 1  # type: ignore[attr-defined]
+    assert len(events(stack, "source_processing_confirmed")) == 1
+
+
+def test_a_crash_while_erasing_is_finished_by_the_next_sweep(stack: Stack) -> None:
+    source = confirmed_audio(stack)
+    erase = stack.blobs.erase_originals
+
+    def crash(workspace_id: str, source_id: str) -> None:
+        raise OSError("disk busy")
+
+    stack.blobs.erase_originals = crash  # type: ignore[method-assign]
+    sweeper = retention(stack)
+    first = sweeper.sweep(T0 + timedelta(days=31))
+    assert (first.erased, first.failed) == (0, 1)
+    assert original(stack, source.id).is_file()
+    stack.blobs.erase_originals = erase  # type: ignore[method-assign]
+    second = sweeper.sweep(T0 + timedelta(days=31))
+    assert (second.erased, second.failed) == (1, 0)
+    assert not original(stack, source.id).exists()
+    stored = stack.sources.get_owned(stack.ws, OWNER, source.id)
+    assert stored.retention_until is None and stored.state == "ready"
+    assert len(events(stack, "audio_erased")) == 1
+    assert sweeper.sweep(T0 + timedelta(days=62)).erased == 0
+
+
+def test_migration_0012_keeps_existing_rows_without_a_retention_date(tmp_path) -> None:
+    path = tmp_path / "nodo.db"
+    old = migrate_to(path, 11)
+    _insert_document(old, "d1")
+    _insert_document(old, "a1", kind="audio")
+    old.close()
+    db = LocalDatabase(path)
+    try:
+        with db.transaction(write=False) as conn:
+            rows = conn.execute(
+                "SELECT id, retention_until, retention_erase_phase FROM sources ORDER BY id"
+            ).fetchall()
+            index = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+                ("sources_retention_idx",),
+            ).fetchone()
+            applied = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
+    finally:
+        db.close()
+    assert [tuple(r) for r in rows] == [("a1", None, None), ("d1", None, None)]
+    assert index is not None and "retention_until IS NOT NULL" in index[0]
+    assert 12 in applied
+    db = LocalDatabase(path)
+    try:
+        assert SqliteSourceRepository(db).originals_due(T0 + timedelta(days=9999), 10) == ()
+    finally:
+        db.close()

@@ -6,6 +6,7 @@ merges them in, the way the SQLite triggers copy meetings into the sources table
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -29,6 +30,9 @@ class MemorySourceRepository:
         self._meetings = meetings
         self._sources: dict[tuple[str, str], Source] = {}
         self._erase_claims: dict[tuple[str, str], tuple[datetime, str, str, str]] = {}
+        # Whether an import of (workspace, source) is running; the import job twin sets it (the
+        # SQLite store joins import_jobs). The retention sweep leaves such a source alone.
+        self.import_running: Callable[[str, str], bool] = lambda workspace_id, source_id: False
         # The check for a clash and the write must not be separated by another thread.
         self._lock = threading.RLock()
 
@@ -141,6 +145,7 @@ class MemorySourceRepository:
                 and s.retention_until <= now
                 and s.content_hash is not None
                 and s.state != "cancelling"
+                and not self.import_running(s.workspace_id, s.id)
             ]
         return tuple(sorted(due, key=lambda s: s.retention_until or now)[:limit])
 
@@ -162,6 +167,7 @@ class MemorySourceRepository:
                 or stored.tombstoned_at is not None
                 or stored.content_hash is None
                 or stored.state == "cancelling"
+                or self.import_running(*key)
                 or self._erase_revision(stored) != revision
             ):
                 return None

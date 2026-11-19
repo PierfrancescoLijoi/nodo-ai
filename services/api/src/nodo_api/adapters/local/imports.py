@@ -84,6 +84,7 @@ class SqliteImportJobRepository:
         error_code: str | Clear | None = None,
         cancel_requested: bool | None = None,
         expected_state: str | Collection[str] | None = None,
+        expected_attempt: int | None = None,
     ) -> ImportJob:
         wanted = check_job_update(state, step, (done, total, attempt), error_code, expected_state)
         sets = ["updated_at = ?"]
@@ -106,6 +107,9 @@ class SqliteImportJobRepository:
         if wanted is not None:
             where += f" AND state IN ({', '.join('?' * len(wanted))})"
             params.extend(wanted)
+        if expected_attempt is not None:
+            where += " AND attempt = ?"
+            params.append(expected_attempt)
         with self._db.transaction() as conn:
             # One statement: the state is tested and the row written together.
             cursor = conn.execute(f"UPDATE import_jobs SET {', '.join(sets)} WHERE {where}", params)

@@ -87,6 +87,10 @@ BATCH_FRAGMENTS = 8
 MAX_ORIGIN_CHARS = 500
 _CODE = re.compile(r"[a-z0-9_]{1,64}")
 AWAITING = "awaiting_confirmation"
+# Job step of a recording whose new file is being copied by a reimport: it waits (never active),
+# and confirm and cancel answer 409 until the copy is done. A crash leaves it waiting; importing
+# the file again clears it.
+REIMPORTING = "reimporting"
 # What the owner of an imported recording confirms (FR-5). The audit event stands for it; neither
 # the text nor anything about the recording is written into the event.
 CONFIRMATION_TEXT = "I may process this recording"
@@ -291,6 +295,8 @@ class SourceImportService:
         self._blobs.revoke_links(workspace_id, source_id)
         _, digest = self._blobs.size_and_sha256(original)
         audio = source.kind is SourceKind.AUDIO
+        # Not a recording (16 bytes, no decoder): refused before the owner is asked to confirm.
+        refused = audio and not looks_like_media(original)
         for _ in range(3):  # each turn follows a race: a twin that appears or one that vanishes
             twin = self._sources.find_by_hash(workspace_id, user_id, digest)
             if twin is None:
@@ -299,7 +305,8 @@ class SourceImportService:
                         self._imports.update(
                             workspace_id,
                             source_id,
-                            state=AWAITING,
+                            state="failed" if refused else AWAITING,
+                            error_code="unsupported" if refused else None,
                             expected_state=("queued", AWAITING),
                         )
                 try:  # the hash column only: a cancel or an edit meanwhile is kept
@@ -309,6 +316,11 @@ class SourceImportService:
                     raise
                 except DuplicateContentError:
                     continue  # the same bytes completed at the same moment: answer with them
+                if refused:
+                    with suppress(ConflictError):
+                        self._sources.update(
+                            workspace_id, source_id, state="failed", expected_state="queued"
+                        )
                 job = self._imports.get_owned(workspace_id, user_id, source_id)
                 if not audio:  # a recording is published by confirm
                     self._publish(workspace_id, source_id, digest, job.attempt)
@@ -338,6 +350,8 @@ class SourceImportService:
         audio = source.kind is SourceKind.AUDIO
         if (_kind_for(name, None, audio=self._speech is not None) is SourceKind.AUDIO) != audio:
             raise ValidationFailed  # a recording stays a recording, a document a document
+        if audio and not looks_like_media(path):
+            raise ValidationFailed  # not a recording: refused before anyone is asked
         job = self._imports.get_owned(workspace_id, user_id, source_id)
         if job.state in ACTIVE:
             raise ConflictError  # one import of a source at a time
@@ -345,16 +359,25 @@ class SourceImportService:
         # The same recording after retention erased its original is stored again.
         restore = audio and not self._file_versions(workspace_id, source_id)
         if digest == source.content_hash and not restore:
-            stale = self._stale(workspace_id, user_id, source, job)
+            # A reimport that crashed after storing these bytes left its reservation: clear it.
+            stale = job.step == REIMPORTING or self._stale(workspace_id, user_id, source, job)
             return self._rerun(workspace_id, source, job) if stale else job
         twin = self._sources.find_by_hash(workspace_id, user_id, digest)
         if twin is not None and twin.id != source_id:
             return self._unchanged(workspace_id, user_id, twin)
         # Reserve the source first: a second reimport now gets ConflictError, so two copies
-        # never race for the same file version.
+        # never race for the same file version. A recording is reserved waiting, never active:
+        # a replayed complete, the start sweep or a stray message cannot process it before the
+        # owner confirms the new file; the attempt number is the compare-and-set token.
         previous_source = source
         reserved = self._imports.update(
-            workspace_id, source_id, state="queued", expected_state=job.state
+            workspace_id,
+            source_id,
+            state=AWAITING if audio else "queued",
+            step=REIMPORTING if audio else None,
+            attempt=job.attempt + 1 if audio else None,
+            expected_state=job.state,
+            expected_attempt=job.attempt,
         )
         try:
             # Move the source revision before copying. The retention repository makes this update
@@ -392,7 +415,12 @@ class SourceImportService:
                 )
             with suppress(ConflictError, NotFoundError):  # give the source back as it was
                 self._imports.update(
-                    workspace_id, source_id, state=job.state, expected_state="queued"
+                    workspace_id,
+                    source_id,
+                    state=job.state,
+                    step=CLEAR if audio else None,
+                    expected_state=reserved.state,
+                    expected_attempt=reserved.attempt,
                 )
             if not isinstance(error, DuplicateContentError):
                 raise
@@ -408,6 +436,8 @@ class SourceImportService:
         one stops at its next check and compensates."""
         source = self._owned(workspace_id, user_id, source_id)
         job = self._imports.get_owned(workspace_id, user_id, source_id)
+        if job.step == REIMPORTING:
+            raise ConflictError  # a new file is being copied in: cancel after it
         if job.state == AWAITING:
             return self._cancel_unconfirmed(workspace_id, user_id, source)
         if job.state not in ACTIVE:
@@ -461,12 +491,12 @@ class SourceImportService:
         current state; a cancelled or failed one, or a document, is a conflict."""
         source = self._owned(workspace_id, user_id, source_id)
         job = self._imports.get_owned(workspace_id, user_id, source_id)
-        if (
-            source.kind is not SourceKind.AUDIO
-            or job.state in ENDED
-            or source.state == "cancelling"
-        ):
+        if source.kind is not SourceKind.AUDIO or source.state == "cancelling":
             raise ConflictError
+        if job.state == "failed" and job.error_code == "unsupported":
+            return job  # refused as not a recording: there is nothing to confirm
+        if job.state in ENDED or job.step == REIMPORTING:
+            raise ConflictError  # ended, or a new file is still being copied in
         if job.state != AWAITING:
             return job  # confirmed already
         if self._original_gone(workspace_id, user_id, source):
@@ -997,6 +1027,7 @@ class SourceImportService:
             error_code=CLEAR,
             cancel_requested=False,
             expected_state=job.state,
+            expected_attempt=job.attempt,
         )
         if wait:
             return job

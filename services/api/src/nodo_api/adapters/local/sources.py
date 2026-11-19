@@ -13,6 +13,7 @@ from nodo_api.adapters.local.db import LocalDatabase, from_text, to_text
 from nodo_api.adapters.local.repos import SqliteTranscriptRepository
 from nodo_api.domain.models import Locale
 from nodo_api.domain.sources import (
+    ACTIVE_STATES,
     Clear,
     DuplicateContentError,
     Fragment,
@@ -25,6 +26,12 @@ from nodo_api.domain.sources import (
     outline_order,
 )
 from nodo_api.errors import ConflictError, NotFoundError
+
+# The retention sweep leaves a source alone while its import runs (the states are constants).
+_NO_RUNNING_IMPORT = (
+    " AND NOT EXISTS (SELECT 1 FROM import_jobs j WHERE j.workspace_id = sources.workspace_id"
+    f" AND j.source_id = sources.id AND j.state IN ({', '.join(repr(s) for s in ACTIVE_STATES)}))"
+)
 
 _SOURCE_COLUMNS = (
     "workspace_id, owner_id, id, kind, title, state, origin, language, content_hash, version,"
@@ -209,7 +216,8 @@ class SqliteSourceRepository:
                 " AND content_hash IS NOT NULL AND tombstoned_at IS NULL AND kind = 'audio'"
                 " AND state != 'cancelling'"
                 " AND retention_until <= ?"
-                " ORDER BY retention_until LIMIT ?",
+                + _NO_RUNNING_IMPORT
+                + " ORDER BY retention_until LIMIT ?",
                 (to_text(now), limit),
             ).fetchall()
         return tuple(_source(row) for row in rows)
@@ -233,7 +241,7 @@ class SqliteSourceRepository:
                 " WHERE workspace_id = ? AND id = ? AND retention_until = ?"
                 " AND content_hash = ? AND state = ? AND tombstoned_at IS NULL"
                 " AND state != 'cancelling'"
-                " AND retention_erase_phase IS NULL",
+                " AND retention_erase_phase IS NULL" + _NO_RUNNING_IMPORT,
                 (workspace_id, source_id, due, content_hash, state),
             )
             if cursor.rowcount == 1:
