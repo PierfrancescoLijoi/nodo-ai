@@ -83,6 +83,12 @@ class MemoryWatchFolderRepository:
                     old, sha256=sha256, source_id=source_id, linked_only=linked_only
                 )
 
+    def unlink_source(self, source_id: str) -> None:
+        with self._lock:
+            for key, item in self._files.items():
+                if item.source_id == source_id:
+                    self._files[key] = replace(item, source_id=None, linked_only=False)
+
     def prune(self, folder_id: str, keep: frozenset[str]) -> None:
         with self._lock:
             self._files = {

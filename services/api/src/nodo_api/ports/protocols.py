@@ -235,6 +235,11 @@ class WatchFolderRepository(Protocol):
         linked_only when that source belongs to another path or an upload. No error if gone."""
         ...
 
+    def unlink_source(self, source_id: str) -> None:
+        """The source was deleted: no watched file points at it any more. Each file keeps its
+        hash, so the same bytes are not imported again while they stay in the folder."""
+        ...
+
     def prune(self, folder_id: str, keep: frozenset[str]) -> None:
         """Forget the files of a folder that a complete scan did not see."""
         ...

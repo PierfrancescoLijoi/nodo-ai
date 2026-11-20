@@ -93,6 +93,8 @@ async def _lifespan(app: FastAPI):
     if runtime is not None:
         runtime.start()
     sources = app.state.container.source_service
+    # After runtime.start (imports resumed, watcher running) is safe: resume_interrupted skips a
+    # source with no content hash (tombstones clear it) and _check/_gone stop work on tombstones.
     if sources is not None:  # after the engine lock: deletes a failure or crash left unfinished
         try:
             sources.finish_deletes()
@@ -244,6 +246,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
             blobs=a.source_blobs,
             imports=a.imports,
             jobs=a.jobs,
+            watch=a.folder_watcher.repository if a.folder_watcher is not None else None,
         )
         if all(
             port is not None

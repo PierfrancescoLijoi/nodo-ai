@@ -118,6 +118,13 @@ class SqliteWatchFolderRepository:
                 (sha256, source_id, int(linked_only), folder_id, rel_path),
             )
 
+    def unlink_source(self, source_id: str) -> None:
+        with self._db.transaction() as conn:
+            conn.execute(
+                "UPDATE watch_files SET source_id = NULL, linked_only = 0 WHERE source_id = ?",
+                (source_id,),
+            )
+
     def prune(self, folder_id: str, keep: frozenset[str]) -> None:
         with self._db.transaction() as conn:
             known = [

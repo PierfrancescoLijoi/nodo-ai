@@ -18,6 +18,7 @@ from nodo_api.ports import (
     JobControl,
     SourceBlobStore,
     SourceRepository,
+    WatchFolderRepository,
 )
 from nodo_api.services.answer_cache import AnswerCache, invalidate
 from nodo_api.services.source_import import IMPORT_SOURCE
@@ -46,6 +47,7 @@ class SourceService:
         blobs: SourceBlobStore | None = None,
         imports: ImportJobRepository | None = None,
         jobs: JobControl | None = None,
+        watch: WatchFolderRepository | None = None,
     ) -> None:
         self._sources = sources
         self._fragments = fragments
@@ -57,6 +59,7 @@ class SourceService:
         self._blobs = blobs
         self._imports = imports
         self._jobs = jobs
+        self._watch = watch
 
     def delete(self, workspace_id: str, user_id: str, source_id: str) -> None:
         """Tombstone (state `deleting`, title, origin note and content hash forgotten), stop the
@@ -110,6 +113,8 @@ class SourceService:
             self._imports.delete(workspace_id, source_id)
         if self._jobs is not None:  # their keys carry a prefix of the content hash
             self._jobs.discard(workspace_id, IMPORT_SOURCE, f"{source_id}:")
+        if self._watch is not None:  # the path keeps its hash: these bytes stay deleted
+            self._watch.unlink_source(source_id)
         # After the last change, so an answer computed before it is never stored.
         invalidate(self._answers, workspace_id, user_id)
 

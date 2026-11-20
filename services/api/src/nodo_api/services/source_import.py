@@ -915,6 +915,13 @@ class SourceImportService:
             IMPORT_SOURCE,
             {"source_id": source_id},
         )
+        # A delete that ran meanwhile discarded the queue before this message landed: remove it
+        # too, so no key with a prefix of the content hash outlives the source.
+        if self._control is not None:
+            try:
+                self._sources.get_for_processing(workspace_id, source_id)
+            except NotFoundError:
+                self._control.discard(workspace_id, IMPORT_SOURCE, f"{source_id}:")
 
     def _enter(self, workspace_id: str, source_id: str, state: str, total: int = 0) -> None:
         try:  # the step (new version marker) is kept: it decides what a failure erases
@@ -1080,13 +1087,20 @@ class SourceImportService:
         return job
 
     def _discard(self, workspace_id: str, source: Source) -> None:
-        """Remove a new source whose bytes another source already holds."""
-        self._sources.save(
-            workspace_id,
-            replace(source, tombstoned_at=self._clock(), title=None, origin=None),
+        """Remove a new source whose bytes another source already holds. Tombstoned as `deleting`
+        first, so a failed erase (a locked file) is finished by finish_deletes at the next start."""
+        dead = replace(
+            source,
+            tombstoned_at=self._clock(),
+            state="deleting",
+            title=None,
+            origin=None,
+            content_hash=None,
         )
+        self._sources.save(workspace_id, dead)
         self._blobs.erase(workspace_id, source.id)
         self._imports.delete(workspace_id, source.id)
+        self._sources.save(workspace_id, replace(dead, state="deleted"))
 
     def _file_versions(self, workspace_id: str, source_id: str) -> list[Path]:
         paths: list[Path] = []
