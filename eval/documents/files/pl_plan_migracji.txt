@@ -1,0 +1,20 @@
+PLAN MIGRACJI SERWERÓW – PROJEKT BURSZTYN
+
+Firma fikcyjna: Hurtownia Modrzew
+Data: 22 kwietnia 2026
+
+Uczestnicy
+Agnieszka Sobczak (kierowniczka IT), Michał Kurek (administrator), Ewa Pawlak (logistyka).
+
+Stan obecny
+System magazynowy Spichlerz działa na dwóch starych serwerach w biurze. System tras Kompas
+korzysta z danych Spichlerza co pięć minut. Serwery mają ponad osiem lat i nie mają już wsparcia.
+
+Decyzje
+Zdecydowaliśmy, że Spichlerz zostanie przeniesiony na nowe serwery w dwóch etapach, najpierw baza
+danych, potem aplikacja. Taki podział zaproponował Michał Kurek.
+Stare serwery zostaną wyłączone dopiero po trzydziestu dniach pracy nowych.
+
+Zadania
+Michał Kurek sprawdzi kopie zapasowe Spichlerza przed 10 maja 2026.
+Ewa Pawlak poinformuje kierowców o przerwie w działaniu Kompasu.

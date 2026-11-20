@@ -115,6 +115,21 @@ adapter presents transcript segments as fragments with the same ids and time loc
 sources use the `sources`, `sections` and versioned `fragments` tables. All reads are scoped by
 workspace, and owner-facing reads perform the owner check in the repository query.
 
+Document import (Phase 2) runs on the local engine only. `SourceImportService` takes a file from
+the upload API or a watched folder, stores the original under `sources/` in the data folder,
+hashes it (the same bytes answer `unchanged`), and queues one import job on the SQLite queue. The
+worker sniffs the content, checks the limits and parses in a separate process (ADR-032), builds
+the Section tree and Fragments, writes a new immutable version, indexes the fragments (FTS5 plus
+E5 vectors in `search_fragments`) and extracts entities and relations with the local language
+model in batches of at most eight fragments. Extraction output goes through the same validation as
+meetings and lands in the graph as evidence of a `source` node; only `MENTIONED_IN` is approved
+automatically. Audio and video wait for the owner's processing confirmation and then use the
+meeting speech pipeline; their originals are erased after 30 days. Every stage re-reads the source
+and the cancel flag, so a delete or cancel wins and erases what the import wrote. The fragment
+index is not yet used by `/v1/query`, which still answers from meetings only. The memory engine
+has the same service with a stand-in parser for tests (real files fail there as damaged); the Azure engine has no source import and
+answers `not_available_on_engine` (PostgreSQL and Azure parity is Phase 10).
+
 ## 7. Query path (trust pipeline)
 
 ```mermaid

@@ -152,6 +152,7 @@ def import_output(
     *,
     unchanged: bool = False,
     existing_source_id: str | None = None,
+    warnings: tuple[str, ...] = (),
 ) -> ImportOutput:
     return ImportOutput(
         state=job.state,
@@ -162,6 +163,7 @@ def import_output(
         error_code=job.error_code,
         unchanged=unchanged,
         existing_source_id=existing_source_id,
+        warnings=warnings,
     )
 
 

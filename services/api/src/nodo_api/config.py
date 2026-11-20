@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     local_parser_timeout_seconds: float = Field(default=300.0, gt=0)
     local_parser_memory_mb: int = Field(default=2048, ge=64)
     watch_poll_seconds: float = Field(default=30.0, ge=5.0)  # a floor: each scan walks the tree
+    # Import responses of the local engine carry "slow_on_this_machine" (spec section 16):
+    # document extraction measured slower than the local ingest budget on the reference laptop
+    # (docs/PERFORMANCE.md section 8).
+    local_import_slow_notice: bool = True
 
     azure_storage_account: str | None = None
     azure_servicebus_fqdn: str | None = None

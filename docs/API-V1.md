@@ -93,9 +93,15 @@ contain `time_ms`; the existing `/v1/meetings*` contract is unchanged.
 ```
 ImportOutput {
   state, step: string|null, done, total, attempt, error_code: string|null,
-  unchanged: boolean, existing_source_id: string|null
+  unchanged: boolean, existing_source_id: string|null, warnings: string[]
 }
 ```
+
+`warnings` holds stable notice codes (empty when there is nothing to say). The local engine sends
+`slow_on_this_machine` on every import response by default: on the reference laptop extraction of
+documents took about an hour of model time per 50 pages, extrapolated from a 2.67-page corpus (`docs/PERFORMANCE.md`), so a client
+should tell the owner that a large import can take long. The setting
+`NODO_LOCAL_IMPORT_SLOW_NOTICE=false` removes it. Clients must ignore codes they do not know.
 
 When the bytes already belong to another live source, `unchanged` is true and
 `existing_source_id` identifies it. `GET /v1/sources/{id}/versions` returns
@@ -131,6 +137,13 @@ Non-meeting sources are available on the local engine. On an engine without sour
 adapters the import, status, version and delete routes return `501` with error code
 `not_available_on_engine`. Source responses never expose `workspace_id`, `owner_id`, a full
 content hash or an original file name.
+
+Known limits of the local import in this version: a recording is transcribed in one call, so a
+cancel or delete during a long transcription takes effect only after that call returns (nothing
+is written from it); the engine refuses files above the import cap (200 MiB by default), long
+recordings included; a hardlink inside a watched folder is imported like any other file; deleted
+text can remain in the SQLite write-ahead log until a checkpoint succeeds; documents are not yet
+used by `POST /v1/query`, which answers from meetings only.
 
 ## Questions
 

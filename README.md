@@ -584,6 +584,9 @@ NODO AI is open source under the [MIT License](LICENSE). Copyright 2026 Pierfran
 - The knowledge-base direction is documented in [PRODUCT.md](docs/product/PRODUCT.md) and the [design specification](docs/superpowers/specs/2026-11-12-knowledge-base-design.md).
 - Local meeting capture, ingestion, grounded query, graph, review, export and deletion are
   implemented and exercised end to end.
+- Knowledge base Phase 2 (documents) is closed on the local engine: import of documents, audio and
+  watched folders through `/v1/sources`, with measured speed and extraction quality in
+  [PERFORMANCE.md](docs/PERFORMANCE.md); there is no Library screen yet.
 - The browser real-time client and backend voice gateway are implemented, including durable ACK,
   cross-replica replay, bounded reconnect buffering and fallback upload.
 - Azure infrastructure, policies and application images are represented in Terraform and automated

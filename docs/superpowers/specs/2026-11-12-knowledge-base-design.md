@@ -306,6 +306,26 @@ Settled after the independent builder check:
 - MCP is read-only in this phase.
 - Documentation language: English; chat and review in Italian.
 
+### Phase 2 outcome (19 and 20 November 2026)
+
+Measured with `eval/measure_import.py` on the reference laptop (Ryzen 7 8845HS, 31 GB RAM,
+RTX 4050 Laptop 6 GB) on ten annotated fictional documents; details in
+[PERFORMANCE.md](../../PERFORMANCE.md#8-document-import-phase-2).
+
+- Extraction precision on documents was 0.83 on the GPU run and 0.72 on the CPU run, against 0.69
+  and 0.72 for meeting extraction on the golden-set transcripts in the same runs: not lower, so
+  the feature ships. Recall was lower (0.42 and 0.46 against 0.64): the model often puts a role in
+  the label or reuses one key for several entities, and validation keeps the first per key.
+- Ingest, extrapolated from a 2.67-page corpus, took about 56 minutes per 50 pages on the GPU and about 5.3 hours on the CPU, almost all
+  of it extraction. That is slow, so import responses of the local engine carry the warning
+  `slow_on_this_machine` (on by default, setting `NODO_LOCAL_IMPORT_SLOW_NOTICE`).
+- Deliberate limits left by Phase 2: a recording is transcribed in one call (a cancel or delete
+  waits for it); hardlinks in watched folders import like files; deleted text can stay in the
+  SQLite write-ahead log until a checkpoint succeeds; the source graph node keeps its first title
+  after a reimport; PDF fragments have pages but no `bbox`; documents are not used by `/v1/query`
+  yet; the Azure engine answers `not_available_on_engine` for documents and PostgreSQL parity is
+  Phase 10.
+
 ## 17. Left to the builder
 
 Exact column types and indexes; chunk sizes and token budgets (measured, not guessed); prompt texts;

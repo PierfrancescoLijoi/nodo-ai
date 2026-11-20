@@ -37,3 +37,26 @@ Repeat for `it`, `pl` and `da`, with a fresh process per setting. Record citatio
 answerability and p50/p95/max latency together; the reranker stays enabled only if all four language
 guardrails hold. Its isolated CPU cost is reproducible with
 `python services/api/scripts/bench_reranker.py 20 100`.
+
+## Document import measurement
+
+`eval/documents/files` holds ten fictional documents (companies, people and projects are invented)
+in English, Italian, Polish and Danish, as Markdown, text, HTML, DOCX and text-layer PDF. The DOCX
+and PDF files were generated once with neutral metadata. `expected.jsonl` annotates, per file, the
+people, projects, systems, decisions and actions a reader would extract, with `match` terms
+compared against normalised labels, plus the expected `ASSIGNED_TO`, `PROPOSED_BY` and
+`DEPENDS_ON` relations; entries marked `optional` are accepted but not required.
+`meetings_expected.jsonl` annotates the golden-set meetings the same way, as the meeting baseline.
+
+```powershell
+$env:NODO_TEST_LOCAL_MODELS="1"
+services/api/.venv/Scripts/python eval/measure_import.py gpu
+services/api/.venv/Scripts/python eval/measure_import.py cpu
+```
+
+Run each device in its own invocation: the meeting baseline runs only on the first device of a call.
+
+The script imports every file through `SourceImportService` on a fresh local engine and prints
+seconds per 50 pages (a page is 3 000 parsed characters) for parsing, indexing and extraction,
+peak memory, and entity and relation precision and recall next to the meeting baseline. It needs
+the installed local models and never downloads anything. Results: `docs/PERFORMANCE.md`.

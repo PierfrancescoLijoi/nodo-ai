@@ -288,14 +288,20 @@ def delete_watch_folder(folder_id: str, actor: PrincipalDep, request: Request) -
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _import_status(job, *, requested_source_id: str | None = None) -> ImportStatusOutput:
+SLOW_ON_THIS_MACHINE = "slow_on_this_machine"
+
+
+def _import_status(job, container, *, requested_source_id: str | None = None) -> ImportStatusOutput:
     unchanged = requested_source_id is not None and job.source_id != requested_source_id
+    settings = container.settings
+    slow = settings.backend == "local" and settings.local_import_slow_notice
     return ImportStatusOutput(
         **{
             "import": import_output(
                 job,
                 unchanged=unchanged,
                 existing_source_id=job.source_id if unchanged else None,
+                warnings=(SLOW_ON_THIS_MACHINE,) if slow else (),
             )
         }
     )
@@ -307,17 +313,17 @@ def _import_status(job, *, requested_source_id: str | None = None) -> ImportStat
     status_code=status.HTTP_202_ACCEPTED,
 )
 def complete_source(source_id: str, actor: PrincipalDep, request: Request):
-    job = _source_import(request.app.state.container).complete(
-        actor.workspace_id, actor.user_id, source_id
-    )
-    return _import_status(job, requested_source_id=source_id)
+    container = request.app.state.container
+    job = _source_import(container).complete(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container, requested_source_id=source_id)
 
 
 @router.get("/sources/{source_id}/import", response_model=ImportStatusOutput)
 def source_import_status(source_id: str, actor: PrincipalDep, request: Request):
     container = request.app.state.container
     _source_import(container)
-    return _import_status(container.imports.get_owned(actor.workspace_id, actor.user_id, source_id))
+    job = container.imports.get_owned(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
 
 
 @router.post(
@@ -326,10 +332,9 @@ def source_import_status(source_id: str, actor: PrincipalDep, request: Request):
     status_code=status.HTTP_202_ACCEPTED,
 )
 def cancel_source_import(source_id: str, actor: PrincipalDep, request: Request):
-    job = _source_import(request.app.state.container).cancel(
-        actor.workspace_id, actor.user_id, source_id
-    )
-    return _import_status(job)
+    container = request.app.state.container
+    job = _source_import(container).cancel(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
 
 
 @router.post(
@@ -338,10 +343,9 @@ def cancel_source_import(source_id: str, actor: PrincipalDep, request: Request):
     status_code=status.HTTP_202_ACCEPTED,
 )
 def retry_source_import(source_id: str, actor: PrincipalDep, request: Request):
-    job = _source_import(request.app.state.container).retry(
-        actor.workspace_id, actor.user_id, source_id
-    )
-    return _import_status(job)
+    container = request.app.state.container
+    job = _source_import(container).retry(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
 
 
 @router.post(
@@ -356,10 +360,9 @@ def retry_source_import(source_id: str, actor: PrincipalDep, request: Request):
 def confirm_source_processing(
     source_id: str, payload: ProcessingConfirmation, actor: PrincipalDep, request: Request
 ):
-    job = _source_import(request.app.state.container).confirm(
-        actor.workspace_id, actor.user_id, source_id
-    )
-    return _import_status(job)
+    container = request.app.state.container
+    job = _source_import(container).confirm(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
 
 
 @router.get("/sources/{source_id}/versions", response_model=SourceVersionList)

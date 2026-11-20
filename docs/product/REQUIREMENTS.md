@@ -41,6 +41,23 @@ Priority follows MoSCoW: **Must** is required for the usable knowledge base or a
 | FR-29 | Provide English, Polish, Italian, and Danish UI; light and dark themes; and complete keyboard and screen-reader operation. | Should | Phase 6 - UI |
 | FR-30 | Run the same ports on Azure and synchronize Sources, hierarchy, review state, and approved Pages. | Could | Phase 10 - Cloud catch-up |
 
+## Status after Phase 2
+
+Status of the Phase 2 requirements on 19 November 2026, local engine only (the Azure engine answers
+`not_available_on_engine` for documents until Phase 10). "API" means met through `/v1/sources`;
+the Library screens come in Phase 6.
+
+| ID | Status | What is missing |
+|---|---|---|
+| FR-1 | Met through the API and watched folders for PDF, DOCX, PPTX, XLSX, HTML, Markdown, text, audio and video. | Drag-and-drop and file picker screens (Phase 6). Scanned PDFs import as `no_text_layer` (no OCR). |
+| FR-2 | Met: same bytes answer `unchanged`; changed bytes add a version, unchanged fragments keep their ids and only sections with new fragments are extracted again. | Edits early in a long paragraph or large table also change the ids of the later parts of that block. |
+| FR-3 | Met: durable SQLite queue with progress, cancel, retry and resume after a crash. | A recording is transcribed in one call, so a cancel during it takes effect when the call returns. |
+| FR-5 | Met: origin notes for documents, audited "I may process this recording" confirmation and 30-day retention of imported audio originals. | None for the local engine. |
+| FR-6 | Met: nested Section tree and Fragments with locators (`page`, `slide`, `chars`, `time_ms`). | PDF fragments carry the page but no `bbox` yet. |
+| FR-23 | Met: imported audio and video go through the meeting speech pipeline into timed Fragments. | Files above the 200 MiB import cap are refused. |
+
+Measured import speed and extraction quality are in [PERFORMANCE.md](../PERFORMANCE.md#8-document-import-phase-2).
+
 ## Acceptance criteria
 
 ### FR-1 Source import channels and formats

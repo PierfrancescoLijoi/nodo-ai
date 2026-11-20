@@ -162,6 +162,8 @@ class ImportOutput(FrozenModel):
     error_code: str | None
     unchanged: bool = False
     existing_source_id: str | None = None
+    # Stable notice codes; "slow_on_this_machine": the local engine may take long (PERFORMANCE.md).
+    warnings: tuple[str, ...] = ()
 
 
 class ProcessingConfirmation(FrozenModel):

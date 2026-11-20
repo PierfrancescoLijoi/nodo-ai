@@ -572,6 +572,14 @@
             "default": false,
             "title": "Unchanged",
             "type": "boolean"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
