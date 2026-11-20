@@ -216,7 +216,10 @@ DOCUMENT_SYSTEM_PROMPT = (
     "systems or topics), SUPERSEDES (a decision in this document that replaces one in the list of "
     "existing decisions, referred to as existing:<id>), CONTRADICTS (a decision in tension with an "
     "existing one). The first line inside the document block names the section the text comes "
-    "from. Every entity and relation must cite the numbered fragments that support it. Never "
+    "from. Give every entity its own short key (e1, e2, e3, ...) and use those keys in relations. "
+    "For a person the label is the name exactly as written in the text, never a role or job title; "
+    "create one person entity per named person. Every entity and relation must cite the numbered "
+    "fragments that support it. Never "
     "invent names. Labels are short noun phrases or statements in {language}. Write the summary in "
     "{language}, two sentences at most."
 )

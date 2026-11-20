@@ -610,8 +610,8 @@ def test_malformed_items_are_dropped_one_by_one() -> None:
 
 
 def test_extraction_version_names_the_prompt_and_the_model() -> None:
-    assert EXTRACTION_VERSION == "doc-1"
-    assert extraction_version("qwen3") == "doc-1|qwen3"
+    assert EXTRACTION_VERSION == "doc-2"
+    assert extraction_version("qwen3") == "doc-2|qwen3"
 
 
 def test_a_change_of_the_document_prompt_requires_a_new_extraction_version() -> None:
@@ -619,10 +619,10 @@ def test_a_change_of_the_document_prompt_requires_a_new_extraction_version() -> 
         (DOCUMENT_SYSTEM_PROMPT + json.dumps(EXTRACTION_SCHEMA, sort_keys=True)).encode()
     ).hexdigest()
     # If this fails you changed what the model is told: bump EXTRACTION_VERSION, then update this.
-    assert (EXTRACTION_VERSION, digest) == ("doc-1", PINNED_DOCUMENT_PROMPT)
+    assert (EXTRACTION_VERSION, digest) == ("doc-2", PINNED_DOCUMENT_PROMPT)
 
 
-PINNED_DOCUMENT_PROMPT = "564189cbc8ca546b0e39c44f819efd314c026e1aebbf6345c8de3d8ae07a0c26"
+PINNED_DOCUMENT_PROMPT = "503e0e8f06f2b729924633b80a09dd47c08587549e8356bb9e2cbfcfb67395f9"
 
 
 def test_meeting_extraction_prompt_and_schema_are_unchanged() -> None:
@@ -659,7 +659,7 @@ def test_the_in_memory_engine_wires_a_fragment_extractor(settings) -> None:
     adapters = memory_adapters(settings)
     fragments = (_fragment("f0", 0, None, "Marco decided to go with the queue."),)
     assert adapters.fragment_extractor.extract(fragments, (), Locale.EN, ()).entities
-    assert adapters.extraction_version == "doc-1|keyword"
+    assert adapters.extraction_version == "doc-2|keyword"
 
 
 def test_local_fragment_extractor_takes_the_gpu_lease_and_uses_the_document_prompt() -> None:
