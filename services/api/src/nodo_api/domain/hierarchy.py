@@ -7,8 +7,10 @@ refused, never repaired. The stores apply the rule inside their write transactio
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Literal
+
+from nodo_api.domain.graph import Relation
 
 MAX_DEPTH = 6
 
@@ -52,3 +54,40 @@ def check_link(
     if up + 1 + down > max_depth:
         return "too_deep"
     return None
+
+
+Direction = Literal["parents", "children", "both"]
+
+# The parent links touching `ids`: upward (child in ids) when the flag is True, else downward.
+Links = Callable[[frozenset[str], bool], Sequence[Relation]]
+
+
+def walk_links(
+    seed: str, links: Links, *, direction: Direction, depth: int, limit: int
+) -> tuple[list[str], list[Relation], bool]:
+    """Breadth-first walk over parent links: (node ids, seed first; edges; truncated).
+
+    Each direction walks from the seed on its own (parents up, children down, both does both, so
+    siblings are not reached). A visited set ends any cycle, so corrupt data still terminates;
+    every traversed edge is kept once, also when it leads to a node already seen (a diamond)."""
+    if not 1 <= depth <= MAX_DEPTH:
+        raise ValueError(f"depth must be between 1 and {MAX_DEPTH}")
+    order, seen, edges, truncated = [seed], {seed}, {}, False
+    for up in {"parents": (True,), "children": (False,), "both": (True, False)}[direction]:
+        frontier = frozenset({seed})
+        for _ in range(depth):
+            if not frontier:
+                break
+            found: list[str] = []
+            for rel in sorted(links(frontier, up), key=lambda r: r.id):
+                other = rel.target_id if up else rel.source_id
+                if other not in seen:
+                    if len(seen) >= limit:
+                        truncated = True
+                        continue
+                    seen.add(other)
+                    order.append(other)
+                    found.append(other)
+                edges.setdefault(rel.id, rel)
+            frontier = frozenset(found)
+    return order, list(edges.values()), truncated

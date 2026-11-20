@@ -36,7 +36,7 @@ from nodo_api.domain.graph import (
     relation_id,
     source_entity_id,
 )
-from nodo_api.domain.hierarchy import check_link
+from nodo_api.domain.hierarchy import Direction, check_link, walk_links
 from nodo_api.domain.sources import SourceKind
 from nodo_api.errors import NotFoundError, refusal_error
 
@@ -49,6 +49,7 @@ Key = tuple[str, str]  # (workspace_id, owner_id)
 class _Row:
     relation: Relation
     seq: int
+    batch: int = 0  # the write that created it, as created_at in SQLite (one stamp per write)
 
 
 @dataclass(slots=True)
@@ -133,6 +134,7 @@ class MemoryGraphStore:
         extraction: Extraction,
     ) -> None:
         refresh = node.type is EntityType.MEETING
+        before, batch = set(part.relations), next(self._clock)
         self._put_entity(part, node, origin_id, refresh)
         created_at = node.effective_at
         ids: dict[str, str] = {}
@@ -231,6 +233,8 @@ class MemoryGraphStore:
             )
         for code, count in sorted(refused.items()):
             logger.info("hierarchy_link_refused code=%s count=%d", code, count)
+        for rid in part.relations.keys() - before:
+            part.relations[rid].batch = batch
         self._sweep(part)
         self._restore_supersession(part)
         for row in part.relations.values():
@@ -683,6 +687,79 @@ class MemoryGraphStore:
                 changes.append(Change(rel.id, new.label, old.label, meeting, new.effective_at))
         return tuple(changes)
 
+    # --------------------------------------------------------------- hierarchy
+
+    def hierarchy(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        entity_id: str,
+        *,
+        direction: Direction,
+        depth: int,
+        include_proposed: bool,
+        limit: int,
+    ) -> Subgraph:
+        part = self._parts.get((workspace_id, owner_id)) or _Partition()
+        seed = part.entities.get(entity_id)
+        if seed is None or seed.type in ORIGIN_TYPES:
+            raise NotFoundError
+        statuses = _LIVE if include_proposed else frozenset({ReviewStatus.APPROVED})
+
+        def links(ids: frozenset[str], up: bool) -> list[Relation]:
+            return [
+                r for r in _child_of(part, statuses) if (r.source_id if up else r.target_id) in ids
+            ]
+
+        order, edges, truncated = walk_links(
+            entity_id, links, direction=direction, depth=depth, limit=limit
+        )
+        nodes = tuple(part.entities[i] for i in order if i in part.entities)
+        return Subgraph(nodes, tuple(edges), truncated)
+
+    def pending_hierarchy(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        part = self._parts.get((workspace_id, owner_id))
+        if part is None:
+            return Subgraph()
+        waiting = sorted(
+            (
+                r
+                for r in part.relations.values()
+                if r.relation.kind is RelationKind.CHILD_OF
+                and r.relation.status is ReviewStatus.PROPOSED
+                and r.relation.evidence
+            ),
+            key=lambda r: (-r.batch, r.relation.id),
+        )
+        chosen = [r.relation for r in waiting[:limit]]
+        ids = list(dict.fromkeys(i for r in chosen for i in (r.source_id, r.target_id)))
+        nodes = tuple(part.entities[i] for i in ids if i in part.entities)
+        return Subgraph(nodes, tuple(chosen), len(waiting) > limit)
+
+    def child_of(self, workspace_id: str, owner_id: str, relation_id_: str) -> Relation:
+        part = self._parts.get((workspace_id, owner_id))
+        row = part.relations.get(relation_id_) if part else None
+        if row is None or row.relation.kind is not RelationKind.CHILD_OF:
+            raise NotFoundError
+        return row.relation
+
+    def mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[Entity, ...]:
+        part = self._parts.get((workspace_id, owner_id))
+        if part is None:
+            return ()
+        nodes = {
+            r.relation.target_id
+            for r in part.relations.values()
+            if r.relation.kind is RelationKind.MENTIONED_IN
+            and r.relation.status is not ReviewStatus.REJECTED
+            and r.relation.source_id == entity_id
+        }
+        found = [part.entities[i] for i in nodes if i in part.entities]
+        found.sort(key=lambda e: (-e.effective_at.timestamp(), e.id))
+        return tuple(found[:limit])
+
 
 class _View:
     """The meetings-only view (/v1, frozen clients): the meeting ids, and the entities a meeting
@@ -711,25 +788,32 @@ def _show(view: _View | None, rel: Relation) -> Relation | None:
     return replace(rel, evidence=evidence)
 
 
+_LIVE = frozenset({ReviewStatus.APPROVED, ReviewStatus.PROPOSED})
+
+
+def _child_of(
+    part: _Partition, statuses: frozenset[ReviewStatus], exclude: str | None = None
+) -> list[Relation]:
+    """The parent links with one of `statuses` that still have evidence."""
+    # ponytail: scans the whole partition per call (links x relations); memory is dev/test only.
+    return [
+        r.relation
+        for rid, r in part.relations.items()
+        if r.relation.kind is RelationKind.CHILD_OF
+        and r.relation.status in statuses
+        and r.relation.evidence
+        and rid != exclude
+    ]
+
+
 def _hierarchy_steps(part: _Partition, exclude: str | None = None):
     """parents_of and children_of over the live parent links: not rejected, with evidence."""
 
-    # ponytail: scans the whole partition per level (links x relations); memory is dev/test only.
-    def live() -> list[Relation]:
-        return [
-            r.relation
-            for rid, r in part.relations.items()
-            if r.relation.kind is RelationKind.CHILD_OF
-            and r.relation.status is not ReviewStatus.REJECTED
-            and r.relation.evidence
-            and rid != exclude
-        ]
-
     def parents_of(ids: frozenset[str]) -> frozenset[str]:
-        return frozenset(r.target_id for r in live() if r.source_id in ids)
+        return frozenset(r.target_id for r in _child_of(part, _LIVE, exclude) if r.source_id in ids)
 
     def children_of(ids: frozenset[str]) -> frozenset[str]:
-        return frozenset(r.source_id for r in live() if r.target_id in ids)
+        return frozenset(r.source_id for r in _child_of(part, _LIVE, exclude) if r.target_id in ids)
 
     return parents_of, children_of
 

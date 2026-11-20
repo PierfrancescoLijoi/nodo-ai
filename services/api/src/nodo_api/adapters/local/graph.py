@@ -12,7 +12,7 @@ import logging
 import sqlite3
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 import numpy as np
@@ -21,6 +21,7 @@ from nodo_api.adapters.local.db import LocalDatabase, from_text, now_text, to_te
 from nodo_api.domain.graph import (
     AUTO_APPROVED,
     EXISTING_PREFIX,
+    ORIGIN_TYPES,
     Change,
     Entity,
     EntityType,
@@ -44,7 +45,7 @@ from nodo_api.domain.graph import (
     relation_id,
     source_entity_id,
 )
-from nodo_api.domain.hierarchy import check_link
+from nodo_api.domain.hierarchy import Direction, check_link, walk_links
 from nodo_api.domain.sources import SourceKind
 from nodo_api.errors import NotFoundError, refusal_error
 
@@ -215,6 +216,7 @@ class SqliteGraphStore:
         refused: Counter[str] = Counter()
         written: set[str] = set()
         steps = _hierarchy_steps(conn, workspace_id, owner_id)
+        stamp = now_text()  # one stamp per write, as the other relations of the write
 
         def kept(item) -> bool:
             rid = relation_id(workspace_id, owner_id, item[0], RelationKind.CHILD_OF, item[1])
@@ -256,7 +258,7 @@ class SqliteGraphStore:
                     RelationKind.CHILD_OF.value,
                     ReviewStatus.PROPOSED.value,
                     confidence,
-                    now_text(),
+                    stamp,
                 ),
             )
             # Evidence names the source written now, never anything the model said (ADR-029).
@@ -959,6 +961,85 @@ class SqliteGraphStore:
             for r in rows
         )
 
+    # --------------------------------------------------------------- hierarchy
+
+    def hierarchy(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        entity_id: str,
+        *,
+        direction: Direction,
+        depth: int,
+        include_proposed: bool,
+        limit: int,
+    ) -> Subgraph:
+        statuses = _LIVE if include_proposed else ("approved",)
+        with self._db.transaction(write=False) as conn:
+            seed = self._entities(conn, workspace_id, owner_id, [entity_id]).get(entity_id)
+            if seed is None or seed.type in ORIGIN_TYPES:
+                raise NotFoundError
+
+            def links(ids: frozenset[str], up: bool) -> list[Relation]:
+                end = "source_id" if up else "target_id"
+                rows = _child_of_rows(conn, workspace_id, owner_id, end, ids, statuses)
+                return [_relation(r) for r in rows]
+
+            order, edges, truncated = walk_links(
+                entity_id, links, direction=direction, depth=depth, limit=limit
+            )
+            entities = self._entities(conn, workspace_id, owner_id, order)
+            evidence = self._evidence(conn, workspace_id, owner_id, [e.id for e in edges])
+        nodes = tuple(entities[i] for i in order if i in entities)
+        relations = tuple(replace(e, evidence=tuple(evidence.get(e.id, ()))) for e in edges)
+        return Subgraph(nodes, relations, truncated)
+
+    def pending_hierarchy(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                f"SELECT {_RELATION_COLUMNS} FROM relations WHERE workspace_id = ? AND owner_id = ?"
+                " AND kind = 'CHILD_OF' AND status = 'proposed' AND EXISTS (SELECT 1"
+                " FROM relation_evidence ev WHERE ev.workspace_id = relations.workspace_id"
+                " AND ev.owner_id = relations.owner_id AND ev.relation_id = relations.id)"
+                " ORDER BY created_at DESC, id LIMIT ?",
+                (workspace_id, owner_id, limit + 1),
+            ).fetchall()
+            chosen = rows[:limit]
+            ids = list(dict.fromkeys(i for r in chosen for i in (r["source_id"], r["target_id"])))
+            entities = self._entities(conn, workspace_id, owner_id, ids)
+            evidence = self._evidence(conn, workspace_id, owner_id, [r["id"] for r in chosen])
+        nodes = tuple(entities[i] for i in ids if i in entities)
+        relations = tuple(_relation(r, tuple(evidence.get(r["id"], ()))) for r in chosen)
+        return Subgraph(nodes, relations, len(rows) > limit)
+
+    def child_of(self, workspace_id: str, owner_id: str, relation_id_: str) -> Relation:
+        with self._db.transaction(write=False) as conn:
+            row = conn.execute(
+                f"SELECT {_RELATION_COLUMNS} FROM relations WHERE workspace_id = ? AND owner_id = ?"
+                " AND id = ? AND kind = 'CHILD_OF'",
+                (workspace_id, owner_id, relation_id_),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError
+            evidence = self._evidence(conn, workspace_id, owner_id, [relation_id_])
+        return _relation(row, tuple(evidence.get(relation_id_, ())))
+
+    def mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[Entity, ...]:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                "SELECT e.id, e.type, e.label, e.status, e.effective_at, e.due_at, e.ref"
+                " FROM relations r JOIN entities e ON e.workspace_id = r.workspace_id"
+                " AND e.owner_id = r.owner_id AND e.id = r.target_id"
+                " WHERE r.workspace_id = ? AND r.owner_id = ? AND r.source_id = ?"
+                " AND r.kind = 'MENTIONED_IN' AND r.status <> 'rejected'"
+                " AND e.type IN ('meeting', 'source')"
+                " ORDER BY e.effective_at DESC, e.id LIMIT ?",
+                (workspace_id, owner_id, entity_id, limit),
+            ).fetchall()
+        return tuple(_entity(r) for r in rows)
+
     # ------------------------------------------------------------------ export
 
     def export_meeting(self, workspace_id: str, owner_id: str, meeting_id: str) -> GraphExport:
@@ -1023,26 +1104,41 @@ class SqliteGraphStore:
         return rows
 
 
+_LIVE = ("approved", "proposed")
+
+
+def _child_of_rows(
+    conn,
+    workspace_id: str,
+    owner_id: str,
+    end: str,
+    ids: frozenset[str],
+    statuses: Sequence[str],
+    exclude: str | None = None,
+) -> list[sqlite3.Row]:
+    """The parent links whose `end` (source_id or target_id) is in `ids`, with one of `statuses`
+    and still some evidence."""
+    rows: list[sqlite3.Row] = []
+    for part in _slices(sorted(ids)):
+        rows += conn.execute(
+            f"SELECT {_RELATION_COLUMNS} FROM relations r WHERE r.workspace_id = ?"
+            f" AND r.owner_id = ? AND r.kind = 'CHILD_OF' AND r.status IN ({_marks(len(statuses))})"
+            f" AND r.id <> ? AND r.{end} IN ({_marks(len(part))})"
+            " AND EXISTS (SELECT 1 FROM relation_evidence ev"
+            " WHERE ev.workspace_id = r.workspace_id AND ev.owner_id = r.owner_id"
+            " AND ev.relation_id = r.id)",
+            (workspace_id, owner_id, *statuses, exclude or "", *part),
+        ).fetchall()
+    return rows
+
+
 def _hierarchy_steps(conn, workspace_id: str, owner_id: str, exclude: str | None = None):
     """parents_of and children_of over the live parent links: not rejected, with evidence."""
-    live = (
-        "SELECT DISTINCT r.{out} FROM relations r WHERE r.workspace_id = ? AND r.owner_id = ?"
-        " AND r.kind = 'CHILD_OF' AND r.status <> 'rejected' AND r.id <> ?"
-        " AND r.{end} IN ({marks}) AND EXISTS (SELECT 1 FROM relation_evidence ev"
-        " WHERE ev.workspace_id = r.workspace_id AND ev.owner_id = r.owner_id"
-        " AND ev.relation_id = r.id)"
-    )
 
     def step(end: str, out: str):
         def ends(ids: frozenset[str]) -> frozenset[str]:
-            found: set[str] = set()
-            for part in _slices(sorted(ids)):
-                rows = conn.execute(
-                    live.format(out=out, end=end, marks=_marks(len(part))),
-                    (workspace_id, owner_id, exclude or "", *part),
-                ).fetchall()
-                found |= {r[0] for r in rows}
-            return frozenset(found)
+            rows = _child_of_rows(conn, workspace_id, owner_id, end, ids, _LIVE, exclude)
+            return frozenset(r[out] for r in rows)
 
         return ends
 

@@ -4,7 +4,7 @@ from collections.abc import Collection, Mapping, Sequence
 from contextlib import AbstractContextManager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from nodo_api.domain.answer_cache import AnswerKey, CachedAnswer
 from nodo_api.domain.documents import ParsedDocument
@@ -665,6 +665,43 @@ class GraphStore(Protocol):
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         """Remove everything derived from the meeting; relations lose their evidence first."""
+        ...
+
+
+class HierarchyStore(Protocol):
+    """Reads over the parent links between concepts (ADR-030). Only the memory and SQLite graph
+    stores implement it; the Azure engine has none."""
+
+    def hierarchy(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        entity_id: str,
+        *,
+        direction: Literal["parents", "children", "both"],
+        depth: int,
+        include_proposed: bool,
+        limit: int,
+    ) -> Subgraph:
+        """Walk CHILD_OF only (approved, plus proposed when asked, never rejected) from the seed,
+        breadth first, at most `depth` levels (ValueError outside 1..MAX_DEPTH). Nodes are unique,
+        seed first; every traversed edge comes once with its evidence; `truncated` when `limit`
+        nodes were reached. NotFoundError when the entity is not the owner's or is an origin
+        node."""
+        ...
+
+    def pending_hierarchy(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        """Proposed CHILD_OF relations, newest first, with their end entities and evidence."""
+        ...
+
+    def child_of(self, workspace_id: str, owner_id: str, relation_id: str) -> Relation:
+        """The owner's CHILD_OF relation, else NotFoundError."""
+        ...
+
+    def mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[Entity, ...]:
+        """The meeting and source nodes the entity is MENTIONED_IN, newest first."""
         ...
 
 
