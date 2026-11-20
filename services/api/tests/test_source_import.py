@@ -504,9 +504,9 @@ def test_reimport_refuses_a_link_and_a_running_import(stack: Stack, tmp_path: Pa
         stack.service.reimport(stack.ws, OWNER, pending.id, target)
 
 
-def test_title_change_on_reimport_keeps_the_first_graph_label(stack: Stack, tmp_path) -> None:
-    """The source title follows the newest file name; the graph node keeps its first label, as a
-    meeting node does (pinned by the source graph contract; see the Task 11 report)."""
+def test_title_change_on_reimport_relabels_the_graph_node(stack: Stack, tmp_path) -> None:
+    """The source title follows the newest file name and the graph node label follows the title
+    (Phase 3, Task 2; pinned by the source graph contract)."""
     source = stack.imported("plan.md", b"v1")
     reimport(stack, source.id, tmp_path, b"v2", DOC_B, name="roadmap.md")
     stack.service.process(stack.ws, source.id)
@@ -516,7 +516,7 @@ def test_title_change_on_reimport_keeps_the_first_graph_label(stack: Stack, tmp_
         stack.ws, OWNER, [node], depth=1, node_limit=50, fanout=50, include_proposed=True,
         as_of=None,
     )  # fmt: skip
-    assert {n.label for n in sub.nodes if n.id == node} == {"plan.md"}
+    assert {n.label for n in sub.nodes if n.id == node} == {"roadmap.md"}
 
 
 # --------------------------------------------------------------------------- failures

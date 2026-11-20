@@ -342,7 +342,7 @@ class SourceGraphContract:
             meeting(1).created_at,
         )
         node = source_entity_id(ws, OWNER, "doc1")
-        assert [n.label for n in walk(store, ws, [node]).nodes if n.id == node] == ["Handbook"]
+        assert [n.label for n in walk(store, ws, [node]).nodes if n.id == node] == ["Renamed"]
 
     # --- the meetings-only view /v1 reads (legacy clients) -------------------------------------
 

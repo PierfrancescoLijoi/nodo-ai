@@ -174,6 +174,11 @@ class SqliteGraphStore:
                 conn, workspace_id, user_id, source.id, dropped_fragment_ids
             )
             self._write(conn, workspace_id, user_id, origin, extraction, touched)
+            # The node follows the current title; concepts keep their first-writer label.
+            conn.execute(
+                "UPDATE entities SET label = ? WHERE workspace_id = ? AND owner_id = ? AND id = ?",
+                (source.label, workspace_id, user_id, node),
+            )
             # Nothing may point at the node (an empty extraction): it must not linger.
             self._delete_unsupported(conn, workspace_id, user_id, [node])
 

@@ -113,6 +113,9 @@ class MemoryGraphStore:
             part = copy.deepcopy(self._part(workspace_id, user_id))
             self._drop_meeting_evidence(part, source.id, dropped_fragment_ids)
             self._write(part, workspace_id, user_id, node, source.id, extraction)
+            # The node follows the current title; concepts keep their first-writer label.
+            if node.id in part.entities:
+                part.entities[node.id] = replace(part.entities[node.id], label=node.label)
             self._parts[(workspace_id, user_id)] = part
 
     def _write(
