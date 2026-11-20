@@ -11,6 +11,7 @@ from nodo_api.domain.sources import SourceKind
 from nodo_api.errors import NotFoundError, UseMeetingsApi
 from nodo_api.ports import (
     AuditLog,
+    CollectionRepository,
     FragmentIndex,
     FragmentRepository,
     GraphStore,
@@ -48,6 +49,7 @@ class SourceService:
         imports: ImportJobRepository | None = None,
         jobs: JobControl | None = None,
         watch: WatchFolderRepository | None = None,
+        collections: CollectionRepository | None = None,
     ) -> None:
         self._sources = sources
         self._fragments = fragments
@@ -60,6 +62,7 @@ class SourceService:
         self._imports = imports
         self._jobs = jobs
         self._watch = watch
+        self._collections = collections
 
     def delete(self, workspace_id: str, user_id: str, source_id: str) -> None:
         """Tombstone (state `deleting`, title, origin note and content hash forgotten), stop the
@@ -115,6 +118,8 @@ class SourceService:
             self._jobs.discard(workspace_id, IMPORT_SOURCE, f"{source_id}:")
         if self._watch is not None:  # the path keeps its hash: these bytes stay deleted
             self._watch.unlink_source(source_id)
+        if self._collections is not None:  # the memory store has no tombstone trigger
+            self._collections.forget_source(workspace_id, source_id)
         # After the last change, so an answer computed before it is never stored.
         invalidate(self._answers, workspace_id, user_id)
 

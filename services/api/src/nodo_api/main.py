@@ -84,6 +84,7 @@ class AppContainer:
     source_import: SourceImportService | None = None
     folder_watcher: Any = None
     hierarchy: HierarchyService | None = None  # None on Azure: routes answer 501
+    collections: Any = None  # None on Azure: routes answer 501
 
 
 @asynccontextmanager
@@ -225,6 +226,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         settings.known_notice_versions,
         settings.known_retention_policies,
         a.answers,
+        collections=a.collections,
     )
     query_service = QueryService(
         a.meetings,
@@ -249,6 +251,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
             imports=a.imports,
             jobs=a.jobs,
             watch=a.folder_watcher.repository if a.folder_watcher is not None else None,
+            collections=a.collections,
         )
         if all(
             port is not None
@@ -305,6 +308,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.source_import,
         a.folder_watcher,
         hierarchy,
+        collections=a.collections,
     )
 
 

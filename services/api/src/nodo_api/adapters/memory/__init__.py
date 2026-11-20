@@ -13,6 +13,7 @@ from nodo_api.adapters.memory.adapters import (
     MockRetriever,
     seed_memory_adapters,
 )
+from nodo_api.adapters.memory.collections import MemoryCollectionRepository
 from nodo_api.adapters.memory.fragment_index import MemoryFragmentIndex
 from nodo_api.adapters.memory.graph import MemoryGraphStore
 from nodo_api.adapters.memory.imports import MemoryImportJobRepository
@@ -23,6 +24,7 @@ from nodo_api.adapters.memory.watch_folders import MemoryWatchFolderRepository
 __all__ = [
     "MemoryAuditLog",
     "MemoryBlobStore",
+    "MemoryCollectionRepository",
     "MemoryExportStore",
     "MemoryFragmentIndex",
     "MemoryFragmentRepository",

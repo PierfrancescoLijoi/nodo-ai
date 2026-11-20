@@ -53,6 +53,7 @@ class Adapters:
     source_import: Any = None  # the import service (Task 11); local and memory, None on Azure
     folder_watcher: Any = None  # watched folders (Task 15); local and memory, None on Azure
     hierarchy_store: Any = None  # concept parent links (ADR-030); local and memory, None on Azure
+    collections: Any = None  # nested collections of sources (FR-8); local and memory, None on Azure
 
 
 @dataclass(slots=True)
@@ -90,6 +91,7 @@ def memory_adapters(settings: Settings) -> Adapters:
     from nodo_api.adapters.memory import (
         MemoryAuditLog,
         MemoryBlobStore,
+        MemoryCollectionRepository,
         MemoryExportStore,
         MemoryFragmentIndex,
         MemoryFragmentRepository,
@@ -173,6 +175,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         source_blobs=source_blobs,
         source_import=source_import,
         hierarchy_store=graph,
+        collections=MemoryCollectionRepository(sources),
         # No poll thread here: nothing scans unless a caller runs scan_once.
         folder_watcher=FolderWatcher(
             MemoryWatchFolderRepository(), source_import, source_blobs, source_blobs.root

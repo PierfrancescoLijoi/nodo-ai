@@ -11,6 +11,7 @@ from typing import Any
 
 from nodo_api.adapters.local.answers import SqliteAnswerStore
 from nodo_api.adapters.local.blob import LocalBlobStore
+from nodo_api.adapters.local.collections import SqliteCollectionRepository
 from nodo_api.adapters.local.db import LocalDatabase
 from nodo_api.adapters.local.documents.parser import SubprocessDocumentParser
 from nodo_api.adapters.local.documents.sniff import check_limits, sniff
@@ -400,4 +401,5 @@ def local_adapters(settings: Settings):
         source_import=source_import,
         folder_watcher=watcher,
         hierarchy_store=graph,
+        collections=SqliteCollectionRepository(db),
     )

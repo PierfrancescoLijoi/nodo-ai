@@ -51,6 +51,18 @@ class DepthRefused(ConflictError):
     public_message = "The parent link would make the hierarchy too deep"
 
 
+class DuplicateName(ConflictError):
+    """A sibling collection already has this name (case and accent insensitive)."""
+
+    code = "duplicate_name"
+    public_message = "A sibling already has this name"
+
+
+class TooManyCollections(ConflictError):
+    code = "too_many_collections"
+    public_message = "The collection limit is reached"
+
+
 def refusal_error(code: LinkRefusal) -> ConflictError:
     """The 409 for a refused parent link: `self` and `cycle` are both a cycle."""
     return DepthRefused() if code == "too_deep" else CycleRefused()

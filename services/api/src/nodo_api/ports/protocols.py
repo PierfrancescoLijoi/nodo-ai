@@ -47,6 +47,9 @@ from nodo_api.domain.sources import (
     WatchFile,
     WatchFolder,
 )
+from nodo_api.domain.sources import (
+    Collection as SourceCollection,
+)
 
 # Every method takes workspace_id (and, where data belongs to a person, the user or the set of
 # meeting ids that person may see) so that access control happens inside the store query,
@@ -672,6 +675,77 @@ class GraphStore(Protocol):
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
         """Remove everything derived from the meeting; relations lose their evidence first."""
+        ...
+
+
+class CollectionRepository(Protocol):
+    """Owner-made nested collections of sources (FR-4, FR-8). Local and memory only. Names are
+    checked with `collection_name` (ValueError that never repeats the name)."""
+
+    def create(
+        self, workspace_id: str, owner_id: str, *, name: str, parent_id: str | None
+    ) -> SourceCollection:
+        """NotFoundError for a parent that is not the owner's; DuplicateName for a sibling with the
+        same normalized name; TooManyCollections past the limit; DepthRefused when the parent
+        already has six ancestors. Every check and the write are one atomic step."""
+        ...
+
+    def list_owned(self, workspace_id: str, owner_id: str) -> tuple[SourceCollection, ...]:
+        """Parents before children, siblings by normalized name, `source_count` of live sources."""
+        ...
+
+    def get_owned(
+        self, workspace_id: str, owner_id: str, collection_id: str
+    ) -> SourceCollection: ...
+
+    def update(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        collection_id: str,
+        *,
+        name: str | None = None,
+        parent_id: str | Clear | None = None,
+    ) -> SourceCollection:
+        """None leaves a field, CLEAR moves to the root; a move is checked with check_link over
+        the collection tree in the write (CycleRefused, DepthRefused), names as in create."""
+        ...
+
+    def delete(self, workspace_id: str, owner_id: str, collection_id: str) -> int:
+        """The collection and its subtree with their memberships; returns how many collections
+        went. Sources are never touched."""
+        ...
+
+    def add_source(
+        self, workspace_id: str, owner_id: str, collection_id: str, source_id: str
+    ) -> None:
+        """Idempotent. NotFoundError unless the collection and the live source are the owner's,
+        checked together with the insert (a source tombstoned meanwhile is never added)."""
+        ...
+
+    def remove_source(
+        self, workspace_id: str, owner_id: str, collection_id: str, source_id: str
+    ) -> None:
+        """Idempotent."""
+        ...
+
+    def list_sources(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        collection_id: str,
+        limit: int,
+        cursor: tuple[datetime, str] | None,
+    ) -> tuple[Source, ...]:
+        """Live member sources, newest first; NotFoundError for a collection not the owner's."""
+        ...
+
+    def collections_of(self, workspace_id: str, owner_id: str, source_id: str) -> tuple[str, ...]:
+        """Ids of the owner's collections that hold the source."""
+        ...
+
+    def forget_source(self, workspace_id: str, source_id: str) -> None:
+        """Remove every membership of the source (erasure)."""
         ...
 
 
