@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from nodo_api.domain.models import Answerability, Locale, MeetingState
-from nodo_api.domain.sources import ImportState, SourceKind
+from nodo_api.domain.sources import ImportState, SourceKind, collection_name
 
 
 class FrozenModel(BaseModel):
@@ -116,6 +116,7 @@ class SourceOutput(FrozenModel):
     origin: str | None
     language: Locale | None
     version: int
+    retention_until: datetime | None = None  # when the stored original is erased (FR-4)
 
 
 class SourceList(FrozenModel):
@@ -409,3 +410,39 @@ class HierarchyProposalList(FrozenModel):
 
 class HierarchyReviewInput(FrozenModel):
     status: Literal["approved", "rejected"]
+
+
+# --- collections of sources (FR-4, FR-8); local and memory engines, 501 on Azure ----------------
+
+
+def _checked_name(name: str | None) -> str | None:
+    # collection_name raises a ValueError that never repeats the name: a plain 422.
+    return None if name is None else collection_name(name)
+
+
+class CollectionOutput(FrozenModel):
+    id: str
+    parent_id: str | None
+    name: str
+    created_at: datetime
+    source_count: int
+
+
+class CollectionList(FrozenModel):
+    items: tuple[CollectionOutput, ...]
+
+
+class CollectionCreate(FrozenModel):
+    name: str
+    parent_id: str | None = Field(default=None, max_length=64)
+
+    _name = field_validator("name")(_checked_name)
+
+
+class CollectionUpdate(FrozenModel):
+    """`parent_id` sent as null moves to the root; left out, the parent stays."""
+
+    name: str | None = None
+    parent_id: str | None = Field(default=None, max_length=64)
+
+    _name = field_validator("name")(_checked_name)

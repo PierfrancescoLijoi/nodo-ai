@@ -41,6 +41,7 @@ def test_lists_meeting_as_source(client, auth_headers) -> None:
         "origin": None,
         "language": None,
         "version": 1,
+        "retention_until": None,
     }
 
 

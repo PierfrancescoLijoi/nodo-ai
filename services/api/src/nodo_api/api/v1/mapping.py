@@ -9,6 +9,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from nodo_api.api.v1.schemas import (
+    CollectionOutput,
     ConceptOutput,
     EvidenceOutput,
     FragmentOutput,
@@ -40,6 +41,7 @@ from nodo_api.domain.graph import (
 )
 from nodo_api.domain.models import Meeting, SpeakerSummary
 from nodo_api.domain.sources import (
+    Collection,
     Fragment,
     ImportJob,
     Locator,
@@ -157,6 +159,17 @@ def source_output(source: Source) -> SourceOutput:
         origin=source.origin,
         language=source.language,
         version=source.version,
+        retention_until=source.retention_until,
+    )
+
+
+def collection_output(collection: Collection) -> CollectionOutput:
+    return CollectionOutput(
+        id=collection.id,
+        parent_id=collection.parent_id,
+        name=collection.name,
+        created_at=collection.created_at,
+        source_count=collection.source_count,
     )
 
 

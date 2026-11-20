@@ -19,6 +19,7 @@ from fastapi.concurrency import run_in_threadpool
 from opentelemetry import trace
 
 from nodo_api.api.v1.mapping import (
+    collection_output,
     concept_output,
     decode_cursor,
     edge_output,
@@ -36,6 +37,10 @@ from nodo_api.api.v1.mapping import (
 from nodo_api.api.v1.schemas import (
     ChangeOutput,
     ChangesOutput,
+    CollectionCreate,
+    CollectionList,
+    CollectionOutput,
+    CollectionUpdate,
     ConceptHierarchyOutput,
     ExportInput,
     ExportOutput,
@@ -76,7 +81,7 @@ from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
 from nodo_api.domain.hierarchy import MAX_DEPTH
 from nodo_api.domain.source_files import UploadRejected
-from nodo_api.domain.sources import SourceKind
+from nodo_api.domain.sources import CLEAR, SourceKind
 from nodo_api.errors import (
     AuthenticationError,
     NotAvailableOnEngine,
@@ -724,3 +729,109 @@ def review_hierarchy_link(
         actor.workspace_id, actor.user_id, relation_id, ReviewStatus(payload.status)
     )
     return hierarchy_link_output(relation, partial(service.locate, actor.workspace_id))
+
+
+# --- collections of sources (FR-4, FR-8); local and memory engines, 501 on Azure ----------------
+# Names stay out of logs and errors: the repositories and these routes log nothing about them.
+
+
+def _collections(container):
+    if getattr(container, "collections", None) is None:
+        raise NotAvailableOnEngine
+    return container.collections
+
+
+CollectionId = Annotated[str, Path(max_length=64)]
+MemberId = Annotated[str, Path(max_length=64)]
+
+
+@router.get("/collections", response_model=CollectionList)
+def list_collections(
+    actor: PrincipalDep,
+    request: Request,
+    source_id: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+):
+    """Every collection of the caller, parents first; with `source_id`, only those holding it."""
+    container = request.app.state.container
+    collections = _collections(container)
+    items = collections.list_owned(actor.workspace_id, actor.user_id)
+    if source_id is not None:
+        sources, _ = _source_stores(container)
+        sources.get_owned(actor.workspace_id, actor.user_id, source_id)  # 404 unless live and mine
+        held = set(collections.collections_of(actor.workspace_id, actor.user_id, source_id))
+        items = tuple(item for item in items if item.id in held)
+    return CollectionList(items=tuple(collection_output(item) for item in items))
+
+
+@router.post("/collections", response_model=CollectionOutput, status_code=status.HTTP_201_CREATED)
+def create_collection(payload: CollectionCreate, actor: PrincipalDep, request: Request):
+    created = _collections(request.app.state.container).create(
+        actor.workspace_id, actor.user_id, name=payload.name, parent_id=payload.parent_id
+    )
+    return collection_output(created)
+
+
+@router.patch("/collections/{collection_id}", response_model=CollectionOutput)
+def update_collection(
+    collection_id: CollectionId, payload: CollectionUpdate, actor: PrincipalDep, request: Request
+):
+    moves_to_root = "parent_id" in payload.model_fields_set and payload.parent_id is None
+    updated = _collections(request.app.state.container).update(
+        actor.workspace_id,
+        actor.user_id,
+        collection_id,
+        name=payload.name,
+        parent_id=CLEAR if moves_to_root else payload.parent_id,
+    )
+    return collection_output(updated)
+
+
+@router.delete("/collections/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_collection(collection_id: CollectionId, actor: PrincipalDep, request: Request):
+    """The collection and its subtree; the sources in them stay in the library."""
+    _collections(request.app.state.container).delete(
+        actor.workspace_id, actor.user_id, collection_id
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/collections/{collection_id}/sources", response_model=SourceList)
+def list_collection_sources(
+    collection_id: CollectionId,
+    actor: PrincipalDep,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+):
+    page = _collections(request.app.state.container).list_sources(
+        actor.workspace_id, actor.user_id, collection_id, limit + 1, decode_cursor(cursor)
+    )
+    items, has_more = page[:limit], len(page) > limit
+    return SourceList(
+        items=tuple(source_output(item) for item in items),
+        next_cursor=encode_cursor(items[-1]) if has_more and items else None,
+    )
+
+
+@router.put(
+    "/collections/{collection_id}/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def add_collection_source(
+    collection_id: CollectionId, source_id: MemberId, actor: PrincipalDep, request: Request
+):
+    _collections(request.app.state.container).add_source(
+        actor.workspace_id, actor.user_id, collection_id, source_id
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/collections/{collection_id}/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def remove_collection_source(
+    collection_id: CollectionId, source_id: MemberId, actor: PrincipalDep, request: Request
+):
+    collections = _collections(request.app.state.container)
+    collections.get_owned(actor.workspace_id, actor.user_id, collection_id)  # 404 unless mine
+    collections.remove_source(actor.workspace_id, actor.user_id, collection_id, source_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
