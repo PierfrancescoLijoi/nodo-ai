@@ -361,3 +361,51 @@ class ExportOutput(FrozenModel):
     status: Literal["queued", "running", "ready", "failed"] = "queued"
     expires_at: datetime | None = None
     download_path: str | None = None
+
+
+# --- concept hierarchy (ADR-030): new models only, /v1/graph/* keeps hiding CHILD_OF --------------
+
+
+class ConceptOutput(FrozenModel):
+    id: str
+    type: str
+    label: str
+    status: str | None
+
+
+class SourceMentionOutput(FrozenModel):
+    source_id: str
+    title: str | None
+
+
+class HierarchyEvidenceOutput(FrozenModel):
+    source_id: str
+    fragment_id: str
+    locator: dict[str, Any] | None
+
+
+class HierarchyLinkOutput(FrozenModel):
+    id: str
+    child_id: str
+    parent_id: str
+    status: Literal["proposed", "approved", "rejected"]
+    confidence: float
+    evidence: tuple[HierarchyEvidenceOutput, ...]
+
+
+class ConceptHierarchyOutput(FrozenModel):
+    concept: ConceptOutput
+    mentioned_in: tuple[SourceMentionOutput, ...]
+    nodes: tuple[ConceptOutput, ...]
+    links: tuple[HierarchyLinkOutput, ...]
+    truncated: bool
+
+
+class HierarchyProposalList(FrozenModel):
+    items: tuple[HierarchyLinkOutput, ...]
+    nodes: tuple[ConceptOutput, ...]
+    truncated: bool
+
+
+class HierarchyReviewInput(FrozenModel):
+    status: Literal["approved", "rejected"]

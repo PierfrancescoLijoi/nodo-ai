@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from functools import partial
+from typing import Annotated, Literal
 
 from fastapi import (
     APIRouter,
@@ -18,10 +19,12 @@ from fastapi.concurrency import run_in_threadpool
 from opentelemetry import trace
 
 from nodo_api.api.v1.mapping import (
+    concept_output,
     decode_cursor,
     edge_output,
     encode_cursor,
     fragment_output,
+    hierarchy_link_output,
     import_output,
     list_item,
     meeting_output,
@@ -33,9 +36,13 @@ from nodo_api.api.v1.mapping import (
 from nodo_api.api.v1.schemas import (
     ChangeOutput,
     ChangesOutput,
+    ConceptHierarchyOutput,
     ExportInput,
     ExportOutput,
     GraphEdgeOutput,
+    HierarchyLinkOutput,
+    HierarchyProposalList,
+    HierarchyReviewInput,
     ImportStatusOutput,
     MeetingCreate,
     MeetingList,
@@ -51,6 +58,7 @@ from nodo_api.api.v1.schemas import (
     SourceCreateOutput,
     SourceFragments,
     SourceList,
+    SourceMentionOutput,
     SourceOutline,
     SourceOutput,
     SourceVersionList,
@@ -66,6 +74,7 @@ from nodo_api.api.v1.schemas import (
 from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
+from nodo_api.domain.hierarchy import MAX_DEPTH
 from nodo_api.domain.source_files import UploadRejected
 from nodo_api.domain.sources import SourceKind
 from nodo_api.errors import (
@@ -642,3 +651,76 @@ async def import_meeting(meeting_id: str, actor: PrincipalDep, request: Request)
         actor.user_id,
         package,
     )
+
+
+# --- concept hierarchy (ADR-030); local and memory engines, 501 on Azure --------------------------
+
+
+def _hierarchy(container):
+    if getattr(container, "hierarchy", None) is None:
+        raise NotAvailableOnEngine
+    return container.hierarchy
+
+
+@router.get("/concepts/{concept_id}/hierarchy", response_model=ConceptHierarchyOutput)
+def concept_hierarchy(
+    concept_id: Annotated[str, Path(max_length=64)],
+    actor: PrincipalDep,
+    request: Request,
+    direction: Literal["parents", "children", "both"] = "both",
+    depth: Annotated[int, Query(ge=1, le=MAX_DEPTH)] = 1,
+    include_proposed: bool = False,
+    limit: Annotated[int, Query(ge=1, le=200)] = 60,
+):
+    service = _hierarchy(request.app.state.container)
+    found = service.concept(
+        actor.workspace_id,
+        actor.user_id,
+        concept_id,
+        direction=direction,
+        depth=depth,
+        include_proposed=include_proposed,
+        limit=limit,
+    )
+    locate = partial(service.locate, actor.workspace_id)
+    return ConceptHierarchyOutput(
+        concept=concept_output(found.concept),
+        mentioned_in=tuple(
+            SourceMentionOutput(source_id=source_id, title=title)
+            for source_id, title in found.mentioned_in
+        ),
+        nodes=tuple(concept_output(node) for node in found.graph.nodes),
+        links=tuple(hierarchy_link_output(edge, locate) for edge in found.graph.edges),
+        truncated=found.graph.truncated,
+    )
+
+
+@router.get("/hierarchy/proposals", response_model=HierarchyProposalList)
+def hierarchy_proposals(
+    actor: PrincipalDep,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+):
+    """Parent links the model or a document proposed that nobody has decided yet."""
+    service = _hierarchy(request.app.state.container)
+    graph = service.proposals(actor.workspace_id, actor.user_id, limit)
+    locate = partial(service.locate, actor.workspace_id)
+    return HierarchyProposalList(
+        items=tuple(hierarchy_link_output(edge, locate) for edge in graph.edges),
+        nodes=tuple(concept_output(node) for node in graph.nodes),
+        truncated=graph.truncated,
+    )
+
+
+@router.patch("/hierarchy/links/{relation_id}", response_model=HierarchyLinkOutput)
+def review_hierarchy_link(
+    relation_id: Annotated[str, Path(max_length=64)],
+    payload: HierarchyReviewInput,
+    actor: PrincipalDep,
+    request: Request,
+):
+    service = _hierarchy(request.app.state.container)
+    relation = service.review(
+        actor.workspace_id, actor.user_id, relation_id, ReviewStatus(payload.status)
+    )
+    return hierarchy_link_output(relation, partial(service.locate, actor.workspace_id))

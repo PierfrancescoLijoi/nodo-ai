@@ -399,4 +399,5 @@ def local_adapters(settings: Settings):
         source_blobs=source_blobs,
         source_import=source_import,
         folder_watcher=watcher,
+        hierarchy_store=graph,
     )

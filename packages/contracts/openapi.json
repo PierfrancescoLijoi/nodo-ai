@@ -182,6 +182,82 @@
         "title": "CitationOutput",
         "type": "object"
       },
+      "ConceptHierarchyOutput": {
+        "properties": {
+          "concept": {
+            "$ref": "#/components/schemas/ConceptOutput"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyLinkOutput"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "mentioned_in": {
+            "items": {
+              "$ref": "#/components/schemas/SourceMentionOutput"
+            },
+            "title": "Mentioned In",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/ConceptOutput"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "concept",
+          "mentioned_in",
+          "nodes",
+          "links",
+          "truncated"
+        ],
+        "title": "ConceptHierarchyOutput",
+        "type": "object"
+      },
+      "ConceptOutput": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "label",
+          "status"
+        ],
+        "title": "ConceptOutput",
+        "type": "object"
+      },
       "CorrectionInput": {
         "properties": {
           "segment_id": {
@@ -505,6 +581,129 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HierarchyEvidenceOutput": {
+        "properties": {
+          "fragment_id": {
+            "title": "Fragment Id",
+            "type": "string"
+          },
+          "locator": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locator"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "fragment_id",
+          "locator"
+        ],
+        "title": "HierarchyEvidenceOutput",
+        "type": "object"
+      },
+      "HierarchyLinkOutput": {
+        "properties": {
+          "child_id": {
+            "title": "Child Id",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyEvidenceOutput"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "parent_id": {
+            "title": "Parent Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "proposed",
+              "approved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "child_id",
+          "parent_id",
+          "status",
+          "confidence",
+          "evidence"
+        ],
+        "title": "HierarchyLinkOutput",
+        "type": "object"
+      },
+      "HierarchyProposalList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyLinkOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/ConceptOutput"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "nodes",
+          "truncated"
+        ],
+        "title": "HierarchyProposalList",
+        "type": "object"
+      },
+      "HierarchyReviewInput": {
+        "properties": {
+          "status": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HierarchyReviewInput",
         "type": "object"
       },
       "ImportOutput": {
@@ -1451,6 +1650,31 @@
         "title": "SourceList",
         "type": "object"
       },
+      "SourceMentionOutput": {
+        "properties": {
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "source_id",
+          "title"
+        ],
+        "title": "SourceMentionOutput",
+        "type": "object"
+      },
       "SourceOutline": {
         "properties": {
           "sections": {
@@ -1912,6 +2136,95 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/concepts/{concept_id}/hierarchy": {
+      "get": {
+        "operationId": "concept_hierarchy_v1_concepts__concept_id__hierarchy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "concept_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "title": "Concept Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "both",
+              "enum": [
+                "parents",
+                "children",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 6,
+              "minimum": 1,
+              "title": "Depth",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_proposed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Proposed",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 60,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceptHierarchyOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Concept Hierarchy"
+      }
+    },
     "/v1/export": {
       "post": {
         "operationId": "export_data_v1_export_post",
@@ -2274,6 +2587,99 @@
           }
         },
         "summary": "Graph Subgraph"
+      }
+    },
+    "/v1/hierarchy/links/{relation_id}": {
+      "patch": {
+        "operationId": "review_hierarchy_link_v1_hierarchy_links__relation_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "relation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "title": "Relation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HierarchyReviewInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchyLinkOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Hierarchy Link"
+      }
+    },
+    "/v1/hierarchy/proposals": {
+      "get": {
+        "description": "Parent links the model or a document proposed that nobody has decided yet.",
+        "operationId": "hierarchy_proposals_v1_hierarchy_proposals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchyProposalList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hierarchy Proposals"
       }
     },
     "/v1/local/source-uploads/{token}": {

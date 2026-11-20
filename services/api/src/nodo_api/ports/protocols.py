@@ -198,6 +198,13 @@ class SourceRepository(Protocol):
         case-insensitive substring. Pass the last (created_at, id) seen as `cursor`."""
         ...
 
+    def titles(
+        self, workspace_id: str, user_id: str, source_ids: Sequence[str]
+    ) -> dict[str, str | None]:
+        """Current titles of the owner's live sources among `source_ids`, meetings included, in
+        one read. Missing, deleted or other owners' ids are absent."""
+        ...
+
 
 class WatchFolderRepository(Protocol):
     """Watched folders (Task 15) and what each scan saw of their files. Local and memory only."""

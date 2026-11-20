@@ -29,6 +29,7 @@ from nodo_api.resilience import Bulkhead, DependencyUnavailable, is_transient
 from nodo_api.services import (
     EvidenceValidator,
     GraphService,
+    HierarchyService,
     MeetingService,
     QueryService,
     SourceImportService,
@@ -82,6 +83,7 @@ class AppContainer:
     source_blobs: Any = None
     source_import: SourceImportService | None = None
     folder_watcher: Any = None
+    hierarchy: HierarchyService | None = None  # None on Azure: routes answer 501
 
 
 @asynccontextmanager
@@ -261,6 +263,12 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         )
         else None
     )
+    graph_service = GraphService(a.graph, a.audit, a.answers)
+    hierarchy = (
+        HierarchyService(a.hierarchy_store, graph_service, a.fragments, a.sources)
+        if a.hierarchy_store is not None and a.fragments is not None and a.sources is not None
+        else None
+    )
     return AppContainer(
         settings,
         AuthManager(settings, key_provider),
@@ -274,7 +282,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.audit,
         meeting_service,
         query_service,
-        GraphService(a.graph, a.audit, a.answers),
+        graph_service,
         SyncImportService(
             a.meetings,
             a.transcripts,
@@ -296,6 +304,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.source_blobs,
         a.source_import,
         a.folder_watcher,
+        hierarchy,
     )
 
 
