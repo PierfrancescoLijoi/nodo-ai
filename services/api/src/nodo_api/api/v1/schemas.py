@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from nodo_api.domain.models import Answerability, Locale, MeetingState
+from nodo_api.domain.sources import ImportState, SourceKind
 
 
 class FrozenModel(BaseModel):
@@ -104,6 +105,114 @@ class MeetingListItem(FrozenModel):
 class MeetingList(FrozenModel):
     items: tuple[MeetingListItem, ...]
     next_cursor: str | None
+
+
+class SourceOutput(FrozenModel):
+    id: str
+    kind: SourceKind
+    title: str | None
+    state: str
+    created_at: datetime
+    origin: str | None
+    language: Locale | None
+    version: int
+
+
+class SourceList(FrozenModel):
+    items: tuple[SourceOutput, ...]
+    next_cursor: str | None
+
+
+class SourceCreate(FrozenModel):
+    filename: str = Field(min_length=1, max_length=200)
+    size_bytes: int = Field(ge=1)
+    kind: SourceKind | None = None
+    origin_note: str | None = Field(default=None, max_length=500)
+
+
+class WatchFolderCreate(FrozenModel):
+    path: str = Field(min_length=1, max_length=1024)
+
+
+class WatchFolderOutput(FrozenModel):
+    """A watched folder; its path is answered to its owner only."""
+
+    id: str
+    path: str
+    enabled: bool
+    created_at: datetime
+
+
+class WatchFolderList(FrozenModel):
+    items: tuple[WatchFolderOutput, ...]
+
+
+class SourceCreateOutput(FrozenModel):
+    source: SourceOutput
+    upload_url: str
+    expires_in_seconds: int
+
+
+class ImportOutput(FrozenModel):
+    state: ImportState
+    step: str | None
+    done: int
+    total: int
+    attempt: int
+    error_code: str | None
+    unchanged: bool = False
+    existing_source_id: str | None = None
+    # Stable notice codes; "slow_on_this_machine": the local engine may take long (PERFORMANCE.md).
+    warnings: tuple[str, ...] = ()
+
+
+class ProcessingConfirmation(FrozenModel):
+    """The owner of an imported recording states "I may process this recording"."""
+
+    confirmed: Literal[True]
+
+
+class ImportStatusOutput(FrozenModel):
+    import_: ImportOutput = Field(alias="import", serialization_alias="import")
+
+
+class SourceVersionOutput(FrozenModel):
+    version: int
+    content_hash_prefix: str
+    parser: str
+    created_at: datetime
+    size_bytes: int
+
+
+class SourceVersionList(FrozenModel):
+    items: tuple[SourceVersionOutput, ...]
+
+
+class SectionOutput(FrozenModel):
+    id: str
+    parent_id: str | None
+    ordinal: int
+    level: int
+    title: str
+
+
+class SourceOutline(FrozenModel):
+    sections: tuple[SectionOutput, ...]
+
+
+class FragmentOutput(FrozenModel):
+    id: str
+    section_id: str | None
+    ordinal: int
+    text: str
+    locator: dict[str, Any]
+    speaker_id: str | None
+    confidence: float | None
+
+
+class SourceFragments(FrozenModel):
+    version: int
+    fragments: tuple[FragmentOutput, ...]
 
 
 class UploadSessionOutput(FrozenModel):

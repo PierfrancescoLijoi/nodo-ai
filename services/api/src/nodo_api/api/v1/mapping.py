@@ -4,29 +4,42 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 from datetime import datetime
 
 from nodo_api.api.v1.schemas import (
     EvidenceOutput,
+    FragmentOutput,
     GraphEdgeOutput,
     GraphNodeOutput,
+    ImportOutput,
     InsightAction,
     InsightDecision,
     InsightNode,
     Insights,
     MeetingListItem,
     MeetingOutput,
+    SectionOutput,
+    SourceOutput,
+    SourceVersionOutput,
     SpeakerOutput,
     SubgraphOutput,
 )
-from nodo_api.domain.graph import EntityType, MeetingDigest, Relation, Subgraph
+from nodo_api.domain.graph import (
+    EntityType,
+    MeetingDigest,
+    Relation,
+    RelationKind,
+    Subgraph,
+)
 from nodo_api.domain.models import Meeting, SpeakerSummary
+from nodo_api.domain.sources import Fragment, ImportJob, Section, Source, SourceVersion
 from nodo_api.errors import ValidationFailed
 from nodo_api.services.ingestion import default_title
 
 
-def encode_cursor(meeting: Meeting) -> str:
-    raw = f"{meeting.created_at.isoformat()}|{meeting.id}".encode()
+def encode_cursor(item: Meeting | Source) -> str:
+    raw = f"{item.created_at.isoformat()}|{item.id}".encode()
     return base64.urlsafe_b64encode(raw).decode()
 
 
@@ -121,9 +134,85 @@ def list_item(meeting: Meeting, digest: MeetingDigest | None) -> MeetingListItem
     )
 
 
+def source_output(source: Source) -> SourceOutput:
+    return SourceOutput(
+        id=source.id,
+        kind=source.kind,
+        title=source.title,
+        state=source.state,
+        created_at=source.created_at,
+        origin=source.origin,
+        language=source.language,
+        version=source.version,
+    )
+
+
+def import_output(
+    job: ImportJob,
+    *,
+    unchanged: bool = False,
+    existing_source_id: str | None = None,
+    warnings: tuple[str, ...] = (),
+) -> ImportOutput:
+    return ImportOutput(
+        state=job.state,
+        step=job.step,
+        done=job.done,
+        total=job.total,
+        attempt=job.attempt,
+        error_code=job.error_code,
+        unchanged=unchanged,
+        existing_source_id=existing_source_id,
+        warnings=warnings,
+    )
+
+
+def source_version_output(version: SourceVersion) -> SourceVersionOutput:
+    return SourceVersionOutput(
+        version=version.version,
+        content_hash_prefix=version.content_hash[:12],
+        parser=version.parser,
+        created_at=version.created_at,
+        size_bytes=version.size_bytes,
+    )
+
+
+def section_output(section: Section) -> SectionOutput:
+    return SectionOutput(
+        id=section.id,
+        parent_id=section.parent_id,
+        ordinal=section.ordinal,
+        level=section.level,
+        title=section.title,
+    )
+
+
+def fragment_output(fragment: Fragment) -> FragmentOutput:
+    return FragmentOutput(
+        id=fragment.id,
+        section_id=fragment.section_id,
+        ordinal=fragment.ordinal,
+        text=fragment.text,
+        locator=json.loads(fragment.locator.to_json()),
+        speaker_id=fragment.speaker_id,
+        confidence=fragment.confidence,
+    )
+
+
 def subgraph_output(graph: Subgraph, depth: int) -> SubgraphOutput:
+    """The legacy graph view. The store already read it meetings-only; SOURCE nodes, CHILD_OF
+    edges and edges touching a SOURCE node are dropped here too, as a guard, so the frozen
+    clients and the OpenAPI literals never see the source vocabulary."""
+    hidden = {n.id for n in graph.nodes if n.type is EntityType.SOURCE}
+    edges = [
+        edge
+        for edge in graph.edges
+        if edge.kind is not RelationKind.CHILD_OF
+        and edge.source_id not in hidden
+        and edge.target_id not in hidden
+    ]
     meeting_of: dict[str, str] = {}
-    for edge in graph.edges:
+    for edge in edges:
         if edge.evidence:
             first = edge.evidence[0].meeting_id
             meeting_of.setdefault(edge.source_id, first)
@@ -138,8 +227,9 @@ def subgraph_output(graph: Subgraph, depth: int) -> SubgraphOutput:
                 meeting_id=n.meeting_id if n.type is EntityType.MEETING else meeting_of.get(n.id),
             )
             for n in graph.nodes
+            if n.id not in hidden
         ),
-        edges=tuple(edge_output(e) for e in graph.edges),
+        edges=tuple(edge_output(e) for e in edges),
         depth=depth,
         truncated=graph.truncated,
     )

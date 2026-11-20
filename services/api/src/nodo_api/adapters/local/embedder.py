@@ -84,6 +84,12 @@ class LocalEmbedder:
             vectors += pooled.tolist()
         return vectors
 
+    def within_ceiling(self, texts: list[str]) -> list[bool]:
+        """Whether each text, as a passage, fits the model without being cut: the tokenizer
+        truncates at MAX_TOKENS and keeps the cut-off part in `overflowing`."""
+        tokenizer, _ = self._load()
+        return [not e.overflowing for e in tokenizer.encode_batch(["passage: " + t for t in texts])]
+
     def embed_passages(self, texts: list[str]) -> list[list[float]]:
         return self._encode("passage: ", texts)
 

@@ -42,13 +42,18 @@ Shortcut: `NODO.cmd` at the repository root starts the app.
 
 | Path | Content |
 |---|---|
-| `nodo.db` | meetings, transcripts, graph, search index, queue |
+| `nodo.db` | meetings, transcripts, imported sources with their sections, fragments and versions, graph, search indexes, queue, watched folders |
 | `audio/` | the recordings, until you delete the meeting |
+| `sources/` | the original files of imported documents, one folder per source and version, until you delete the source; imported audio and video are erased 30 days after upload (their transcript stays) |
 | `attestation.key` | signs the record that you declared you may record |
 | `window/` | the app window's profile (microphone permission) |
 | `models/` | llama.cpp, the speaker models and the search model (int8 ONNX, 280 MB); Whisper and the language model live in the Hugging Face cache |
 
 Deleting a meeting removes its audio, transcript, search entries and graph entries from this computer, and from Azure on the next copy.
+
+Deleting an imported source removes its original files, sections, fragments, search entries and graph evidence from this computer. The engine then asks SQLite to empty its write-ahead log; when another reader holds the database at that moment, deleted text can stay in `nodo.db-wal` until a later checkpoint succeeds. The copy to Azure carries meetings only; imported sources stay on this computer.
+
+Document import works but is slow on the reference laptop (about an hour of model time per 50 pages on its 6 GB GPU, extrapolated from a 2.67-page corpus; see [PERFORMANCE.md](PERFORMANCE.md#8-document-import-phase-2)), so every import response of the local engine carries the notice `slow_on_this_machine`. Set `NODO_LOCAL_IMPORT_SLOW_NOTICE=false` to hide it on a faster computer.
 
 ## What the models are good and bad at
 

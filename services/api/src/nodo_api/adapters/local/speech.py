@@ -30,6 +30,7 @@ import numpy as np
 
 from nodo_api.adapters.local.models import GpuArbiter, LocalModelPaths
 from nodo_api.domain.models import SpokenPhrase
+from nodo_api.domain.source_files import looks_like_media
 
 logger = logging.getLogger("nodo_speech")
 
@@ -183,28 +184,6 @@ def build_phrases(tagged: Sequence[tuple[Word, int]], language: str) -> tuple[Sp
         group.append(word)
     flush()
     return tuple(phrases)
-
-
-# Signatures of the audio and video containers a recording can be in. Anything else (a playlist, a
-# concat script, text that ffmpeg would interpret as a list of other files) is refused before ffmpeg
-# sees it: the upload is an untrusted file.
-CONTAINER_SIGNATURES = (
-    (0, b"RIFF"),  # WAV
-    (0, b"OggS"),
-    (0, bytes([0x1A, 0x45, 0xDF, 0xA3])),  # Matroska and WebM
-    (0, b"fLaC"),
-    (0, b"ID3"),
-    (4, b"ftyp"),  # MP4 and M4A
-    (0, bytes([0xFF, 0xFB])),  # MP3 frame
-    (0, bytes([0xFF, 0xF3])),
-    (0, bytes([0xFF, 0xF1])),  # AAC (ADTS)
-)
-
-
-def looks_like_media(path: Path | str) -> bool:
-    with Path(path).open("rb") as handle:
-        head = handle.read(16)
-    return any(head[offset : offset + len(sig)] == sig for offset, sig in CONTAINER_SIGNATURES)
 
 
 def decode_audio(path: Path | str, ffmpeg: str | None) -> np.ndarray:

@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -25,10 +26,23 @@ from nodo_api.errors import NodoError
 from nodo_api.jwks import JwksCache
 from nodo_api.middleware import EdgeProtection
 from nodo_api.resilience import Bulkhead, DependencyUnavailable, is_transient
-from nodo_api.services import EvidenceValidator, GraphService, MeetingService, QueryService
+from nodo_api.services import (
+    EvidenceValidator,
+    GraphService,
+    MeetingService,
+    QueryService,
+    SourceImportService,
+    SourceService,
+)
 from nodo_api.services.exports import ExportService
 from nodo_api.services.sync_import import SyncImportService
-from nodo_api.telemetry import configure, configure_logging, instrument_app, request_id_var
+from nodo_api.telemetry import (
+    configure,
+    configure_logging,
+    instrument_app,
+    redact_path,
+    request_id_var,
+)
 
 logger = logging.getLogger("nodo_api")
 
@@ -60,6 +74,14 @@ class AppContainer:
     readiness: tuple[tuple[str, Callable[[], None]], ...] = ()
     query_gate: Bulkhead | None = None
     speech: Any = None  # the speech adapter, for the local push-to-talk path
+    sources: Any = None
+    fragments: Any = None
+    source_service: SourceService | None = None
+    # Local and memory engines only; None on Azure (routes answer 501 there, Task 13).
+    imports: Any = None
+    source_blobs: Any = None
+    source_import: SourceImportService | None = None
+    folder_watcher: Any = None
 
 
 @asynccontextmanager
@@ -70,6 +92,14 @@ async def _lifespan(app: FastAPI):
         await voice.startup()
     if runtime is not None:
         runtime.start()
+    sources = app.state.container.source_service
+    # After runtime.start (imports resumed, watcher running) is safe: resume_interrupted skips a
+    # source with no content hash (tombstones clear it) and _check/_gone stop work on tombstones.
+    if sources is not None:  # after the engine lock: deletes a failure or crash left unfinished
+        try:
+            sources.finish_deletes()
+        except Exception as error:
+            logger.error("finish_deletes_failed type=%s", type(error).__name__)
     try:
         yield
     finally:
@@ -104,6 +134,11 @@ def create_app(
     instrument_app(app)
     app.state.container = _container(effective_settings, oidc_key_provider)
     app.include_router(router)
+    # The capability route also serves the in-memory development engine. Other local-only routes
+    # need a LocalRuntime and remain mounted below only for backend=local.
+    from nodo_api.api import local
+
+    app.include_router(local.source_upload_router)
     _configure_voice(app, effective_settings, voice_factory)
     _configure_cors(app, effective_settings)
     _configure_middleware(app)
@@ -114,6 +149,7 @@ def create_app(
         body_limits=(
             ("/v1/sync/", SYNC_BODY_LIMIT),
             ("/v1/local/uploads/", LOCAL_UPLOAD_LIMIT),
+            ("/v1/local/source-uploads/", effective_settings.local_import_max_bytes),
         ),
         # The local engine also serves the web app, which needs scripts and styles.
         security_headers=effective_settings.backend != "local",
@@ -149,8 +185,6 @@ def create_app(
         return {"status": "ready"}
 
     if effective_settings.backend == "local":
-        from nodo_api.api import local
-
         _only_loopback_hosts(app, effective_settings)
 
         app.include_router(local.router)
@@ -200,6 +234,33 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.entity_indexer,
         a.answers,
     )
+    source_service = (
+        SourceService(
+            sources=a.sources,
+            fragments=a.fragments,
+            graph=a.graph,
+            answers=a.answers,
+            audit=a.audit,
+            clock=lambda: datetime.now(UTC),
+            fragment_index=a.fragment_index,
+            blobs=a.source_blobs,
+            imports=a.imports,
+            jobs=a.jobs,
+            watch=a.folder_watcher.repository if a.folder_watcher is not None else None,
+        )
+        if all(
+            port is not None
+            for port in (
+                a.sources,
+                a.fragments,
+                a.fragment_index,
+                a.source_blobs,
+                a.imports,
+                a.jobs,
+            )
+        )
+        else None
+    )
     return AppContainer(
         settings,
         AuthManager(settings, key_provider),
@@ -228,6 +289,13 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.readiness,
         Bulkhead("query", settings.max_concurrent_queries, wait_seconds=0.0),
         a.speech,
+        a.sources,
+        a.fragments,
+        source_service,
+        a.imports,
+        a.source_blobs,
+        a.source_import,
+        a.folder_watcher,
     )
 
 
@@ -275,7 +343,7 @@ def _configure_middleware(app: FastAPI) -> None:
                 {
                     "event": "http_request",
                     "method": request.method,
-                    "path": request.url.path,
+                    "path": redact_path(request.url.path),  # never an upload token
                     "status_code": response.status_code,
                     "request_id": request_id,
                 }

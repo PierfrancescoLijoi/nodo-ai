@@ -21,7 +21,7 @@ evidence.
   <img src="https://img.shields.io/badge/web-TypeScript_%7C_Next.js_%7C_React-3178C6?style=flat" alt="TypeScript, Next.js and React">
   <img src="https://img.shields.io/badge/data-PostgreSQL_%7C_pgvector_%7C_SQLite-336791?style=flat" alt="PostgreSQL, pgvector and SQLite">
   <img src="https://img.shields.io/badge/infrastructure-Azure_%7C_Terraform-7B42BC?style=flat" alt="Azure and Terraform">
-  <img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=flat" alt="Apache 2.0 license">
+  <img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT license">
 </p>
 
 [Product](#product-capabilities) · [Architecture](#architecture) · [Azure](#azure-architecture) ·
@@ -558,7 +558,7 @@ Operational procedures are in [RUNBOOKS.md](docs/RUNBOOKS.md).
 
 ## License
 
-NODO AI is open source under the [Apache License 2.0](LICENSE). Copyright 2026 Pierfrancesco Lijoi.
+NODO AI is open source under the [MIT License](LICENSE). Copyright 2026 Pierfrancesco Lijoi.
 
 ## Documentation map
 
@@ -581,8 +581,12 @@ NODO AI is open source under the [Apache License 2.0](LICENSE). Copyright 2026 P
 
 ## Current status
 
+- The knowledge-base direction is documented in [PRODUCT.md](docs/product/PRODUCT.md) and the [design specification](docs/superpowers/specs/2026-11-12-knowledge-base-design.md).
 - Local meeting capture, ingestion, grounded query, graph, review, export and deletion are
   implemented and exercised end to end.
+- Knowledge base Phase 2 (documents) is closed on the local engine: import of documents, audio and
+  watched folders through `/v1/sources`, with measured speed and extraction quality in
+  [PERFORMANCE.md](docs/PERFORMANCE.md); there is no Library screen yet.
 - The browser real-time client and backend voice gateway are implemented, including durable ACK,
   cross-replica replay, bounded reconnect buffering and fallback upload.
 - Azure infrastructure, policies and application images are represented in Terraform and automated

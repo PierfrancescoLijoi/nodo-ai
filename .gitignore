@@ -19,6 +19,7 @@ ios/
 graphify-out/
 tmp/
 apps/mobile/.claude/
+.claude/
 coverage/
 *.egg-info/
 .coverage

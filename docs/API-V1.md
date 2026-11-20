@@ -1,6 +1,6 @@
 # NODO API v1 - contract for the app
 
-The OpenAPI file in `packages/contracts/openapi.json` is generated from the code. This page is the human contract the mobile client is built against. All endpoints need `Authorization: Bearer <access token>` (Entra External ID). Errors use `{ "error": { "code", "message", "request_id" } }` with status 401, 404, 409 or 422. Timestamps are ISO 8601 UTC strings. A user only ever sees their own meetings and graph.
+The OpenAPI file in `packages/contracts/openapi.json` is generated from the code. This page is the human contract the mobile client is built against. All endpoints need `Authorization: Bearer <access token>` (Entra External ID). Errors use `{ "error": { "code", "message", "request_id" } }` with status 401, 404, 409, 422 or 501. Timestamps are ISO 8601 UTC strings. A user only ever sees their own sources, meetings and graph.
 
 ## Meetings
 
@@ -35,6 +35,115 @@ MeetingOutput {
 `PATCH /v1/meetings/{id}/speakers/{speaker_id}` with `{ name: string | null }` names a speaker (or clears the name with `null`) and returns the updated `MeetingOutput`. Rules: `speaker_id` matches `S<n>` and must exist in the transcript (404 otherwise); only meetings in `review` or `ready` can be edited (409); names are 1 to 80 characters, at most 5 words, letters, digits, marks, spaces, `.` `'` `-` (422 otherwise, no control characters). A change queues a background re-analysis, so the named person appears in the graph and in `insights.people` a few seconds later. Names belong to one meeting; nothing links them across meetings and no voice data is kept.
 
 `POST /v1/meetings` accepts an optional `title` (1 to 120 characters). `GET /v1/meetings/{id}/transcript?limit&offset` is unchanged: items have `id, meeting_id, speaker_id ("S1", "S2"), start_ms, end_ms, text, confidence, version, locale`.
+
+## Sources
+
+A source is a meeting, document, deck, web page, note or imported audio item.
+`GET /v1/sources?kind=&state=&q=&limit=20&cursor=<opaque>` returns
+`{ items: SourceOutput[], next_cursor: string | null }`, newest first. `limit` is 1 to 100 and
+`kind`, when present, is one of `meeting`, `document`, `deck`, `web`, `note`, `audio`. `state`
+matches the exact processing state and `q` is a case-insensitive title substring.
+
+```
+SourceOutput {
+  id, kind, title: string|null, state, created_at,
+  origin: string|null, language: "en"|"pl"|"it"|"da"|null, version
+}
+```
+
+`GET /v1/sources/{id}` returns one owned source. A missing source and another user's source both
+return 404. `GET /v1/sources/{id}/outline` returns
+`{ sections: { id, parent_id, ordinal, level, title }[] }` in depth-first reading order.
+`GET /v1/sources/{id}/fragments` returns
+`{ version, fragments: { id, section_id, ordinal, text, locator, speaker_id, confidence }[] }`.
+`locator` is an object containing one or more of `time_ms`, `page`, `bbox`, `slide`, `chars`;
+ranges are two-element arrays. For a meeting, fragment ids are transcript segment ids and locators
+contain `time_ms`; the existing `/v1/meetings*` contract is unchanged.
+
+### Importing a local source
+
+1. `POST /v1/sources` needs an `Idempotency-Key` header (8 to 128 letters, digits, `_` or `-`) and
+   body `{ filename, size_bytes, kind?, origin_note? }`. It returns `201` with
+   `{ source: SourceOutput, upload_url, expires_in_seconds }`. A repeated key with the same name,
+   kind and origin note returns the same source and a fresh upload link until bytes have been
+   uploaded; another value for one of those fields, a replay after the bytes are stored or after
+   a cancel, and too many open upload links on the engine return `409`. The declared size is not
+   stored before upload, so a replay may change only `size_bytes`; the new link enforces the new
+   size. `413` means the declared size is above the import cap, `507` that the disk is too full.
+2. Send exactly `size_bytes` raw bytes to `upload_url` with `PUT`. The local capability URL does
+   not use a bearer token and works once. It returns `204`; `400` for a body shorter than
+   `size_bytes` (the link stays usable for another try); `403` for an unknown, used or expired
+   link, or one revoked because the source was completed, cancelled or deleted; `413` for a body
+   above `size_bytes` or the import cap; `507` when there is not enough disk space. Request logs
+   and traces record the route with `{token}` in place of the link token.
+3. `POST /v1/sources/{id}/complete` returns `202` with `{ import: ImportOutput }`. Poll
+   `GET /v1/sources/{id}/import` until `state` is `ready`, `failed` or `cancelled`.
+4. `POST /v1/sources/{id}/cancel` and `POST /v1/sources/{id}/retry` return `202` with the same
+   import shape. Retry is valid for failed or cancelled work and stale extraction.
+5. Audio and video (`.mp3 .wav .m4a .flac .ogg .mp4 .mkv .mov .webm`, kind `audio`) stop after
+   complete in `awaiting_confirmation`. `POST /v1/sources/{id}/confirm-processing` with
+   `{ confirmed: true }` is the owner stating "I may process this recording"; it is audited (kind
+   only) and starts the transcription. It returns `202` with the import shape; a second call
+   returns the current state; another user gets `404`; a cancelled, failed or deleted import, or
+   a document, gets `409`. Cancel while awaiting erases the original at once. A retry of a
+   recording asks for a new confirmation. The original is erased 30 days after upload (the
+   transcript fragments stay); after that a retry or confirmation that needs it returns `409`
+   with code `original_missing`, and a reimport of the file stores it again.
+
+```
+ImportOutput {
+  state, step: string|null, done, total, attempt, error_code: string|null,
+  unchanged: boolean, existing_source_id: string|null, warnings: string[]
+}
+```
+
+`warnings` holds stable notice codes (empty when there is nothing to say). The local engine sends
+`slow_on_this_machine` on every import response by default: on the reference laptop extraction of
+documents took about an hour of model time per 50 pages, extrapolated from a 2.67-page corpus (`docs/PERFORMANCE.md`), so a client
+should tell the owner that a large import can take long. The setting
+`NODO_LOCAL_IMPORT_SLOW_NOTICE=false` removes it. Clients must ignore codes they do not know.
+
+When the bytes already belong to another live source, `unchanged` is true and
+`existing_source_id` identifies it. `GET /v1/sources/{id}/versions` returns
+`{ items: { version, content_hash_prefix, parser, created_at, size_bytes }[] }`; it never returns
+the original file name or full content hash. For a meeting id the complete, import, cancel, retry
+and versions routes return `404`. `DELETE /v1/sources/{id}` returns `204` after erasing
+the source and its derived data. Meetings must be deleted through `/v1/meetings/{id}`; using the
+source delete returns `422` with `use the meetings API`.
+
+### Watched folders
+
+`POST /v1/sources/watch-folders` with `{ path }` watches a folder on the engine's computer and
+returns `201` with `WatchFolder { id, path, enabled, created_at }`. The path must be absolute, an
+existing folder on a local fixed drive (no network share or UNC path), not a symbolic link or
+junction, and must not overlap the NODO data folder in any spelling; otherwise `422`. The same folder twice returns `409`. `GET /v1/sources/watch-folders` returns
+`{ items: WatchFolder[] }` for the caller only; `DELETE /v1/sources/watch-folders/{id}` returns
+`204` and stops watching (sources already imported stay), `404` for another user's folder. The
+path is stored in the local database, returned only to its owner and never logged.
+
+The engine scans every `watch_poll_seconds` (default 30, at least 5) down to five folder levels
+and at most 5,000 entries per folder. A supported file is imported once two scans in a row see
+the same size and modification time and it did not change while it was copied; a changed file
+becomes a new version of the same source, and a recording waits in `awaiting_confirmation` as
+above, also after a change. Each watched path owns its source: a file whose bytes another source
+already holds (another watched file or an upload) is linked to it without a duplicate, and when
+that file later changes it starts its own source; the other source is never changed by it. Links, junctions, hidden and
+system files, OneDrive files that are not on this computer (never downloaded by the scan), and
+`~$*`, `.~lock*`, `*.tmp`, `*.crdownload`, `*.part` are skipped. A source deleted by its owner
+is imported again only when the file content changes. Removing a watch folder and adding it again
+starts afresh: every file is imported again, also ones whose source was deleted.
+
+Non-meeting sources are available on the local engine. On an engine without source-import
+adapters the import, status, version and delete routes return `501` with error code
+`not_available_on_engine`. Source responses never expose `workspace_id`, `owner_id`, a full
+content hash or an original file name.
+
+Known limits of the local import in this version: a recording is transcribed in one call, so a
+cancel or delete during a long transcription takes effect only after that call returns (nothing
+is written from it); the engine refuses files above the import cap (200 MiB by default), long
+recordings included; a hardlink inside a watched folder is imported like any other file; deleted
+text can remain in the SQLite write-ahead log until a checkpoint succeeds; documents are not yet
+used by `POST /v1/query`, which answers from meetings only.
 
 ## Questions
 

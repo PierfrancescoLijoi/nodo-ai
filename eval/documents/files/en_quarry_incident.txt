@@ -1,0 +1,26 @@
+QUARRY SEARCH CLUSTER - INCIDENT REVIEW
+
+Fictional company: Brightmoor Analytics
+Incident date: 9 April 2026
+
+Summary
+For 47 minutes the Quarry search cluster answered every query with an empty result page. The
+Kestrel ingestion job had moved the live index alias to a new index that held no documents.
+
+Timeline
+09:12 Kestrel finished a reindex run and moved the alias.
+09:20 Customer support reported empty searches.
+09:59 Hamid Osei moved the alias back by hand and results returned.
+
+Root cause
+Kestrel moved the alias without checking how many documents the new index contained.
+
+Decisions
+The team decided that Kestrel must refuse to move an alias when the new index holds fewer than
+95 percent of the documents of the current one. Hamid Osei proposed this check.
+Alias moves are no longer scheduled at night; they run during working hours only.
+
+Actions
+Ruth Abernathy adds the document count check to Kestrel before 30 April 2026.
+Hamid Osei writes a runbook for rolling back an alias by hand.
+Leo Fairbank sets up an alert on the rate of empty result pages in Quarry.

@@ -1,7 +1,7 @@
-"""Routes that exist only in the local backend (ADR-014): the audio upload link and engine status.
+"""Local-engine routes (ADR-014), plus the source upload capability used by memory development.
 
-The upload route is not behind the bearer token: the link itself is the capability (random, one
-meeting, one use, short life), exactly like an Azure blob SAS link. The rest needs the token."""
+Upload routes are not behind the bearer token: each link is the capability (random, one object,
+one use, short life), exactly like an Azure blob SAS link. The rest needs the token."""
 
 from __future__ import annotations
 
@@ -17,9 +17,11 @@ from starlette.staticfiles import StaticFiles
 from nodo_api.adapters.local.blob import UploadRejected
 from nodo_api.api.v1.routes import PrincipalDep
 from nodo_api.api.v1.schemas import FrozenModel
-from nodo_api.errors import ValidationFailed
+from nodo_api.domain.source_files import UploadRejected as SourceUploadRejected
+from nodo_api.errors import NotAvailableOnEngine, ValidationFailed
 
 router = APIRouter(prefix="/v1/local")
+source_upload_router = APIRouter(prefix="/v1/local")
 
 
 class SyncStart(FrozenModel):
@@ -84,6 +86,27 @@ async def upload(token: str, request: Request) -> Response:
                 target.write(chunk)
     except UploadRejected as error:
         raise HTTPException(status_code=403) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@source_upload_router.put("/source-uploads/{token}", status_code=status.HTTP_204_NO_CONTENT)
+async def source_upload(token: str, request: Request) -> Response:
+    """The random one-use link is the credential; document bytes never need a bearer token."""
+    blobs = request.app.state.container.source_blobs
+    if blobs is None:
+        raise NotAvailableOnEngine
+    try:
+        with blobs.open_upload(token) as target:
+            async for chunk in request.stream():
+                target.write(chunk)
+    except SourceUploadRejected as error:
+        if error.code == "too_large":
+            raise HTTPException(status_code=413) from error
+        if error.code == "low_disk":
+            raise HTTPException(status_code=507) from error
+        if error.code == "size_mismatch":  # a short body: the link stays usable for a new try
+            raise HTTPException(status_code=400) from error
+        raise HTTPException(status_code=403) from error  # unknown, used, expired or revoked
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

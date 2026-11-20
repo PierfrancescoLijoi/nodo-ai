@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from nodo_api.adapters.azure.openai_extractor import (
+    MODEL_ENTITY_TYPES,
+    MODEL_RELATION_KINDS,
     AzureOpenAiExtractor,
     ExtractionError,
     parse_extraction,
@@ -92,3 +94,16 @@ def test_the_request_is_strict_and_the_transcript_cannot_close_its_own_tag() -> 
     user = sent["messages"][1]["content"]
     assert user.count("</transcript>") == 1  # only the real closing tag
     assert "(none)" in user
+
+
+def test_the_model_is_offered_the_meeting_vocabulary_only() -> None:
+    # Source nodes and CHILD_OF exist in the graph (ADR-029, ADR-030) but are not extracted yet.
+    assert MODEL_ENTITY_TYPES == ["person", "project", "system", "topic", "decision", "action"]
+    assert MODEL_RELATION_KINDS == [
+        "ABOUT",
+        "PROPOSED_BY",
+        "ASSIGNED_TO",
+        "DEPENDS_ON",
+        "SUPERSEDES",
+        "CONTRADICTS",
+    ]

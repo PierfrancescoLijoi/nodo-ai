@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 from uuid import uuid4
 
 from nodo_api.domain.exports import EXPORT_TTL_HOURS, Export, ExportState
-from nodo_api.domain.graph import EntityType, Subgraph
+from nodo_api.domain.graph import ORIGIN_TYPES, EntityType, Subgraph
 from nodo_api.domain.maintenance import MaintenanceMeeting, PendingJob
 from nodo_api.domain.models import (
     Answerability,
@@ -23,6 +23,7 @@ from nodo_api.domain.models import (
 )
 from nodo_api.domain.retention import AudioDue, audio_expires_at
 from nodo_api.errors import NotFoundError
+from nodo_api.worker import IMPORT_AGING_SECONDS, IMPORT_SOURCE
 
 
 class MemoryMeetingRepository:
@@ -68,6 +69,10 @@ class MemoryMeetingRepository:
         if meeting is None or meeting.tombstoned_at is not None:
             raise NotFoundError
         return meeting
+
+    def exists(self, workspace_id: str, meeting_id: str) -> bool:
+        """Whether the meeting is stored, tombstoned or not (the source store uses it)."""
+        return (workspace_id, meeting_id) in self._meetings
 
     def owned_ids(self, workspace_id: str, user_id: str) -> frozenset[str]:
         return frozenset(
@@ -199,12 +204,24 @@ class ScheduledJob:
     delay_seconds: int
 
 
+@dataclass(frozen=True, slots=True)
+class ClaimedJob:
+    workspace_id: str
+    job_key: str
+    job_type: str
+    delivery_count: int
+
+
 class MemoryJobQueue:
     def __init__(self) -> None:
         self._jobs: dict[tuple[str, str, str], str] = {}
         self.scheduled: list[ScheduledJob] = []
         self._created: dict[tuple[str, str, str], datetime] = {}
         self.unsent: list[tuple[PendingJob, datetime]] = []
+        self.cancelled: set[tuple[str, str, str]] = set()
+        self.claimed: dict[tuple[str, str, str], int] = {}  # key -> deliveries so far
+        self._last_was_import = False
+        self._released: set[tuple[str, str, str]] = set()
 
     def backdate(self, workspace_id: str, job_key: str, job_type: str, when: datetime) -> None:
         self._created[(workspace_id, job_key, job_type)] = when
@@ -245,6 +262,70 @@ class MemoryJobQueue:
 
     def publish_count(self, workspace_id: str, job_key: str, job_type: str) -> int:
         return int((workspace_id, job_key, job_type) in self._jobs)
+
+    def claim_next(self, now: datetime | None = None) -> ClaimedJob | None:
+        """The same priority rule as SqliteJobQueue.claim_next; publish order breaks ties."""
+        now = now or datetime.now(UTC)
+        aged = now - timedelta(seconds=IMPORT_AGING_SECONDS)
+        allow_aged = not self._last_was_import
+        ready = [
+            (seq, key)
+            for seq, key in enumerate(self._jobs)
+            if key not in self.cancelled and key not in self.claimed and self._created[key] <= now
+        ]
+        ready += [
+            (seq, key)
+            for seq, key in enumerate(self._jobs)
+            if key in self._released and key not in self.cancelled
+        ]
+        if not ready:
+            return None
+
+        def rank(item: tuple[int, tuple[str, str, str]]) -> tuple:
+            seq, key = item
+            waiting = key[2] == IMPORT_SOURCE and not (allow_aged and self._created[key] <= aged)
+            return (waiting, self._created[key], seq)
+
+        _, key = min(ready, key=rank)
+        if key in self._released:  # put back by a graceful stop: same delivery again
+            self._released.discard(key)
+        else:
+            self.claimed[key] = self.claimed.get(key, 0) + 1
+        self._last_was_import = key[2] == IMPORT_SOURCE
+        return ClaimedJob(*key, self.claimed[key])
+
+    def release_claim(self, job: ClaimedJob) -> bool:
+        """The graceful-stop release of SqliteJobQueue: only this claim, delivery refunded."""
+        key = (job.workspace_id, job.job_key, job.job_type)
+        if self.claimed.get(key) != job.delivery_count or key in self._released:
+            return False
+        self._released.add(key)
+        return True
+
+    def release_claims(self) -> int:
+        return 0  # claims live in this process: no earlier engine can have left one behind
+
+    def cancel(self, workspace_id: str, job_key: str, job_type: str) -> bool:
+        key = (workspace_id, job_key, job_type)
+        running = key in self.claimed and key not in self._released
+        if key not in self._jobs or key in self.cancelled or running:
+            return False
+        self._released.discard(key)
+        self.cancelled.add(key)
+        return True
+
+    def discard(self, workspace_id: str, job_type: str, key_prefix: str) -> int:
+        gone = [
+            k
+            for k in self._jobs
+            if (k[0], k[2]) == (workspace_id, job_type) and k[1].startswith(key_prefix)
+        ]
+        for key in gone:
+            for table in (self._jobs, self._created, self.claimed):
+                table.pop(key, None)
+            self.cancelled.discard(key)
+            self._released.discard(key)
+        return len(gone)
 
 
 class MockRetriever:
@@ -412,9 +493,16 @@ class MemoryAuditLog:
     def __init__(self) -> None:
         self._events: dict[tuple[str, str], tuple[str, dict[str, str]]] = {}
 
-    def append(self, workspace_id: str, event_type: str, metadata: dict[str, str]) -> str:
-        event_id = str(uuid4())
-        self._events[(workspace_id, event_id)] = (event_type, dict(metadata))
+    def append(
+        self,
+        workspace_id: str,
+        event_type: str,
+        metadata: dict[str, str],
+        *,
+        event_id: str | None = None,
+    ) -> str:
+        event_id = event_id or str(uuid4())
+        self._events.setdefault((workspace_id, event_id), (event_type, dict(metadata)))
         return event_id
 
 
@@ -447,9 +535,7 @@ class MockLlm:
             )
             for item in evidence[:3]
         )
-        entities = tuple(
-            dict.fromkeys(n.label for n in graph.nodes if n.type is not EntityType.MEETING)
-        )
+        entities = tuple(dict.fromkeys(n.label for n in graph.nodes if n.type not in ORIGIN_TYPES))
         return GeneratedAnswer(
             self.localized_answer(locale), Answerability.SUPPORTED, citations, entities
         )

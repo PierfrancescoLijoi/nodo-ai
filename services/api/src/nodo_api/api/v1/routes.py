@@ -21,8 +21,13 @@ from nodo_api.api.v1.mapping import (
     decode_cursor,
     edge_output,
     encode_cursor,
+    fragment_output,
+    import_output,
     list_item,
     meeting_output,
+    section_output,
+    source_output,
+    source_version_output,
     subgraph_output,
 )
 from nodo_api.api.v1.schemas import (
@@ -31,25 +36,44 @@ from nodo_api.api.v1.schemas import (
     ExportInput,
     ExportOutput,
     GraphEdgeOutput,
+    ImportStatusOutput,
     MeetingCreate,
     MeetingList,
     MeetingOutput,
+    ProcessingConfirmation,
     QueryFiltersInput,
     QueryInput,
     QueryOutput,
     ReviewInput,
     ReviewOutput,
     ReviewRelationInput,
+    SourceCreate,
+    SourceCreateOutput,
+    SourceFragments,
+    SourceList,
+    SourceOutline,
+    SourceOutput,
+    SourceVersionList,
     SpeakerNameInput,
     SubgraphOutput,
     TranscriptPage,
     UploadSessionOutput,
     VoiceQueryInput,
+    WatchFolderCreate,
+    WatchFolderList,
+    WatchFolderOutput,
 )
 from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
-from nodo_api.errors import AuthenticationError, ValidationFailed
+from nodo_api.domain.source_files import UploadRejected
+from nodo_api.domain.sources import SourceKind
+from nodo_api.errors import (
+    AuthenticationError,
+    NotAvailableOnEngine,
+    NotFoundError,
+    ValidationFailed,
+)
 from nodo_api.services.query import QueryFilters, QueryRequest
 from nodo_api.telemetry import pseudonym
 
@@ -132,6 +156,259 @@ def list_meetings(
     return MeetingList(
         items=tuple(list_item(m, digests.get(m.id)) for m in items),
         next_cursor=encode_cursor(items[-1]) if has_more and items else None,
+    )
+
+
+def _source_stores(container):
+    if container.sources is None or container.fragments is None:
+        raise NotAvailableOnEngine
+    return container.sources, container.fragments
+
+
+def _source_import(container):
+    if container.source_import is None:
+        raise NotAvailableOnEngine
+    return container.source_import
+
+
+def _source_delete(container):
+    _source_import(container)
+    if container.source_service is None:
+        raise NotAvailableOnEngine
+    return container.source_service
+
+
+@router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)
+def create_source(
+    payload: SourceCreate,
+    actor: PrincipalDep,
+    request: Request,
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+    ],
+):
+    container = request.app.state.container
+    service = _source_import(container)
+    try:
+        source, session = service.create(
+            actor.workspace_id,
+            actor.user_id,
+            filename=payload.filename,
+            size_bytes=payload.size_bytes,
+            kind=payload.kind,
+            origin_note=payload.origin_note,
+            idempotency_key=idempotency_key,
+        )
+    except UploadRejected as error:
+        if error.code == "too_large":
+            raise HTTPException(status_code=413) from error
+        if error.code == "low_disk":
+            raise HTTPException(status_code=507) from error
+        raise HTTPException(status_code=409) from error
+    return SourceCreateOutput(
+        source=source_output(source),
+        upload_url=f"/v1/local/source-uploads/{session.token}",
+        expires_in_seconds=container.settings.upload_session_seconds,
+    )
+
+
+@router.get("/sources", response_model=SourceList)
+def list_sources(
+    actor: PrincipalDep,
+    request: Request,
+    kind: SourceKind | None = None,
+    state: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    q: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+):
+    sources, _ = _source_stores(request.app.state.container)
+    kinds = None if kind is None else frozenset({kind})
+    page = sources.list_owned(
+        actor.workspace_id,
+        actor.user_id,
+        limit + 1,
+        decode_cursor(cursor),
+        kinds,
+        state,
+        q,
+    )
+    items, has_more = page[:limit], len(page) > limit
+    return SourceList(
+        items=tuple(source_output(item) for item in items),
+        next_cursor=encode_cursor(items[-1]) if has_more and items else None,
+    )
+
+
+def _folder_watcher(container):
+    if getattr(container, "folder_watcher", None) is None:
+        raise NotAvailableOnEngine
+    return container.folder_watcher
+
+
+def _watch_folder_output(folder) -> WatchFolderOutput:
+    return WatchFolderOutput(
+        id=folder.id, path=folder.path, enabled=folder.enabled, created_at=folder.created_at
+    )
+
+
+# Before /sources/{source_id}: these paths would otherwise be read as a source id.
+@router.get("/sources/watch-folders", response_model=WatchFolderList)
+def list_watch_folders(actor: PrincipalDep, request: Request):
+    watcher = _folder_watcher(request.app.state.container)
+    folders = watcher.list_folders(actor.workspace_id, actor.user_id)
+    return WatchFolderList(items=tuple(_watch_folder_output(f) for f in folders))
+
+
+@router.post(
+    "/sources/watch-folders",
+    response_model=WatchFolderOutput,
+    status_code=status.HTTP_201_CREATED,
+    description="Watch a folder on this computer: supported files in it (down to five folder "
+    "levels) are imported once they stop changing, a changed file becomes a new version, and "
+    "recordings wait for a processing confirmation. 422 for a relative path, a missing folder, a "
+    "network share, a link or a folder that overlaps the NODO data folder; 409 when it is "
+    "watched already.",
+)
+def add_watch_folder(payload: WatchFolderCreate, actor: PrincipalDep, request: Request):
+    watcher = _folder_watcher(request.app.state.container)
+    folder = watcher.add_folder(actor.workspace_id, actor.user_id, payload.path)
+    return _watch_folder_output(folder)
+
+
+@router.delete(
+    "/sources/watch-folders/{folder_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    description="Stop watching. Sources already imported from the folder stay.",
+)
+def delete_watch_folder(folder_id: str, actor: PrincipalDep, request: Request) -> Response:
+    watcher = _folder_watcher(request.app.state.container)
+    watcher.delete_folder(actor.workspace_id, actor.user_id, folder_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+SLOW_ON_THIS_MACHINE = "slow_on_this_machine"
+
+
+def _import_status(job, container, *, requested_source_id: str | None = None) -> ImportStatusOutput:
+    unchanged = requested_source_id is not None and job.source_id != requested_source_id
+    settings = container.settings
+    slow = settings.backend == "local" and settings.local_import_slow_notice
+    return ImportStatusOutput(
+        **{
+            "import": import_output(
+                job,
+                unchanged=unchanged,
+                existing_source_id=job.source_id if unchanged else None,
+                warnings=(SLOW_ON_THIS_MACHINE,) if slow else (),
+            )
+        }
+    )
+
+
+@router.post(
+    "/sources/{source_id}/complete",
+    response_model=ImportStatusOutput,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def complete_source(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    job = _source_import(container).complete(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container, requested_source_id=source_id)
+
+
+@router.get("/sources/{source_id}/import", response_model=ImportStatusOutput)
+def source_import_status(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    _source_import(container)
+    job = container.imports.get_owned(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
+
+
+@router.post(
+    "/sources/{source_id}/cancel",
+    response_model=ImportStatusOutput,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def cancel_source_import(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    job = _source_import(container).cancel(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
+
+
+@router.post(
+    "/sources/{source_id}/retry",
+    response_model=ImportStatusOutput,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_source_import(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    job = _source_import(container).retry(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
+
+
+@router.post(
+    "/sources/{source_id}/confirm-processing",
+    response_model=ImportStatusOutput,
+    status_code=status.HTTP_202_ACCEPTED,
+    description="Imported audio or video waits in awaiting_confirmation until its owner confirms "
+    '"I may process this recording". The confirmation is audited (kind only) and starts the '
+    "transcription. A second call answers the current state; a cancelled, failed or deleted "
+    "import, or a document, is refused. 409 original_missing once the original was erased.",
+)
+def confirm_source_processing(
+    source_id: str, payload: ProcessingConfirmation, actor: PrincipalDep, request: Request
+):
+    container = request.app.state.container
+    job = _source_import(container).confirm(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
+
+
+@router.get("/sources/{source_id}/versions", response_model=SourceVersionList)
+def source_versions(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    _source_import(container)
+    source = container.sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    if source.kind is SourceKind.MEETING:
+        raise NotFoundError  # like complete, import, cancel and retry: not an imported source
+    versions = container.fragments.versions(actor.workspace_id, actor.user_id, source_id)
+    return SourceVersionList(items=tuple(source_version_output(item) for item in versions))
+
+
+@router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_source(source_id: str, actor: PrincipalDep, request: Request) -> Response:
+    _source_delete(request.app.state.container).delete(actor.workspace_id, actor.user_id, source_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/sources/{source_id}", response_model=SourceOutput)
+def get_source(source_id: str, actor: PrincipalDep, request: Request):
+    sources, _ = _source_stores(request.app.state.container)
+    source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    return source_output(source)
+
+
+@router.get("/sources/{source_id}/outline", response_model=SourceOutline)
+def get_source_outline(source_id: str, actor: PrincipalDep, request: Request):
+    sources, fragments = _source_stores(request.app.state.container)
+    sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    return SourceOutline(
+        sections=tuple(
+            section_output(item) for item in fragments.outline(actor.workspace_id, source_id)
+        )
+    )
+
+
+@router.get("/sources/{source_id}/fragments", response_model=SourceFragments)
+def get_source_fragments(source_id: str, actor: PrincipalDep, request: Request):
+    sources, fragments = _source_stores(request.app.state.container)
+    source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    latest = fragments.latest(actor.workspace_id, source_id)
+    # A meeting is versioned by its transcript, not by the sources row.
+    return SourceFragments(
+        version=latest[0].version if latest else source.version,
+        fragments=tuple(fragment_output(item) for item in latest),
     )
 
 
@@ -235,6 +512,7 @@ def graph_subgraph(
         include_proposed=include_proposed,
         as_of=as_of,
         limit=limit,
+        meetings_only=True,  # /v1 is the frozen clients' view
     )
     return subgraph_output(graph, depth)
 
@@ -247,7 +525,7 @@ def graph_reviews(
 ):
     """The inbox: relations the model proposed that nobody has decided yet (ADR-025)."""
     graph = request.app.state.container.graph_service.reviews(
-        actor.workspace_id, actor.user_id, limit
+        actor.workspace_id, actor.user_id, limit, meetings_only=True
     )
     return subgraph_output(graph, 1)
 
@@ -257,7 +535,11 @@ def review_relation(
     relation_id: str, payload: ReviewRelationInput, actor: PrincipalDep, request: Request
 ):
     relation = request.app.state.container.graph_service.review(
-        actor.workspace_id, actor.user_id, relation_id, ReviewStatus(payload.status)
+        actor.workspace_id,
+        actor.user_id,
+        relation_id,
+        ReviewStatus(payload.status),
+        meetings_only=True,  # a relation /v1 never shows answers 404, before any write
     )
     return edge_output(relation)
 
@@ -269,7 +551,7 @@ def graph_changes(
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ):
     changes = request.app.state.container.graph_service.changes(
-        actor.workspace_id, actor.user_id, limit
+        actor.workspace_id, actor.user_id, limit, meetings_only=True
     )
     return ChangesOutput(
         items=tuple(

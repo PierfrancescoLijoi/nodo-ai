@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from nodo_api.domain.answer_cache import CachedAnswer
-from nodo_api.domain.graph import EntityType, Subgraph
+from nodo_api.domain.graph import ORIGIN_TYPES, Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
 from nodo_api.errors import NotFoundError
 from nodo_api.ports import GraphStore, LlmClient, MeetingRepository, Retriever, TranscriptRepository
@@ -75,10 +75,10 @@ def entity_support(graph: Subgraph) -> dict[str, frozenset[tuple[str, str]]]:
     nodes = {n.id: n for n in graph.nodes}
     support: dict[str, set[tuple[str, str]]] = {}
     for edge in graph.edges:
-        evidence = {(e.meeting_id, e.segment_id) for e in edge.evidence}
+        evidence = {(e.source_id, e.fragment_id) for e in edge.evidence}
         for node_id in (edge.source_id, edge.target_id):
             node = nodes.get(node_id)
-            if node is not None and node.type is not EntityType.MEETING:
+            if node is not None and node.type not in ORIGIN_TYPES:
                 support.setdefault(node.label, set()).update(evidence)
     return {label: frozenset(keys) for label, keys in support.items()}
 
@@ -293,7 +293,12 @@ class QueryService:
         terms = tuple(dict.fromkeys(w for w in _WORD.findall(question.lower()) if len(w) >= 3))[
             :MAX_TERMS
         ]
-        seeds = list(self._graph.find_entities(workspace_id, user_id, terms, SEED_ENTITIES))
+        # Answers read meetings only: documents reach them through later routes, not this one.
+        seeds = list(
+            self._graph.find_entities(
+                workspace_id, user_id, terms, SEED_ENTITIES, meetings_only=True
+            )
+        )
         if self._entities is not None:
             # Entities the question means in other words or another language join the ones it names.
             known = {e.id for e in seeds}
@@ -313,4 +318,5 @@ class QueryService:
             fanout=GRAPH_FANOUT,
             include_proposed=False,
             as_of=None,
+            meetings_only=True,
         )

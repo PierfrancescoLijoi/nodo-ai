@@ -3,8 +3,10 @@ same contract tests run against this class and against PostgreSQL (tests/graph_c
 
 from __future__ import annotations
 
+import copy
 import itertools
 import math
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -12,6 +14,7 @@ from datetime import UTC, datetime
 from nodo_api.domain.graph import (
     AUTO_APPROVED,
     EXISTING_PREFIX,
+    ORIGIN_TYPES,
     Change,
     Entity,
     EntityType,
@@ -23,12 +26,15 @@ from nodo_api.domain.graph import (
     Relation,
     RelationKind,
     ReviewStatus,
+    SourceRef,
     Subgraph,
     entity_id,
     meeting_entity_id,
     normalize_label,
     relation_id,
+    source_entity_id,
 )
+from nodo_api.domain.sources import SourceKind
 from nodo_api.errors import NotFoundError
 
 Key = tuple[str, str]  # (workspace_id, owner_id)
@@ -53,6 +59,7 @@ class MemoryGraphStore:
     def __init__(self) -> None:
         self._parts: dict[Key, _Partition] = {}
         self._clock = itertools.count(1)
+        self._lock = threading.RLock()  # writes are serialised, as SQLite's write lock does
 
     def _part(self, workspace_id: str, owner_id: str) -> _Partition:
         return self._parts.setdefault((workspace_id, owner_id), _Partition())
@@ -62,23 +69,64 @@ class MemoryGraphStore:
     def upsert_extraction(
         self, workspace_id: str, owner_id: str, meeting: MeetingRef, extraction: Extraction
     ) -> GraphWriteResult:
-        part = self._part(workspace_id, owner_id)
-        self._drop_meeting_evidence(part, meeting.id)
-
-        meeting_node = meeting_entity_id(workspace_id, owner_id, meeting.id)
-        self._put_entity(
-            part,
-            Entity(
-                meeting_node,
-                EntityType.MEETING,
-                meeting.title,
-                None,
-                meeting.created_at,
-                None,
-                meeting.id,
-            ),
+        node = Entity(
+            meeting_entity_id(workspace_id, owner_id, meeting.id),
+            EntityType.MEETING,
+            meeting.title,
+            None,
+            meeting.created_at,
+            None,
             meeting.id,
         )
+        with self._lock:
+            part = self._part(workspace_id, owner_id)
+            self._drop_meeting_evidence(part, meeting.id)
+            self._write(part, workspace_id, owner_id, node, meeting.id, extraction)
+            mine = sum(
+                1
+                for r in part.relations.values()
+                if any(e.source_id == meeting.id for e in r.relation.evidence)
+            )
+        return GraphWriteResult(len(extraction.entities) + 1, mine)
+
+    def replace_source_evidence(
+        self,
+        workspace_id: str,
+        user_id: str,
+        source: SourceRef,
+        extraction: Extraction,
+        *,
+        dropped_fragment_ids: frozenset[str] | None = None,
+    ) -> None:
+        if source.kind is SourceKind.MEETING:
+            raise ValueError("A meeting is written with upsert_extraction")
+        node = Entity(
+            source_entity_id(workspace_id, user_id, source.id),
+            EntityType.SOURCE,
+            source.label,
+            None,
+            source.created_at,
+            source_id=source.id,
+        )
+        with self._lock:
+            # Work on a copy and swap it in at the end: a failure half way keeps the old graph.
+            part = copy.deepcopy(self._part(workspace_id, user_id))
+            self._drop_meeting_evidence(part, source.id, dropped_fragment_ids)
+            self._write(part, workspace_id, user_id, node, source.id, extraction)
+            self._parts[(workspace_id, user_id)] = part
+
+    def _write(
+        self,
+        part: _Partition,
+        workspace_id: str,
+        owner_id: str,
+        node: Entity,
+        origin_id: str,
+        extraction: Extraction,
+    ) -> None:
+        refresh = node.type is EntityType.MEETING
+        self._put_entity(part, node, origin_id, refresh)
+        created_at = node.effective_at
         ids: dict[str, str] = {}
         for item in extraction.entities:
             normalized = normalize_label(item.label)
@@ -89,10 +137,13 @@ class MemoryGraphStore:
             if item.type is EntityType.DECISION and status is None:
                 status = "active"
             effective = item.effective_at or (
-                meeting.created_at if item.type is EntityType.DECISION else None
+                created_at if item.type is EntityType.DECISION else None
             )
             self._put_entity(
-                part, Entity(eid, item.type, item.label, status, effective, item.due_at), normalized
+                part,
+                Entity(eid, item.type, item.label, status, effective, item.due_at),
+                normalized,
+                refresh,
             )
         for key, eid in list(ids.items()):
             self._add_relation(
@@ -101,9 +152,9 @@ class MemoryGraphStore:
                 owner_id,
                 eid,
                 RelationKind.MENTIONED_IN,
-                meeting_node,
+                node.id,
                 1.0,
-                self._evidence(meeting.id, _by_key(extraction, key).evidence),
+                self._evidence(origin_id, _by_key(extraction, key).evidence),
             )
             if part.entities[eid].type is EntityType.DECISION:
                 self._add_relation(
@@ -112,9 +163,9 @@ class MemoryGraphStore:
                     owner_id,
                     eid,
                     RelationKind.DECIDED_IN,
-                    meeting_node,
+                    node.id,
                     1.0,
-                    self._evidence(meeting.id, _by_key(extraction, key).evidence),
+                    self._evidence(origin_id, _by_key(extraction, key).evidence),
                 )
         for rel in extraction.relations:
             source, target = (
@@ -131,7 +182,7 @@ class MemoryGraphStore:
                 rel.kind,
                 target,
                 rel.confidence,
-                self._evidence(meeting.id, rel.evidence),
+                self._evidence(origin_id, rel.evidence),
             )
         self._sweep(part)
         self._restore_supersession(part)
@@ -141,12 +192,6 @@ class MemoryGraphStore:
                 and row.relation.status is ReviewStatus.APPROVED
             ):
                 self._set_superseded(part, row.relation.target_id, True)
-        mine = sum(
-            1
-            for r in part.relations.values()
-            if any(e.meeting_id == meeting.id for e in r.relation.evidence)
-        )
-        return GraphWriteResult(len(extraction.entities) + 1, mine)
 
     @staticmethod
     def _evidence(meeting_id: str, segment_ids: Sequence[str]) -> tuple[Evidence, ...]:
@@ -159,10 +204,23 @@ class MemoryGraphStore:
             return eid if eid in part.entities else None
         return ids.get(key)
 
-    def _put_entity(self, part: _Partition, entity: Entity, normalized: str) -> None:
+    def _put_entity(
+        self, part: _Partition, entity: Entity, normalized: str, refresh: bool = True
+    ) -> None:
+        """Insert or merge, as SQLite does: an existing entity keeps its label, status and
+        effective date, and only a meeting write (`refresh`) moves its recency."""
+        existing = part.entities.get(entity.id)
+        if existing is not None:
+            entity = replace(
+                existing,
+                status=existing.status or entity.status,
+                effective_at=existing.effective_at or entity.effective_at,
+                due_at=entity.due_at or existing.due_at,
+            )
         part.entities[entity.id] = entity
-        part.normalized[entity.id] = normalized
-        part.touched[entity.id] = next(self._clock)
+        part.normalized.setdefault(entity.id, normalized)
+        if existing is None or refresh:
+            part.touched[entity.id] = next(self._clock)
 
     def _add_relation(
         self, part, workspace_id, owner_id, source, kind, target, confidence, evidence
@@ -179,18 +237,27 @@ class MemoryGraphStore:
             row.relation, confidence=max(row.relation.confidence, confidence), evidence=merged
         )
 
-    def _drop_meeting_evidence(self, part: _Partition, meeting_id: str) -> None:
+    def _drop_meeting_evidence(
+        self, part: _Partition, meeting_id: str, fragment_ids: frozenset[str] | None = None
+    ) -> None:
+        """Drop the source's evidence (only the listed fragments when given)."""
         for row in part.relations.values():
-            kept = tuple(e for e in row.relation.evidence if e.meeting_id != meeting_id)
+            kept = tuple(
+                e
+                for e in row.relation.evidence
+                if e.source_id != meeting_id
+                or (fragment_ids is not None and e.fragment_id not in fragment_ids)
+            )
             if len(kept) != len(row.relation.evidence):
                 row.relation = replace(row.relation, evidence=kept)
 
     def _sweep(self, part: _Partition) -> None:
         """Remove what has lost its support, until nothing more falls.
 
-        A relation needs evidence. An entity needs a mention in a meeting (a meeting node needs any
-        relation). An entity nobody mentions any more disappears together with the relations that
-        pointed at it, so deleting a meeting also deletes the labels it contributed.
+        A relation needs evidence. An entity needs a mention in a meeting or source (a meeting or
+        source node needs any relation). An entity nobody mentions any more disappears together
+        with the relations that pointed at it, so deleting a meeting also deletes the labels it
+        contributed.
         """
         changed = True
         while changed:
@@ -207,7 +274,7 @@ class MemoryGraphStore:
             touched = {r.relation.source_id for r in part.relations.values()}
             touched |= {r.relation.target_id for r in part.relations.values()}
             for eid, entity in list(part.entities.items()):
-                alive = eid in touched if entity.type is EntityType.MEETING else eid in mentioned
+                alive = eid in touched if entity.type in ORIGIN_TYPES else eid in mentioned
                 if not alive:
                     del part.entities[eid]
                     part.normalized.pop(eid, None)
@@ -242,13 +309,21 @@ class MemoryGraphStore:
             ):
                 part.entities[eid] = replace(entity, status="active")
 
-    def pending_review(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+    def pending_review(
+        self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
+    ) -> Subgraph:
         part = self._parts.get((workspace_id, owner_id))
         if part is None:
             return Subgraph()
-        waiting = [r for r in part.relations.values() if r.relation.status is ReviewStatus.PROPOSED]
-        waiting.sort(key=lambda r: (-r.seq, r.relation.id))
-        chosen = [r.relation for r in waiting[:limit]]
+        view = _View(part) if meetings_only else None
+        waiting = [
+            (r.seq, shown)
+            for r in part.relations.values()
+            if r.relation.status is ReviewStatus.PROPOSED
+            and (shown := _show(view, r.relation)) is not None
+        ]
+        waiting.sort(key=lambda pair: (-pair[0], pair[1].id))
+        chosen = [rel for _, rel in waiting[:limit]]
         ids = list(dict.fromkeys(i for r in chosen for i in (r.source_id, r.target_id)))
         nodes = tuple(part.entities[i] for i in ids if i in part.entities)
         return Subgraph(nodes, tuple(chosen), len(waiting) > limit)
@@ -262,7 +337,7 @@ class MemoryGraphStore:
         missing = [
             e
             for e in part.entities.values()
-            if e.type is not EntityType.MEETING
+            if e.type not in ORIGIN_TYPES
             and (
                 e.id not in part.vectors
                 or (dimensions is not None and len(part.vectors[e.id]) != dimensions)
@@ -273,12 +348,13 @@ class MemoryGraphStore:
     def put_entity_vectors(
         self, workspace_id: str, owner_id: str, vectors: Mapping[str, Sequence[float]]
     ) -> None:
-        part = self._parts.get((workspace_id, owner_id))
-        if part is None:
-            return
-        for key, vector in vectors.items():
-            if key in part.entities:
-                part.vectors[key] = [float(x) for x in vector]
+        with self._lock:
+            part = self._parts.get((workspace_id, owner_id))
+            if part is None:
+                return
+            for key, vector in vectors.items():
+                if key in part.entities:
+                    part.vectors[key] = [float(x) for x in vector]
 
     def similar_entities(
         self,
@@ -296,7 +372,7 @@ class MemoryGraphStore:
         scored = []
         for key, stored in part.vectors.items():
             entity = part.entities.get(key)
-            if entity is None or entity.type is EntityType.MEETING or len(stored) != len(query):
+            if entity is None or entity.type in ORIGIN_TYPES or len(stored) != len(query):
                 continue
             other = math.sqrt(sum(x * x for x in stored)) or 1.0
             cosine = sum(a * b for a, b in zip(query, stored, strict=True)) / (norm * other)
@@ -312,27 +388,49 @@ class MemoryGraphStore:
         if part is None:
             return frozenset()
         return frozenset(
-            e.segment_id
+            e.fragment_id
             for row in part.relations.values()
             for e in row.relation.evidence
-            if e.meeting_id == meeting_id
+            if e.source_id == meeting_id
         )
 
     def erase(self, workspace_id: str, meeting_id: str) -> None:
-        for (ws, _), part in self._parts.items():
-            if ws != workspace_id:
-                continue
-            self._drop_meeting_evidence(part, meeting_id)
-            self._sweep(part)
-            self._restore_supersession(part)
+        with self._lock:
+            for (ws, _), part in self._parts.items():
+                if ws != workspace_id:
+                    continue
+                self._drop_meeting_evidence(part, meeting_id)
+                self._sweep(part)
+                self._restore_supersession(part)
 
     def review_relation(
-        self, workspace_id: str, owner_id: str, relation_id_: str, status: ReviewStatus
+        self,
+        workspace_id: str,
+        owner_id: str,
+        relation_id_: str,
+        status: ReviewStatus,
+        *,
+        meetings_only: bool = False,
+    ) -> Relation:
+        with self._lock:
+            reviewed = self._review(workspace_id, owner_id, relation_id_, status, meetings_only)
+            view = _View(self._part(workspace_id, owner_id)) if meetings_only else None
+            return _show(view, reviewed) or reviewed
+
+    def _review(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        relation_id_: str,
+        status: ReviewStatus,
+        meetings_only: bool = False,
     ) -> Relation:
         part = self._part(workspace_id, owner_id)
         row = part.relations.get(relation_id_)
         if row is None or status is ReviewStatus.PROPOSED:
             raise NotFoundError if row is None else ValueError("A review is approved or rejected")
+        if meetings_only and _show(_View(part), row.relation) is None:
+            raise NotFoundError  # hidden from that view: nothing is written
         row.relation = replace(row.relation, status=status)
         if row.relation.kind is RelationKind.SUPERSEDES:
             now = datetime.now(UTC)
@@ -352,22 +450,34 @@ class MemoryGraphStore:
         terms: Sequence[str],
         limit: int,
         types: frozenset[EntityType] | None = None,
+        *,
+        meetings_only: bool = False,
     ) -> tuple[Entity, ...]:
         part = self._part(workspace_id, owner_id)
+        view = _View(part) if meetings_only else None
         wanted = [t for t in (normalize_label(x) for x in terms) if len(t) >= 3]
         scored = []
         for eid, entity in part.entities.items():
-            if entity.type is EntityType.MEETING or (types and entity.type not in types):
+            if entity.type in ORIGIN_TYPES or (types and entity.type not in types):
+                continue
+            if view is not None and eid not in view.entities:
                 continue
             score = sum(1 for t in wanted if t in part.normalized[eid])
             if score:
                 scored.append((-score, -part.touched[eid], eid, entity))
         return tuple(e for *_, e in sorted(scored, key=lambda x: x[:3]))[:limit]
 
-    def overview(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Entity, ...]:
+    def overview(
+        self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
+    ) -> tuple[Entity, ...]:
         part = self._part(workspace_id, owner_id)
+        view = _View(part) if meetings_only else None
         ordered = sorted(
-            (e for e in part.entities.values() if e.type is not EntityType.MEETING),
+            (
+                e
+                for e in part.entities.values()
+                if e.type not in ORIGIN_TYPES and (view is None or e.id in view.entities)
+            ),
             key=lambda e: (-part.touched[e.id], e.id),
         )
         return tuple(ordered[:limit])
@@ -389,21 +499,24 @@ class MemoryGraphStore:
         fanout: int,
         include_proposed: bool,
         as_of: datetime | None,
+        meetings_only: bool = False,
     ) -> Subgraph:
         part = self._part(workspace_id, owner_id)
+        view = _View(part) if meetings_only else None
+        shown = part.entities.keys() if view is None else view.entities
         moment = as_of or datetime.now(UTC)
         allowed = {ReviewStatus.APPROVED} | ({ReviewStatus.PROPOSED} if include_proposed else set())
-        order = [s for s in dict.fromkeys(seed_ids) if s in part.entities][:node_limit]
+        order = [s for s in dict.fromkeys(seed_ids) if s in shown][:node_limit]
         seen = set(order)
         frontier, collected, truncated = (
             list(order),
             {},
-            len(order) < len(set(seed_ids) & set(part.entities)),
+            len(order) < len(set(seed_ids) & set(shown)),
         )
         for _ in range(depth):
             nxt: list[str] = []
             for node in frontier:
-                incident = self._incident(part, node, allowed, moment)
+                incident = self._incident(part, node, allowed, moment, view)
                 if len(incident) > fanout:
                     truncated = True
                 for rel in incident[:fanout]:
@@ -422,11 +535,15 @@ class MemoryGraphStore:
         return Subgraph(tuple(part.entities[i] for i in order), edges, truncated)
 
     @staticmethod
-    def _incident(part: _Partition, node: str, allowed, moment: datetime) -> list[Relation]:
+    def _incident(
+        part: _Partition, node: str, allowed, moment: datetime, view: _View | None
+    ) -> list[Relation]:
         found = []
         for row in part.relations.values():
-            rel = row.relation
-            if node not in (rel.source_id, rel.target_id) or rel.status not in allowed:
+            rel = _show(view, row.relation)
+            if rel is None or node not in (rel.source_id, rel.target_id):
+                continue
+            if rel.status not in allowed:
                 continue
             if (rel.valid_from and rel.valid_from > moment) or (
                 rel.valid_to and rel.valid_to <= moment
@@ -489,23 +606,53 @@ class MemoryGraphStore:
                 statuses[rel.source_id] = rel.status.value
         return owners, statuses
 
-    def recent_changes(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Change, ...]:
+    def recent_changes(
+        self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
+    ) -> tuple[Change, ...]:
         part = self._part(workspace_id, owner_id)
+        view = _View(part) if meetings_only else None
         rows = [
-            r
+            (r.seq, rel)
             for r in part.relations.values()
             if r.relation.kind is RelationKind.SUPERSEDES
             and r.relation.status is not ReviewStatus.REJECTED
+            and (rel := _show(view, r.relation)) is not None
         ]
-        rows.sort(key=lambda r: -r.seq)
+        rows.sort(key=lambda pair: -pair[0])
         changes = []
-        for row in rows[:limit]:
-            rel = row.relation
+        for _, rel in rows[:limit]:
             new, old = part.entities.get(rel.source_id), part.entities.get(rel.target_id)
             if new and old:
-                meeting = rel.evidence[0].meeting_id if rel.evidence else None
+                meeting = rel.evidence[0].source_id if rel.evidence else None
                 changes.append(Change(rel.id, new.label, old.label, meeting, new.effective_at))
         return tuple(changes)
+
+
+class _View:
+    """The meetings-only view (/v1, frozen clients): the meeting ids, and the entities a meeting
+    mentions plus the meeting nodes. See SqliteGraphStore for the same rule in SQL."""
+
+    def __init__(self, part: _Partition) -> None:
+        nodes = {i for i, e in part.entities.items() if e.type is EntityType.MEETING}
+        self.meetings = {part.entities[i].meeting_id for i in nodes}
+        self.entities = nodes | {
+            r.relation.source_id
+            for r in part.relations.values()
+            if r.relation.kind is RelationKind.MENTIONED_IN
+            and r.relation.status is not ReviewStatus.REJECTED
+            and r.relation.target_id in nodes
+        }
+
+
+def _show(view: _View | None, rel: Relation) -> Relation | None:
+    """The relation as the view shows it: only meeting evidence, or None when no meeting backs it
+    or it is a hierarchy edge."""
+    if view is None:
+        return rel
+    evidence = tuple(e for e in rel.evidence if e.source_id in view.meetings)
+    if rel.kind is RelationKind.CHILD_OF or not evidence:
+        return None
+    return replace(rel, evidence=evidence)
 
 
 def _sorted(group: dict[str, Entity] | None) -> tuple[Entity, ...]:

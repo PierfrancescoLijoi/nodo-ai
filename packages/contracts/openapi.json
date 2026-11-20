@@ -286,6 +286,71 @@
         "title": "ExportOutput",
         "type": "object"
       },
+      "FragmentOutput": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "locator": {
+            "additionalProperties": true,
+            "title": "Locator",
+            "type": "object"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "speaker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker Id"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_id",
+          "ordinal",
+          "text",
+          "locator",
+          "speaker_id",
+          "confidence"
+        ],
+        "title": "FragmentOutput",
+        "type": "object"
+      },
       "GraphEdgeOutput": {
         "properties": {
           "confidence": {
@@ -440,6 +505,104 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImportOutput": {
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "existing_source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Existing Source Id"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "parsing",
+              "indexing",
+              "extracting",
+              "ready",
+              "failed",
+              "cancelled",
+              "awaiting_confirmation"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unchanged": {
+            "default": false,
+            "title": "Unchanged",
+            "type": "boolean"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "state",
+          "step",
+          "done",
+          "total",
+          "attempt",
+          "error_code"
+        ],
+        "title": "ImportOutput",
+        "type": "object"
+      },
+      "ImportStatusOutput": {
+        "properties": {
+          "import": {
+            "$ref": "#/components/schemas/ImportOutput"
+          }
+        },
+        "required": [
+          "import"
+        ],
+        "title": "ImportStatusOutput",
         "type": "object"
       },
       "InsightAction": {
@@ -863,6 +1026,21 @@
         "title": "MeetingState",
         "type": "string"
       },
+      "ProcessingConfirmation": {
+        "description": "The owner of an imported recording states \"I may process this recording\".",
+        "properties": {
+          "confirmed": {
+            "const": true,
+            "title": "Confirmed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirmed"
+        ],
+        "title": "ProcessingConfirmation",
+        "type": "object"
+      },
       "QueryFiltersInput": {
         "properties": {
           "project": {
@@ -1055,6 +1233,46 @@
         "title": "ReviewRelationInput",
         "type": "object"
       },
+      "SectionOutput": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "integer"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "parent_id",
+          "ordinal",
+          "level",
+          "title"
+        ],
+        "title": "SectionOutput",
+        "type": "object"
+      },
       "SegmentOutput": {
         "properties": {
           "confidence": {
@@ -1105,6 +1323,266 @@
           "locale"
         ],
         "title": "SegmentOutput",
+        "type": "object"
+      },
+      "SourceCreate": {
+        "properties": {
+          "filename": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin_note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Note"
+          },
+          "size_bytes": {
+            "minimum": 1.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "size_bytes"
+        ],
+        "title": "SourceCreate",
+        "type": "object"
+      },
+      "SourceCreateOutput": {
+        "properties": {
+          "expires_in_seconds": {
+            "title": "Expires In Seconds",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceOutput"
+          },
+          "upload_url": {
+            "title": "Upload Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "upload_url",
+          "expires_in_seconds"
+        ],
+        "title": "SourceCreateOutput",
+        "type": "object"
+      },
+      "SourceFragments": {
+        "properties": {
+          "fragments": {
+            "items": {
+              "$ref": "#/components/schemas/FragmentOutput"
+            },
+            "title": "Fragments",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "fragments"
+        ],
+        "title": "SourceFragments",
+        "type": "object"
+      },
+      "SourceKind": {
+        "enum": [
+          "meeting",
+          "document",
+          "deck",
+          "web",
+          "note",
+          "audio"
+        ],
+        "title": "SourceKind",
+        "type": "string"
+      },
+      "SourceList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "SourceList",
+        "type": "object"
+      },
+      "SourceOutline": {
+        "properties": {
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SectionOutput"
+            },
+            "title": "Sections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sections"
+        ],
+        "title": "SourceOutline",
+        "type": "object"
+      },
+      "SourceOutput": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Locale"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "state",
+          "created_at",
+          "origin",
+          "language",
+          "version"
+        ],
+        "title": "SourceOutput",
+        "type": "object"
+      },
+      "SourceVersionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceVersionOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SourceVersionList",
+        "type": "object"
+      },
+      "SourceVersionOutput": {
+        "properties": {
+          "content_hash_prefix": {
+            "title": "Content Hash Prefix",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "parser": {
+            "title": "Parser",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "content_hash_prefix",
+          "parser",
+          "created_at",
+          "size_bytes"
+        ],
+        "title": "SourceVersionOutput",
         "type": "object"
       },
       "SpeakerNameInput": {
@@ -1363,6 +1841,67 @@
           "ui_locale"
         ],
         "title": "VoiceQueryInput",
+        "type": "object"
+      },
+      "WatchFolderCreate": {
+        "properties": {
+          "path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "WatchFolderCreate",
+        "type": "object"
+      },
+      "WatchFolderList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WatchFolderOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "WatchFolderList",
+        "type": "object"
+      },
+      "WatchFolderOutput": {
+        "description": "A watched folder; its path is answered to its owner only.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "enabled",
+          "created_at"
+        ],
+        "title": "WatchFolderOutput",
         "type": "object"
       }
     }
@@ -1735,6 +2274,39 @@
           }
         },
         "summary": "Graph Subgraph"
+      }
+    },
+    "/v1/local/source-uploads/{token}": {
+      "put": {
+        "description": "The random one-use link is the credential; document bytes never need a bearer token.",
+        "operationId": "source_upload_v1_local_source_uploads__token__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Upload"
       }
     },
     "/v1/meetings": {
@@ -2199,6 +2771,647 @@
           }
         },
         "summary": "Query"
+      }
+    },
+    "/v1/sources": {
+      "get": {
+        "operationId": "list_sources_v1_sources_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sources"
+      },
+      "post": {
+        "operationId": "create_source_v1_sources_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceCreateOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Source"
+      }
+    },
+    "/v1/sources/watch-folders": {
+      "get": {
+        "operationId": "list_watch_folders_v1_sources_watch_folders_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchFolderList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Watch Folders"
+      },
+      "post": {
+        "description": "Watch a folder on this computer: supported files in it (down to five folder levels) are imported once they stop changing, a changed file becomes a new version, and recordings wait for a processing confirmation. 422 for a relative path, a missing folder, a network share, a link or a folder that overlaps the NODO data folder; 409 when it is watched already.",
+        "operationId": "add_watch_folder_v1_sources_watch_folders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchFolderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchFolderOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Watch Folder"
+      }
+    },
+    "/v1/sources/watch-folders/{folder_id}": {
+      "delete": {
+        "description": "Stop watching. Sources already imported from the folder stay.",
+        "operationId": "delete_watch_folder_v1_sources_watch_folders__folder_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "title": "Folder Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Watch Folder"
+      }
+    },
+    "/v1/sources/{source_id}": {
+      "delete": {
+        "operationId": "delete_source_v1_sources__source_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Source"
+      },
+      "get": {
+        "operationId": "get_source_v1_sources__source_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Source"
+      }
+    },
+    "/v1/sources/{source_id}/cancel": {
+      "post": {
+        "operationId": "cancel_source_import_v1_sources__source_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportStatusOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Source Import"
+      }
+    },
+    "/v1/sources/{source_id}/complete": {
+      "post": {
+        "operationId": "complete_source_v1_sources__source_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportStatusOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Source"
+      }
+    },
+    "/v1/sources/{source_id}/confirm-processing": {
+      "post": {
+        "description": "Imported audio or video waits in awaiting_confirmation until its owner confirms \"I may process this recording\". The confirmation is audited (kind only) and starts the transcription. A second call answers the current state; a cancelled, failed or deleted import, or a document, is refused. 409 original_missing once the original was erased.",
+        "operationId": "confirm_source_processing_v1_sources__source_id__confirm_processing_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessingConfirmation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportStatusOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Source Processing"
+      }
+    },
+    "/v1/sources/{source_id}/fragments": {
+      "get": {
+        "operationId": "get_source_fragments_v1_sources__source_id__fragments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceFragments"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Source Fragments"
+      }
+    },
+    "/v1/sources/{source_id}/import": {
+      "get": {
+        "operationId": "source_import_status_v1_sources__source_id__import_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportStatusOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Import Status"
+      }
+    },
+    "/v1/sources/{source_id}/outline": {
+      "get": {
+        "operationId": "get_source_outline_v1_sources__source_id__outline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceOutline"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Source Outline"
+      }
+    },
+    "/v1/sources/{source_id}/retry": {
+      "post": {
+        "operationId": "retry_source_import_v1_sources__source_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportStatusOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Source Import"
+      }
+    },
+    "/v1/sources/{source_id}/versions": {
+      "get": {
+        "operationId": "source_versions_v1_sources__source_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceVersionList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Versions"
       }
     },
     "/v1/sync/meetings/{meeting_id}": {

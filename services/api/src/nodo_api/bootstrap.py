@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from nodo_api.config import Settings
+from nodo_api.ports import DocumentExtractor
 from nodo_api.resilience import Guarded, RetryPolicy, make_guard
 from nodo_api.services.exports import ExportService
+from nodo_api.services.fragment_extraction import ChunkedFragmentExtractor, extraction_version
 from nodo_api.services.ingestion import IngestionService
 
 COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
@@ -39,6 +41,17 @@ class Adapters:
     maintenance: Any = None  # the cross-workspace meeting listing for index maintenance
     entity_indexer: Any = None  # entity vectors: finding graph entities by meaning (ADR-024)
     answers: Any = None  # the answer cache: questions already answered (ADR-026)
+    sources: Any = None  # sources of every kind (ADR-029); local and memory only, None on Azure
+    fragments: Any = None  # sections and fragments of sources; local and memory only
+    imports: Any = None  # import jobs of documents (Task 5); local and memory only, None on Azure
+    source_blobs: Any = None  # original files of documents (Task 6); local and memory only
+    fragment_index: Any = None  # search over fragments of documents (Task 8); local and memory
+    fragment_extractor: DocumentExtractor | None = (
+        None  # entities from document fragments (Task 9); local and memory
+    )
+    extraction_version: str | None = None  # stored with a source version: prompt and model
+    source_import: Any = None  # the import service (Task 11); local and memory, None on Azure
+    folder_watcher: Any = None  # watched folders (Task 15); local and memory, None on Azure
 
 
 @dataclass(slots=True)
@@ -77,39 +90,91 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemoryAuditLog,
         MemoryBlobStore,
         MemoryExportStore,
+        MemoryFragmentIndex,
+        MemoryFragmentRepository,
         MemoryGraphStore,
+        MemoryImportJobRepository,
         MemoryJobQueue,
         MemoryMaintenanceStore,
         MemoryMeetingRepository,
         MemoryRetentionStore,
+        MemorySourceBlobStore,
+        MemorySourceRepository,
         MemorySpeech,
         MemoryTranscriptRepository,
+        MemoryWatchFolderRepository,
         MockLlm,
         MockRetriever,
         seed_memory_adapters,
     )
+    from nodo_api.adapters.memory.documents import MemoryDocumentParser
     from nodo_api.adapters.memory.extractor import KeywordExtractor
+    from nodo_api.adapters.memory.fragment_extractor import KeywordFragmentExtractor
+    from nodo_api.services.folder_watch import FolderWatcher
+    from nodo_api.services.source_import import SourceImportService
 
     meetings = MemoryMeetingRepository()
     transcripts = MemoryTranscriptRepository()
     retriever = MockRetriever()
     graph = MemoryGraphStore()
+    sources = MemorySourceRepository(meetings)
     if settings.seed_demo_data:
         seed_memory_adapters(meetings, transcripts, retriever, graph)
+    queue = MemoryJobQueue()
+    audit = MemoryAuditLog()
+    fragments = MemoryFragmentRepository(sources, transcripts)
+    imports = MemoryImportJobRepository(sources)
+    fragment_index = MemoryFragmentIndex(sources)
+    fragment_extractor = ChunkedFragmentExtractor(
+        KeywordFragmentExtractor(), settings.local_extract_window_tokens
+    )
+    doc_version = extraction_version("keyword")
+    source_blobs = MemorySourceBlobStore(
+        max_bytes=settings.local_import_max_bytes,
+        upload_seconds=settings.upload_session_seconds,
+    )
+    source_import = SourceImportService(
+        sources,
+        fragments,
+        imports,
+        source_blobs,
+        MemoryDocumentParser(),  # tests register parse results; files are never opened here
+        fragment_index,
+        fragment_extractor,
+        graph,
+        queue,
+        audit,
+        extraction_version=doc_version,
+        control=queue,
+        speech=MemorySpeech(),
+        speech_locales=settings.speech_candidate_locales,
+    )
     return Adapters(
         meetings,
         transcripts,
         MemoryBlobStore(),
-        MemoryJobQueue(),
+        queue,
         retriever,
         graph,
         MockLlm(),
-        MemoryAuditLog(),
+        audit,
         MemorySpeech(),
         KeywordExtractor(),
         retention=MemoryRetentionStore(meetings),
         exports=MemoryExportStore(),
         maintenance=MemoryMaintenanceStore(meetings),
+        sources=sources,
+        fragments=fragments,
+        imports=imports,
+        fragment_index=fragment_index,
+        fragment_extractor=fragment_extractor,
+        extraction_version=doc_version,
+        source_blobs=source_blobs,
+        source_import=source_import,
+        # No poll thread here: nothing scans unless a caller runs scan_once.
+        folder_watcher=FolderWatcher(
+            MemoryWatchFolderRepository(), source_import, source_blobs, source_blobs.root
+        ),
     )
 
 
@@ -269,6 +334,11 @@ def azure_adapters(settings: Settings, clients: dict[str, Any] | None = None) ->
             f"{settings.openai_chat_deployment}|{settings.openai_embedding_deployment}",
             AZURE_ANSWER_SIMILARITY,
         ),
+        sources=None,  # sources beyond meetings stay local until the cloud path (ADR-029)
+        fragments=None,
+        imports=None,
+        source_blobs=None,
+        fragment_index=None,
     )
 
 
