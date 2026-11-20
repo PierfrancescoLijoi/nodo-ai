@@ -81,7 +81,7 @@ from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
 from nodo_api.domain.hierarchy import MAX_DEPTH
 from nodo_api.domain.source_files import UploadRejected
-from nodo_api.domain.sources import CLEAR, SourceKind
+from nodo_api.domain.sources import CLEAR, Fragment, SourceKind
 from nodo_api.errors import (
     AuthenticationError,
     NotAvailableOnEngine,
@@ -406,23 +406,63 @@ def get_source(source_id: str, actor: PrincipalDep, request: Request):
 @router.get("/sources/{source_id}/outline", response_model=SourceOutline)
 def get_source_outline(source_id: str, actor: PrincipalDep, request: Request):
     sources, fragments = _source_stores(request.app.state.container)
-    sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    latest = fragments.latest(actor.workspace_id, source_id)
+    counts: dict[str | None, int] = {}
+    first: dict[str | None, Fragment] = {}
+    for item in latest:  # reading order, so the first one seen opens the section
+        counts[item.section_id] = counts.get(item.section_id, 0) + 1
+        first.setdefault(item.section_id, item)
     return SourceOutline(
         sections=tuple(
-            section_output(item) for item in fragments.outline(actor.workspace_id, source_id)
-        )
+            section_output(item, counts.get(item.id, 0), first.get(item.id))
+            for item in fragments.outline(actor.workspace_id, source_id)
+        ),
+        version=_fragments_version(latest, source),
     )
 
 
+def _fragments_version(latest, source) -> int:
+    # A meeting is versioned by its transcript, not by the sources row.
+    return latest[0].version if latest else source.version
+
+
+def _section_scope(sections, section_id: str, include_subsections: bool) -> set[str]:
+    if all(item.id != section_id for item in sections):
+        raise NotFoundError  # also for a meeting, which has no sections
+    scope = {section_id}
+    if include_subsections:
+        for item in sections:  # outline order puts parents before their children
+            if item.parent_id in scope:
+                scope.add(item.id)
+    return scope
+
+
 @router.get("/sources/{source_id}/fragments", response_model=SourceFragments)
-def get_source_fragments(source_id: str, actor: PrincipalDep, request: Request):
+def get_source_fragments(
+    source_id: str,
+    actor: PrincipalDep,
+    request: Request,
+    section_id: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    include_subsections: bool = False,
+    limit: Annotated[int | None, Query(ge=1, le=500)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
     sources, fragments = _source_stores(request.app.state.container)
     source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
     latest = fragments.latest(actor.workspace_id, source_id)
-    # A meeting is versioned by its transcript, not by the sources row.
+    version = _fragments_version(latest, source)
+    if section_id is not None:
+        outline = fragments.outline(actor.workspace_id, source_id)
+        scope = _section_scope(outline, section_id, include_subsections)
+        latest = tuple(item for item in latest if item.section_id in scope)
+    # Without a limit every fragment comes back, as before the paging parameters existed.
+    page = latest[offset:] if limit is None else latest[offset : offset + limit + 1]
+    more = limit is not None and len(page) > limit
     return SourceFragments(
-        version=latest[0].version if latest else source.version,
-        fragments=tuple(fragment_output(item) for item in latest),
+        version=version,
+        fragments=tuple(fragment_output(item) for item in page[:limit]),
+        next_offset=offset + limit if more else None,
     )
 
 

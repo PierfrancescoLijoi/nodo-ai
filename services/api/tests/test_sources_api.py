@@ -81,8 +81,17 @@ def test_outline_and_fragments_for_a_document(app, client, auth_headers) -> None
     assert detail.json()["origin"] == "handbook.pdf"
     assert outline.json() == {
         "sections": [
-            {"id": "intro", "parent_id": None, "ordinal": 0, "level": 1, "title": "heading intro"}
-        ]
+            {
+                "id": "intro",
+                "parent_id": None,
+                "ordinal": 0,
+                "level": 1,
+                "title": "heading intro",
+                "fragment_count": 2,
+                "first_locator": {"chars": [0, 15], "page": 1},
+            }
+        ],
+        "version": 1,
     }
     page = fragments.json()
     assert page["version"] == 1

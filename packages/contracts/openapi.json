@@ -1546,6 +1546,23 @@
       },
       "SectionOutput": {
         "properties": {
+          "first_locator": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Locator"
+          },
+          "fragment_count": {
+            "default": 0,
+            "title": "Fragment Count",
+            "type": "integer"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -1710,6 +1727,17 @@
             "title": "Fragments",
             "type": "array"
           },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
           "version": {
             "title": "Version",
             "type": "integer"
@@ -1795,10 +1823,15 @@
             },
             "title": "Sections",
             "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
           }
         },
         "required": [
-          "sections"
+          "sections",
+          "version"
         ],
         "title": "SourceOutline",
         "type": "object"
@@ -4080,6 +4113,63 @@
             "schema": {
               "title": "Source Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "section_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Section Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_subsections",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Subsections",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 500,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
             }
           }
         ],

@@ -203,13 +203,17 @@ def source_version_output(version: SourceVersion) -> SourceVersionOutput:
     )
 
 
-def section_output(section: Section) -> SectionOutput:
+def section_output(
+    section: Section, fragment_count: int = 0, first: Fragment | None = None
+) -> SectionOutput:
     return SectionOutput(
         id=section.id,
         parent_id=section.parent_id,
         ordinal=section.ordinal,
         level=section.level,
         title=section.title,
+        fragment_count=fragment_count,
+        first_locator=json.loads(first.locator.to_json()) if first else None,
     )
 
 

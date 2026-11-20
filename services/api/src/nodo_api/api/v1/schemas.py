@@ -195,10 +195,13 @@ class SectionOutput(FrozenModel):
     ordinal: int
     level: int
     title: str
+    fragment_count: int = 0  # fragments of the latest version directly in this section
+    first_locator: dict[str, Any] | None = None  # where its first fragment is, in reading order
 
 
 class SourceOutline(FrozenModel):
     sections: tuple[SectionOutput, ...]
+    version: int
 
 
 class FragmentOutput(FrozenModel):
@@ -214,6 +217,7 @@ class FragmentOutput(FrozenModel):
 class SourceFragments(FrozenModel):
     version: int
     fragments: tuple[FragmentOutput, ...]
+    next_offset: int | None = None  # set only when a limit cut the answer short
 
 
 class UploadSessionOutput(FrozenModel):
