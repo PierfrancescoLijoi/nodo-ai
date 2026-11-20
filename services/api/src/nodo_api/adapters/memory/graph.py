@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import copy
 import itertools
+import logging
 import math
 import threading
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -34,8 +36,11 @@ from nodo_api.domain.graph import (
     relation_id,
     source_entity_id,
 )
+from nodo_api.domain.hierarchy import check_link
 from nodo_api.domain.sources import SourceKind
-from nodo_api.errors import NotFoundError
+from nodo_api.errors import NotFoundError, refusal_error
+
+logger = logging.getLogger("nodo_graph")
 
 Key = tuple[str, str]  # (workspace_id, owner_id)
 
@@ -170,12 +175,16 @@ class MemoryGraphStore:
                     1.0,
                     self._evidence(origin_id, _by_key(extraction, key).evidence),
                 )
+        hierarchy = []
         for rel in extraction.relations:
             source, target = (
                 self._resolve(part, ids, rel.source),
                 self._resolve(part, ids, rel.target),
             )
             if source is None or target is None:
+                continue
+            if rel.kind is RelationKind.CHILD_OF:
+                hierarchy.append((source, target, rel))
                 continue
             self._add_relation(
                 part,
@@ -187,6 +196,41 @@ class MemoryGraphStore:
                 rel.confidence,
                 self._evidence(origin_id, rel.evidence),
             )
+        # Parent links one at a time, in extraction order, each checked against those before it.
+        refused: Counter[str] = Counter()
+
+        def kept(item) -> bool:
+            row = part.relations.get(
+                relation_id(workspace_id, owner_id, item[0], RelationKind.CHILD_OF, item[1])
+            )
+            return row is not None and row.relation.status is not ReviewStatus.REJECTED
+
+        # Links already on record go first, so a reviewed link never loses to a new proposal.
+        hierarchy.sort(key=lambda item: not kept(item))
+        for source, target, rel in hierarchy:
+            row = part.relations.get(
+                relation_id(workspace_id, owner_id, source, RelationKind.CHILD_OF, target)
+            )
+            # A row a reimport just stripped of evidence is about to be swept: it counts as new.
+            if row is None or (
+                row.relation.status is not ReviewStatus.REJECTED and not row.relation.evidence
+            ):
+                code = check_link(source, target, *_hierarchy_steps(part))
+                if code is not None:
+                    refused[code] += 1
+                    continue
+            self._add_relation(
+                part,
+                workspace_id,
+                owner_id,
+                source,
+                RelationKind.CHILD_OF,
+                target,
+                rel.confidence,
+                self._evidence(origin_id, rel.evidence),
+            )
+        for code, count in sorted(refused.items()):
+            logger.info("hierarchy_link_refused code=%s count=%d", code, count)
         self._sweep(part)
         self._restore_supersession(part)
         for row in part.relations.values():
@@ -434,6 +478,15 @@ class MemoryGraphStore:
             raise NotFoundError if row is None else ValueError("A review is approved or rejected")
         if meetings_only and _show(_View(part), row.relation) is None:
             raise NotFoundError  # hidden from that view: nothing is written
+        rel = row.relation
+        if (
+            rel.kind is RelationKind.CHILD_OF
+            and status is ReviewStatus.APPROVED
+            and rel.status is ReviewStatus.REJECTED
+        ):
+            code = check_link(rel.source_id, rel.target_id, *_hierarchy_steps(part, exclude=rel.id))
+            if code is not None:
+                raise refusal_error(code)
         row.relation = replace(row.relation, status=status)
         if row.relation.kind is RelationKind.SUPERSEDES:
             now = datetime.now(UTC)
@@ -656,6 +709,29 @@ def _show(view: _View | None, rel: Relation) -> Relation | None:
     if rel.kind is RelationKind.CHILD_OF or not evidence:
         return None
     return replace(rel, evidence=evidence)
+
+
+def _hierarchy_steps(part: _Partition, exclude: str | None = None):
+    """parents_of and children_of over the live parent links: not rejected, with evidence."""
+
+    # ponytail: scans the whole partition per level (links x relations); memory is dev/test only.
+    def live() -> list[Relation]:
+        return [
+            r.relation
+            for rid, r in part.relations.items()
+            if r.relation.kind is RelationKind.CHILD_OF
+            and r.relation.status is not ReviewStatus.REJECTED
+            and r.relation.evidence
+            and rid != exclude
+        ]
+
+    def parents_of(ids: frozenset[str]) -> frozenset[str]:
+        return frozenset(r.target_id for r in live() if r.source_id in ids)
+
+    def children_of(ids: frozenset[str]) -> frozenset[str]:
+        return frozenset(r.source_id for r in live() if r.target_id in ids)
+
+    return parents_of, children_of
 
 
 def _sorted(group: dict[str, Entity] | None) -> tuple[Entity, ...]:

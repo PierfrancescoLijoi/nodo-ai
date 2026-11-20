@@ -8,7 +8,9 @@ still a handful of microsecond lookups.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -42,8 +44,11 @@ from nodo_api.domain.graph import (
     relation_id,
     source_entity_id,
 )
+from nodo_api.domain.hierarchy import check_link
 from nodo_api.domain.sources import SourceKind
-from nodo_api.errors import NotFoundError
+from nodo_api.errors import NotFoundError, refusal_error
+
+logger = logging.getLogger("nodo_graph")
 
 _ENTITY_COLUMNS = "id, type, label, status, effective_at, due_at, ref"
 _RELATION_COLUMNS = "id, source_id, target_id, kind, status, confidence, valid_from, valid_to"
@@ -185,7 +190,7 @@ class SqliteGraphStore:
     def _write(self, conn, workspace_id, owner_id, origin, extraction, touched) -> GraphWriteResult:
         entities, ids = self._entity_rows(workspace_id, owner_id, origin, extraction)
         self._put_entities(conn, entities, refresh=origin.type is EntityType.MEETING)
-        relations, evidence = self._relation_rows(
+        relations, evidence, hierarchy = self._relation_rows(
             conn, workspace_id, owner_id, origin, extraction, ids
         )
         conn.executemany(
@@ -200,8 +205,70 @@ class SqliteGraphStore:
             " source_id, fragment_id) VALUES (?, ?, ?, ?, ?)",
             evidence,
         )
+        written = self._write_hierarchy(conn, workspace_id, owner_id, origin, hierarchy)
         self._sweep(conn, workspace_id, owner_id, touched)
-        return GraphWriteResult(len(entities), len(relations))
+        return GraphWriteResult(len(entities), len(relations) + written)
+
+    def _write_hierarchy(self, conn, workspace_id, owner_id, origin: _Origin, hierarchy) -> int:
+        """Parent links one at a time, in extraction order, each checked against those before it
+        (ADR-030); runs inside the write transaction. Returns how many distinct links it wrote."""
+        refused: Counter[str] = Counter()
+        written: set[str] = set()
+        steps = _hierarchy_steps(conn, workspace_id, owner_id)
+
+        def kept(item) -> bool:
+            rid = relation_id(workspace_id, owner_id, item[0], RelationKind.CHILD_OF, item[1])
+            found = conn.execute(
+                "SELECT 1 FROM relations WHERE workspace_id = ? AND owner_id = ? AND id = ?"
+                " AND status <> 'rejected'",
+                (workspace_id, owner_id, rid),
+            ).fetchone()
+            return found is not None
+
+        # Links already on record go first, so a reviewed link never loses to a new proposal.
+        hierarchy = sorted(hierarchy, key=lambda item: not kept(item))
+        for source, target, confidence, segments in hierarchy:
+            rid = relation_id(workspace_id, owner_id, source, RelationKind.CHILD_OF, target)
+            row = conn.execute(
+                "SELECT status, EXISTS (SELECT 1 FROM relation_evidence ev"
+                " WHERE ev.workspace_id = r.workspace_id AND ev.owner_id = r.owner_id"
+                " AND ev.relation_id = r.id) AS backed FROM relations r"
+                " WHERE r.workspace_id = ? AND r.owner_id = ? AND r.id = ?",
+                (workspace_id, owner_id, rid),
+            ).fetchone()
+            # A row a reimport just stripped of evidence is about to be swept: it counts as new.
+            if row is None or (row["status"] != "rejected" and not row["backed"]):
+                code = check_link(source, target, *steps)
+                if code is not None:
+                    refused[code] += 1
+                    continue
+            conn.execute(
+                "INSERT INTO relations (workspace_id, owner_id, id, source_id, target_id, kind,"
+                " status, confidence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT (workspace_id, owner_id, id)"
+                " DO UPDATE SET confidence = max(relations.confidence, excluded.confidence)",
+                (
+                    workspace_id,
+                    owner_id,
+                    rid,
+                    source,
+                    target,
+                    RelationKind.CHILD_OF.value,
+                    ReviewStatus.PROPOSED.value,
+                    confidence,
+                    now_text(),
+                ),
+            )
+            # Evidence names the source written now, never anything the model said (ADR-029).
+            conn.executemany(
+                "INSERT OR IGNORE INTO relation_evidence (workspace_id, owner_id, relation_id,"
+                " source_id, fragment_id) VALUES (?, ?, ?, ?, ?)",
+                [(workspace_id, owner_id, rid, origin.id, s) for s in segments],
+            )
+            written.add(rid)
+        for code, count in sorted(refused.items()):
+            logger.info("hierarchy_link_refused code=%s count=%d", code, count)
+        return len(written)
 
     @staticmethod
     def _entity_rows(workspace_id, owner_id, origin: _Origin, extraction):
@@ -266,6 +333,7 @@ class SqliteGraphStore:
         by_key = {e.key: e for e in extraction.entities}
         relations: dict[str, tuple] = {}
         evidence: list[tuple] = []
+        hierarchy: list[tuple] = []
         stamp = now_text()
 
         def add(source, kind, target, confidence, segments):
@@ -298,9 +366,11 @@ class SqliteGraphStore:
         for rel in extraction.relations:
             source = self._resolve(ids, existing, rel.source)
             target = self._resolve(ids, existing, rel.target)
-            if source and target:
+            if source and target and rel.kind is RelationKind.CHILD_OF:
+                hierarchy.append((source, target, rel.confidence, rel.evidence))
+            elif source and target:
                 add(source, rel.kind, target, rel.confidence, rel.evidence)
-        return list(relations.values()), evidence
+        return list(relations.values()), evidence, hierarchy
 
     @staticmethod
     def _resolve(ids: dict[str, str], existing: set[str], key: str) -> str | None:
@@ -555,6 +625,8 @@ class SqliteGraphStore:
                 ).fetchone()
             ):
                 raise NotFoundError  # hidden from that view: nothing is written
+            if status is ReviewStatus.APPROVED:
+                self._check_reapproval(conn, workspace_id, owner_id, relation_id_)
             row = conn.execute(
                 "UPDATE relations SET status = ?,"
                 " valid_from = CASE WHEN kind = 'SUPERSEDES' AND ? = 'approved'"
@@ -576,6 +648,22 @@ class SqliteGraphStore:
                     self._restore_supersession(conn, workspace_id, owner_id, [target])
             evidence = self._evidence(conn, workspace_id, owner_id, [relation_id_], meetings_only)
         return _relation(row, tuple(evidence.get(row["id"], ())))
+
+    @staticmethod
+    def _check_reapproval(conn, workspace_id: str, owner_id: str, relation_id_: str) -> None:
+        """A rejected parent link comes back only if the hierarchy still allows it; a proposed one
+        already satisfies the rule."""
+        rel = conn.execute(
+            "SELECT source_id, target_id FROM relations WHERE workspace_id = ? AND owner_id = ?"
+            " AND id = ? AND kind = 'CHILD_OF' AND status = 'rejected'",
+            (workspace_id, owner_id, relation_id_),
+        ).fetchone()
+        if rel is None:
+            return
+        steps = _hierarchy_steps(conn, workspace_id, owner_id, exclude=relation_id_)
+        code = check_link(rel["source_id"], rel["target_id"], *steps)
+        if code is not None:
+            raise refusal_error(code)
 
     # ------------------------------------------------------------------- reads
 
@@ -933,6 +1021,32 @@ class SqliteGraphStore:
                 (workspace_id, owner_id, *part),
             ).fetchall()
         return rows
+
+
+def _hierarchy_steps(conn, workspace_id: str, owner_id: str, exclude: str | None = None):
+    """parents_of and children_of over the live parent links: not rejected, with evidence."""
+    live = (
+        "SELECT DISTINCT r.{out} FROM relations r WHERE r.workspace_id = ? AND r.owner_id = ?"
+        " AND r.kind = 'CHILD_OF' AND r.status <> 'rejected' AND r.id <> ?"
+        " AND r.{end} IN ({marks}) AND EXISTS (SELECT 1 FROM relation_evidence ev"
+        " WHERE ev.workspace_id = r.workspace_id AND ev.owner_id = r.owner_id"
+        " AND ev.relation_id = r.id)"
+    )
+
+    def step(end: str, out: str):
+        def ends(ids: frozenset[str]) -> frozenset[str]:
+            found: set[str] = set()
+            for part in _slices(sorted(ids)):
+                rows = conn.execute(
+                    live.format(out=out, end=end, marks=_marks(len(part))),
+                    (workspace_id, owner_id, exclude or "", *part),
+                ).fetchall()
+                found |= {r[0] for r in rows}
+            return frozenset(found)
+
+        return ends
+
+    return step("source_id", "target_id"), step("target_id", "source_id")
 
 
 def _ref(kind: EntityType, label: str) -> ExportedRef:

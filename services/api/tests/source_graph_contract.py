@@ -357,7 +357,7 @@ class SourceGraphContract:
         assert len(before.edges) == 20
 
         topics = tuple(ent(f"t{i}", T, f"Concept {i}", "f1") for i in range(41))
-        hierarchy = tuple(rel(f"t{i}", K.CHILD_OF, f"t{i + 1}", "f1") for i in range(40))
+        hierarchy = tuple(rel(f"t{i}", K.CHILD_OF, "t40", "f1") for i in range(40))
         store.replace_source_evidence(ws, OWNER, doc(), Extraction("", topics, hierarchy))
 
         assert service.reviews(ws, OWNER, 20, meetings_only=True) == before
