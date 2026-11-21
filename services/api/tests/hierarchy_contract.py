@@ -10,6 +10,7 @@ import pytest
 
 from nodo_api.domain.graph import (
     EntityType,
+    Evidence,
     Extraction,
     RelationKind,
     ReviewStatus,
@@ -70,6 +71,47 @@ def names(ws: str, graph) -> tuple[list[str], set[tuple[str, str]]]:
 
 
 class HierarchyContract:
+    def test_co_mentions_share_evidence_and_new_parent_can_be_proposed(self, store, ws) -> None:
+        extraction = Extraction(
+            "",
+            (
+                ent("a", T, "Concept a", "f1"),
+                ent("b", T, "Concept b", "f1"),
+                ent("c", T, "Concept c", "f2"),
+            ),
+            (),
+        )
+        store.replace_source_evidence(ws, OWNER, doc("doc1"), extraction)
+        found = store.co_mentions(ws, OWNER, cid(ws, "a"), 8)
+        assert [item.entity.id for item in found] == [cid(ws, "b")]
+        assert found[0].evidence == (Evidence("doc1", "f1"),)
+
+        relation = store.propose_child_of(
+            ws,
+            OWNER,
+            cid(ws, "a"),
+            cid(ws, "b"),
+            0.7,
+            (Evidence("doc1", "f1"), Evidence("doc1", "not-shared")),
+        )
+        assert relation is not None
+        assert relation.status is ReviewStatus.PROPOSED
+        assert relation.evidence == (Evidence("doc1", "f1"),)
+
+    def test_parent_suggestion_refuses_a_cycle(self, store, ws) -> None:
+        write(store, ws, [("a", "b")])
+        assert (
+            store.propose_child_of(
+                ws,
+                OWNER,
+                cid(ws, "b"),
+                cid(ws, "a"),
+                0.7,
+                (Evidence("doc1", "f1"),),
+            )
+            is None
+        )
+
     def test_parents_walk_returns_both_parents_of_a_concept(self, store, ws) -> None:
         write(store, ws, [("a", "b"), ("a", "c"), ("b", "d")])
         nodes, edges = names(ws, walk(store, ws, "a", "parents"))

@@ -36,7 +36,7 @@ from nodo_api.domain.graph import (
     relation_id,
     source_entity_id,
 )
-from nodo_api.domain.hierarchy import Direction, check_link, walk_links
+from nodo_api.domain.hierarchy import CoMention, Direction, check_link, walk_links
 from nodo_api.domain.sources import SourceKind
 from nodo_api.errors import NotFoundError, refusal_error
 
@@ -759,6 +759,110 @@ class MemoryGraphStore:
         found = [part.entities[i] for i in nodes if i in part.entities]
         found.sort(key=lambda e: (-e.effective_at.timestamp(), e.id))
         return tuple(found[:limit])
+
+    def co_mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[CoMention, ...]:
+        part = self._parts.get((workspace_id, owner_id))
+        seed = part.entities.get(entity_id) if part else None
+        if seed is None:
+            raise NotFoundError
+        mentions = {
+            row.relation.source_id: frozenset(row.relation.evidence)
+            for row in part.relations.values()
+            if row.relation.kind is RelationKind.MENTIONED_IN
+            and row.relation.status is not ReviewStatus.REJECTED
+        }
+        shared_with = mentions.get(entity_id, frozenset())
+        linked = {
+            other
+            for row in part.relations.values()
+            if row.relation.kind is RelationKind.CHILD_OF
+            and row.relation.status is not ReviewStatus.REJECTED
+            for other in (
+                [row.relation.target_id]
+                if row.relation.source_id == entity_id
+                else [row.relation.source_id]
+                if row.relation.target_id == entity_id
+                else []
+            )
+        }
+        descendants = set(
+            self.hierarchy(
+                workspace_id,
+                owner_id,
+                entity_id,
+                direction="children",
+                depth=6,
+                include_proposed=True,
+                limit=max(len(part.entities), 1),
+            ).nodes
+        )
+        descendant_ids = {entity.id for entity in descendants}
+        things = {EntityType.PROJECT, EntityType.SYSTEM, EntityType.TOPIC}
+        result = []
+        for candidate_id, candidate_evidence in mentions.items():
+            candidate = part.entities.get(candidate_id)
+            shared = tuple(
+                sorted(shared_with & candidate_evidence, key=lambda e: (e.source_id, e.fragment_id))
+            )
+            if (
+                candidate is not None
+                and candidate.type in things
+                and candidate_id != entity_id
+                and candidate_id not in linked
+                and candidate_id not in descendant_ids
+                and shared
+            ):
+                result.append(CoMention(candidate, shared))
+        result.sort(key=lambda item: (-len(item.evidence), item.entity.label, item.entity.id))
+        return tuple(result[:limit])
+
+    def propose_child_of(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        child_id: str,
+        parent_id: str,
+        confidence: float,
+        evidence: tuple[Evidence, ...],
+    ) -> Relation | None:
+        with self._lock:
+            part = self._parts.get((workspace_id, owner_id))
+            things = {EntityType.PROJECT, EntityType.SYSTEM, EntityType.TOPIC}
+            if (
+                part is None
+                or part.entities.get(child_id) is None
+                or part.entities.get(parent_id) is None
+                or part.entities[child_id].type not in things
+                or part.entities[parent_id].type not in things
+            ):
+                return None
+            mentions = {
+                row.relation.source_id: frozenset(row.relation.evidence)
+                for row in part.relations.values()
+                if row.relation.kind is RelationKind.MENTIONED_IN
+                and row.relation.status is not ReviewStatus.REJECTED
+            }
+            shared = mentions.get(child_id, frozenset()) & mentions.get(parent_id, frozenset())
+            kept = tuple(item for item in evidence if item in shared)
+            if not kept:
+                return None
+            rid = relation_id(workspace_id, owner_id, child_id, RelationKind.CHILD_OF, parent_id)
+            existing = part.relations.get(rid)
+            if existing is None and check_link(child_id, parent_id, *_hierarchy_steps(part)):
+                return None
+            self._add_relation(
+                part,
+                workspace_id,
+                owner_id,
+                child_id,
+                RelationKind.CHILD_OF,
+                parent_id,
+                confidence,
+                kept,
+            )
+            return part.relations[rid].relation
 
 
 class _View:

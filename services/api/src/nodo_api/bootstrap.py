@@ -54,6 +54,7 @@ class Adapters:
     folder_watcher: Any = None  # watched folders (Task 15); local and memory, None on Azure
     hierarchy_store: Any = None  # concept parent links (ADR-030); local and memory, None on Azure
     collections: Any = None  # nested collections of sources (FR-8); local and memory, None on Azure
+    parent_suggester: Any = None  # reviewable concept parent suggestions; local and memory only
 
 
 @dataclass(slots=True)
@@ -89,6 +90,7 @@ def build_answer_cache(
 
 def memory_adapters(settings: Settings) -> Adapters:
     from nodo_api.adapters.memory import (
+        KeywordParentSuggester,
         MemoryAuditLog,
         MemoryBlobStore,
         MemoryCollectionRepository,
@@ -176,6 +178,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         source_import=source_import,
         hierarchy_store=graph,
         collections=MemoryCollectionRepository(sources),
+        parent_suggester=KeywordParentSuggester(),
         # No poll thread here: nothing scans unless a caller runs scan_once.
         folder_watcher=FolderWatcher(
             MemoryWatchFolderRepository(), source_import, source_blobs, source_blobs.root

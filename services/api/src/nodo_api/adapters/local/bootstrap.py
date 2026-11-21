@@ -20,7 +20,12 @@ from nodo_api.adapters.local.exports import SqliteExportStore
 from nodo_api.adapters.local.fragment_index import SqliteFragmentIndex
 from nodo_api.adapters.local.graph import SqliteGraphStore
 from nodo_api.adapters.local.imports import SqliteImportJobRepository
-from nodo_api.adapters.local.llm import LocalExtractor, LocalFragmentExtractor, LocalLlm
+from nodo_api.adapters.local.llm import (
+    LocalExtractor,
+    LocalFragmentExtractor,
+    LocalLlm,
+    LocalParentSuggester,
+)
 from nodo_api.adapters.local.maintenance import LocalIndexService, SqliteMaintenanceStore
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer, LocalModelPaths, data_dir
 from nodo_api.adapters.local.queue import LocalWorkerLoop, SqliteJobQueue
@@ -266,10 +271,12 @@ def local_adapters(settings: Settings):
         fragment_extractor: Any = ChunkedFragmentExtractor(
             LocalFragmentExtractor(server, arbiter), settings.local_extract_window_tokens
         )
+        parent_suggester: Any = LocalParentSuggester(server, arbiter)
         doc_version: str | None = extraction_version(models.llm_gguf.stem[:80])
     else:
         llm, extractor = Unavailable("language model"), Unavailable("language model")
         fragment_extractor, doc_version = Unavailable("language model"), None
+        parent_suggester = Unavailable("language model")
 
     entity_indexer = EntityIndexer(
         graph,
@@ -402,4 +409,5 @@ def local_adapters(settings: Settings):
         folder_watcher=watcher,
         hierarchy_store=graph,
         collections=SqliteCollectionRepository(db),
+        parent_suggester=parent_suggester,
     )

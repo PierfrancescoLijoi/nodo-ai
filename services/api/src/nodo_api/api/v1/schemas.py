@@ -416,6 +416,10 @@ class HierarchyReviewInput(FrozenModel):
     status: Literal["approved", "rejected"]
 
 
+class ParentSuggestionInput(FrozenModel):
+    locale: Locale = Locale.EN
+
+
 # --- collections of sources (FR-4, FR-8); local and memory engines, 501 on Azure ----------------
 
 

@@ -74,6 +74,7 @@ class AppContainer:
     runtime: Any = None
     readiness: tuple[tuple[str, Callable[[], None]], ...] = ()
     query_gate: Bulkhead | None = None
+    suggestion_gate: Bulkhead | None = None
     speech: Any = None  # the speech adapter, for the local push-to-talk path
     sources: Any = None
     fragments: Any = None
@@ -268,7 +269,9 @@ def _container(settings: Settings, key_provider) -> AppContainer:
     )
     graph_service = GraphService(a.graph, a.audit, a.answers)
     hierarchy = (
-        HierarchyService(a.hierarchy_store, graph_service, a.fragments, a.sources)
+        HierarchyService(
+            a.hierarchy_store, graph_service, a.fragments, a.sources, a.parent_suggester
+        )
         if a.hierarchy_store is not None and a.fragments is not None and a.sources is not None
         else None
     )
@@ -299,6 +302,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.runtime,
         a.readiness,
         Bulkhead("query", settings.max_concurrent_queries, wait_seconds=0.0),
+        Bulkhead("parent_suggestions", 1, wait_seconds=0.0),
         a.speech,
         a.sources,
         a.fragments,

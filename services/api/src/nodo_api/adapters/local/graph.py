@@ -45,7 +45,7 @@ from nodo_api.domain.graph import (
     relation_id,
     source_entity_id,
 )
-from nodo_api.domain.hierarchy import Direction, check_link, walk_links
+from nodo_api.domain.hierarchy import CoMention, Direction, check_link, walk_links
 from nodo_api.domain.sources import SourceKind
 from nodo_api.errors import NotFoundError, refusal_error
 
@@ -1039,6 +1039,130 @@ class SqliteGraphStore:
                 (workspace_id, owner_id, entity_id, limit),
             ).fetchall()
         return tuple(_entity(r) for r in rows)
+
+    def co_mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[CoMention, ...]:
+        descendants = {
+            entity.id
+            for entity in self.hierarchy(
+                workspace_id,
+                owner_id,
+                entity_id,
+                direction="children",
+                depth=6,
+                include_proposed=True,
+                limit=10000,
+            ).nodes
+        }
+        with self._db.transaction(write=False) as conn:
+            linked_rows = conn.execute(
+                "SELECT source_id, target_id FROM relations WHERE workspace_id = ? AND owner_id = ?"
+                " AND kind = 'CHILD_OF' AND status <> 'rejected'"
+                " AND (source_id = ? OR target_id = ?)",
+                (workspace_id, owner_id, entity_id, entity_id),
+            ).fetchall()
+            linked = {
+                row["target_id"] if row["source_id"] == entity_id else row["source_id"]
+                for row in linked_rows
+            }
+            rows = conn.execute(
+                "SELECT r.source_id AS entity_id, e.id, e.type, e.label, e.status, e.effective_at,"
+                " e.due_at, e.ref, ev.source_id, ev.fragment_id"
+                " FROM relations r JOIN relation_evidence ev ON ev.workspace_id = r.workspace_id"
+                " AND ev.owner_id = r.owner_id AND ev.relation_id = r.id"
+                " JOIN entities e ON e.workspace_id = r.workspace_id AND e.owner_id = r.owner_id"
+                " AND e.id = r.source_id WHERE r.workspace_id = ? AND r.owner_id = ?"
+                " AND r.kind = 'MENTIONED_IN' AND r.status <> 'rejected'"
+                " AND e.type IN ('project', 'system', 'topic')",
+                (workspace_id, owner_id),
+            ).fetchall()
+        evidence: dict[str, set[Evidence]] = {}
+        entities: dict[str, Entity] = {}
+        for row in rows:
+            eid = row["entity_id"]
+            evidence.setdefault(eid, set()).add(Evidence(row["source_id"], row["fragment_id"]))
+            entities.setdefault(eid, _entity(row))
+        seed_evidence = evidence.get(entity_id, set())
+        result = []
+        for candidate_id, candidate_evidence in evidence.items():
+            shared = tuple(
+                sorted(
+                    seed_evidence & candidate_evidence, key=lambda e: (e.source_id, e.fragment_id)
+                )
+            )
+            if (
+                candidate_id != entity_id
+                and candidate_id not in linked
+                and candidate_id not in descendants
+                and shared
+            ):
+                result.append(CoMention(entities[candidate_id], shared))
+        result.sort(key=lambda item: (-len(item.evidence), item.entity.label, item.entity.id))
+        return tuple(result[:limit])
+
+    def propose_child_of(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        child_id: str,
+        parent_id: str,
+        confidence: float,
+        evidence: tuple[Evidence, ...],
+    ) -> Relation | None:
+        rid = relation_id(workspace_id, owner_id, child_id, RelationKind.CHILD_OF, parent_id)
+        with self._db.transaction() as conn:
+            entities = self._entities(conn, workspace_id, owner_id, [child_id, parent_id])
+            things = {EntityType.PROJECT, EntityType.SYSTEM, EntityType.TOPIC}
+            if (
+                set(entities) != {child_id, parent_id}
+                or entities[child_id].type not in things
+                or entities[parent_id].type not in things
+            ):
+                return None
+            mention_rows = conn.execute(
+                "SELECT r.source_id AS entity_id, ev.source_id, ev.fragment_id FROM relations r"
+                " JOIN relation_evidence ev ON ev.workspace_id = r.workspace_id"
+                " AND ev.owner_id = r.owner_id AND ev.relation_id = r.id"
+                " WHERE r.workspace_id = ? AND r.owner_id = ? AND r.kind = 'MENTIONED_IN'"
+                " AND r.status <> 'rejected' AND r.source_id IN (?, ?)",
+                (workspace_id, owner_id, child_id, parent_id),
+            ).fetchall()
+            mentions: dict[str, set[Evidence]] = {child_id: set(), parent_id: set()}
+            for row in mention_rows:
+                mentions[row["entity_id"]].add(Evidence(row["source_id"], row["fragment_id"]))
+            shared = mentions[child_id] & mentions[parent_id]
+            kept = tuple(item for item in evidence if item in shared)
+            if not kept:
+                return None
+            existing = conn.execute(
+                f"SELECT {_RELATION_COLUMNS} FROM relations WHERE workspace_id = ? AND owner_id = ?"
+                " AND id = ?",
+                (workspace_id, owner_id, rid),
+            ).fetchone()
+            if existing is None and check_link(
+                child_id, parent_id, *_hierarchy_steps(conn, workspace_id, owner_id)
+            ):
+                return None
+            conn.execute(
+                "INSERT INTO relations (workspace_id, owner_id, id, source_id, target_id, kind,"
+                " status, confidence, created_at) VALUES (?, ?, ?, ?, ?, 'CHILD_OF', 'proposed', ?, ?)"
+                " ON CONFLICT (workspace_id, owner_id, id) DO UPDATE SET"
+                " confidence = max(relations.confidence, excluded.confidence)",
+                (workspace_id, owner_id, rid, child_id, parent_id, confidence, now_text()),
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO relation_evidence (workspace_id, owner_id, relation_id,"
+                " source_id, fragment_id) VALUES (?, ?, ?, ?, ?)",
+                [(workspace_id, owner_id, rid, item.source_id, item.fragment_id) for item in kept],
+            )
+            row = conn.execute(
+                f"SELECT {_RELATION_COLUMNS} FROM relations WHERE workspace_id = ? AND owner_id = ?"
+                " AND id = ?",
+                (workspace_id, owner_id, rid),
+            ).fetchone()
+            stored_evidence = self._evidence(conn, workspace_id, owner_id, [rid])
+        return _relation(row, tuple(stored_evidence.get(rid, ())))
 
     # ------------------------------------------------------------------ export
 

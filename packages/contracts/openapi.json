@@ -1337,6 +1337,16 @@
         "title": "MeetingState",
         "type": "string"
       },
+      "ParentSuggestionInput": {
+        "properties": {
+          "locale": {
+            "$ref": "#/components/schemas/Locale",
+            "default": "en"
+          }
+        },
+        "title": "ParentSuggestionInput",
+        "type": "object"
+      },
       "ProcessingConfirmation": {
         "description": "The owner of an imported recording states \"I may process this recording\".",
         "properties": {
@@ -2700,6 +2710,56 @@
           }
         },
         "summary": "Concept Hierarchy"
+      }
+    },
+    "/v1/concepts/{concept_id}/parent-suggestions": {
+      "post": {
+        "operationId": "suggest_concept_parents_v1_concepts__concept_id__parent_suggestions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "concept_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "title": "Concept Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParentSuggestionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchyProposalList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Suggest Concept Parents"
       }
     },
     "/v1/export": {

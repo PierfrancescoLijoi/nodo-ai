@@ -14,6 +14,7 @@ from nodo_api.domain.graph import (
     DocumentExtraction,
     Entity,
     EntityType,
+    Evidence,
     Extraction,
     GraphWriteResult,
     MeetingDigest,
@@ -23,7 +24,7 @@ from nodo_api.domain.graph import (
     SourceRef,
     Subgraph,
 )
-from nodo_api.domain.hierarchy import ParentSuggestion
+from nodo_api.domain.hierarchy import CoMention, ParentSuggestion
 from nodo_api.domain.maintenance import MaintenanceMeeting, PendingJob
 from nodo_api.domain.models import (
     Locale,
@@ -785,6 +786,20 @@ class HierarchyStore(Protocol):
     ) -> tuple[Entity, ...]:
         """The meeting and source nodes the entity is MENTIONED_IN, newest first."""
         ...
+
+    def co_mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[CoMention, ...]: ...
+
+    def propose_child_of(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        child_id: str,
+        parent_id: str,
+        confidence: float,
+        evidence: tuple[Evidence, ...],
+    ) -> Relation | None: ...
 
 
 class Extractor(Protocol):

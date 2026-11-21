@@ -13,7 +13,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from nodo_api.domain.graph import (
+    Entity,
     EntityType,
+    Evidence,
     ExtractedRelation,
     Extraction,
     Relation,
@@ -39,6 +41,12 @@ class ParentSuggestion:
     candidate_id: str
     confidence: float
     evidence: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CoMention:
+    entity: Entity
+    evidence: tuple[Evidence, ...]
 
 
 def heading_proposals(

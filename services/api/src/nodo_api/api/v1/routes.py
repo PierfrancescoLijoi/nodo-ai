@@ -52,6 +52,7 @@ from nodo_api.api.v1.schemas import (
     MeetingCreate,
     MeetingList,
     MeetingOutput,
+    ParentSuggestionInput,
     ProcessingConfirmation,
     QueryFiltersInput,
     QueryInput,
@@ -754,6 +755,33 @@ def hierarchy_proposals(
         items=tuple(hierarchy_link_output(edge, locate) for edge in graph.edges),
         nodes=tuple(concept_output(node) for node in graph.nodes),
         truncated=graph.truncated,
+    )
+
+
+@router.post("/concepts/{concept_id}/parent-suggestions", response_model=HierarchyProposalList)
+def suggest_concept_parents(
+    concept_id: Annotated[str, Path(max_length=64)],
+    payload: ParentSuggestionInput,
+    actor: PrincipalDep,
+    request: Request,
+):
+    container = request.app.state.container
+    service = _hierarchy(container)
+    if not service.can_suggest or getattr(container, "suggestion_gate", None) is None:
+        raise NotAvailableOnEngine
+    with container.suggestion_gate:
+        relations = service.suggest_parents(
+            actor.workspace_id, actor.user_id, concept_id, payload.locale
+        )
+    ids = {relation.id for relation in relations}
+    graph = service.proposals(actor.workspace_id, actor.user_id, 200)
+    chosen = tuple(edge for edge in graph.edges if edge.id in ids)
+    node_ids = {value for edge in chosen for value in (edge.source_id, edge.target_id)}
+    locate = partial(service.locate, actor.workspace_id)
+    return HierarchyProposalList(
+        items=tuple(hierarchy_link_output(edge, locate) for edge in chosen),
+        nodes=tuple(concept_output(node) for node in graph.nodes if node.id in node_ids),
+        truncated=False,
     )
 
 
