@@ -215,3 +215,21 @@ Azure is the cloud target. The full service map, identity model, networking stag
 | Foreground service policy changes | Capture breaks on new Android | Native module isolated behind a port; device matrix tests |
 
 Open: legal entity and controller role, hosted Neo4j choice, embedding model choice and licence, whether participant consent via invite or QR is in the first release.
+## Phase 3: hierarchy, collections and source outlines
+
+The local and memory engines represent concept hierarchy as evidence-backed `CHILD_OF` relations.
+Every proposed or approved link that still has evidence participates in one transactional guard:
+the graph must remain acyclic and no path may exceed six links. Document headings, document model
+extraction and on-demand parent suggestions can create proposals; a person must approve or reject
+them through the review API.
+
+Collections are owner-managed structural rows, may be nested and may contain a source in several
+places. They never own or delete a source. Source outlines and section fragments come from the
+authoritative section/fragment tables. These interfaces are local-only for now; the Azure engine
+answers `not_available_on_engine` until PostgreSQL parity in Phase 10.
+
+Known limits: meeting graph rows retain their first stored label although hierarchy responses read
+the current title from `sources`; collection memberships are not synced or included in GDPR export;
+`/v1/query` does not yet use documents or collections; a wrong pending parent proposal can block
+the opposite direction until rejected; and superseded-fragment links are swept instead of marked
+for reconfirmation. Those gaps belong to Phases 4, 5, 8 and 10.

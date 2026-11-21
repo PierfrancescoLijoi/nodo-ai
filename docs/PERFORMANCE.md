@@ -235,3 +235,8 @@ versions; its numbers show the run-to-run noise of the model.
 Not measured in this task: the local setup reported the llama.cpp server, speaker separation
 models and exported embedding model missing. The Phase 3 closing gate must compare `doc-2` with
 `doc-3` using the alternating-run protocol above and report the number of `CHILD_OF` proposals.
+
+The Phase 3 closing gate rechecked availability on 21 November 2026 and the same components were
+still missing, so the alternating `doc-2`/`doc-3` model measurement could not be run. No model
+quality claim is made for hierarchy extraction; this remains a required operator measurement once
+the complete local model stack is installed.

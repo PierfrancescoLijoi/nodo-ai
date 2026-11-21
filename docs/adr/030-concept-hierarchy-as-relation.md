@@ -35,3 +35,10 @@ Two different kinds of hierarchy exist and they are not the same thing. The stru
 - Several parents mean a concept can appear under more than one place in the outline; the outline must say so and not count it twice.
 - Between Phase 1 and Phase 3 the relation exists but is unguarded. Only the contract test writes it, and the extraction prompt does not produce it; Phase 3 must add the guard before anything else can create these edges.
 - `relations.kind` has a `CHECK` list in both SQLite and PostgreSQL. SQLite must widen it, which takes a table rebuild (the Phase 1 graph vocabulary migration). The PostgreSQL migrations are untouched until Phase 10, so the PostgreSQL store rejects `CHILD_OF` until then, in line with the local-only rule of ADR-029. The new contract case runs on the memory and SQLite stores first.
+## Implementation notes (Phase 3)
+
+The invariant covers proposed and approved `CHILD_OF` links that still have evidence. Depth means
+links on a path and is capped at six. Memory and SQLite share a level-by-level Python rule over
+indexed lookups instead of separate recursive SQL. Extraction links that would violate the rule
+are dropped and logged only by stable refusal code and count. Users cannot create a link from
+nothing: they approve or reject proposals created from evidence.

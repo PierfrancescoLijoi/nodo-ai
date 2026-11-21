@@ -277,3 +277,14 @@ The ADR column lists decisions that directly constrain the requirement. A dash m
 | **FR-28** | Phase 8 - Integration | [ADR-017](../adr/017-resilience-and-disaster-recovery.md), [ADR-019](../adr/019-compliance-and-data-governance.md), [ADR-031](../adr/031-wiki-pages-and-human-edits.md) |
 | **FR-29** | Phase 6 - UI | [ADR-008](../adr/008-multilingual-strategy.md), [ADR-009](../adr/009-expo-router-i18next-tokens.md), [ADR-027](../adr/027-nextjs-web-interface.md) |
 | **FR-30** | Phase 10 - Cloud catch-up | [ADR-010](../adr/010-azure-target-and-iac.md), [ADR-015](../adr/015-sync-local-to-azure.md), [ADR-029](../adr/029-source-model.md), [ADR-031](../adr/031-wiki-pages-and-human-edits.md) |
+## Status after Phase 3
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| FR-4 source organization | Implemented locally | Nested collections and source retention |
+| FR-6 source structure | Implemented locally | Outline plus per-section fragments |
+| FR-7 concept hierarchy | Implemented locally | Multiple parents, review, cycle and depth guards |
+| FR-8 collections | Implemented locally | Nested collections and several memberships |
+
+PostgreSQL/Azure parity, sync/export of collections and collection-aware query remain scheduled
+for later phases.
