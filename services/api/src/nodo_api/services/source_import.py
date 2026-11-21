@@ -40,6 +40,7 @@ from nodo_api.domain.graph import (
     SourceRef,
     validate_extraction,
 )
+from nodo_api.domain.hierarchy import heading_proposals
 from nodo_api.domain.models import Locale
 from nodo_api.domain.retention import audio_expires_at
 from nodo_api.domain.source_files import looks_like_media, safe_filename
@@ -796,11 +797,21 @@ class SourceImportService:
         if failure is not None and not parts:
             raise failure  # nothing could be read: the queue retries, then the import fails
         merged = merge(parts) if len(parts) > 1 else (parts[0] if parts else Extraction())
+        proposals = heading_proposals(merged, sections, todo)
+        if proposals:
+            merged = replace(merged, relations=merged.relations + proposals)
         clean = validate_extraction(
             merged,
             frozenset(f.id for f in todo),
             {d.id: EntityType.DECISION for d in known},
         )
+        kept_relation_keys = {(r.source, r.kind, r.target) for r in clean.relations}
+        dropped_proposals = sum(
+            (proposal.source, proposal.kind, proposal.target) not in kept_relation_keys
+            for proposal in proposals
+        )
+        if dropped_proposals:
+            logger.info("heading_proposals_dropped count=%s", dropped_proposals)
         ref = SourceRef(source_id, source.title, source.created_at, source.kind)
         self._graph.replace_source_evidence(
             workspace_id, owner, ref, clean, dropped_fragment_ids=dropped

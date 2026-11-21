@@ -7,16 +7,79 @@ refused, never repaired. The stores apply the rule inside their write transactio
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from typing import Literal
 
-from nodo_api.domain.graph import Relation
+from nodo_api.domain.graph import (
+    EntityType,
+    ExtractedRelation,
+    Extraction,
+    Relation,
+    RelationKind,
+    normalize_label,
+)
+from nodo_api.domain.sources import Fragment, Section
 
 MAX_DEPTH = 6
+HEADING_CONFIDENCE = 0.6
+MAX_HEADING_EVIDENCE = 3
+
+_HEADING_TYPES = frozenset({EntityType.PROJECT, EntityType.SYSTEM, EntityType.TOPIC})
+_LEADING_ENUMERATOR = re.compile(r"^\d+(?:\.\d+)*[.)]?\s+")
 
 LinkRefusal = Literal["self", "cycle", "too_deep"]
 
 Step = Callable[[frozenset[str]], frozenset[str]]
+
+
+def heading_proposals(
+    extraction: Extraction,
+    sections: Sequence[Section],
+    fragments: Sequence[Fragment],
+) -> tuple[ExtractedRelation, ...]:
+    """Infer reviewable child-to-parent links from the document outline.
+
+    Titles are used only to match an extracted concept. Returned values contain entity keys and
+    fragment ids, never document text. Each cited fragment chooses the nearest matching ancestor;
+    grouping those choices yields one deterministic proposal per child/parent pair.
+    """
+    concepts = tuple(entity for entity in extraction.entities if entity.type in _HEADING_TYPES)
+    by_label = {}
+    for entity in concepts:
+        by_label.setdefault(normalize_label(entity.label), entity)
+
+    by_section = {section.id: section for section in sections}
+    heads = {}
+    for section in sections:
+        title = _LEADING_ENUMERATOR.sub("", section.title.strip())
+        head = by_label.get(normalize_label(title))
+        if head is not None:
+            heads[section.id] = head
+
+    ordered_fragments = sorted(fragments, key=lambda fragment: (fragment.ordinal, fragment.id))
+    fragment_by_id = {fragment.id: fragment for fragment in ordered_fragments}
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for entity in concepts:
+        cited = {fragment_id for fragment_id in entity.evidence if fragment_id in fragment_by_id}
+        for fragment in ordered_fragments:
+            if fragment.id not in cited:
+                continue
+            section_id = fragment.section_id
+            while section_id is not None:
+                head = heads.get(section_id)
+                if head is not None and head.key != entity.key:
+                    evidence = grouped.setdefault((entity.key, head.key), [])
+                    if len(evidence) < MAX_HEADING_EVIDENCE:
+                        evidence.append(fragment.id)
+                    break
+                section = by_section.get(section_id)
+                section_id = section.parent_id if section is not None else None
+
+    return tuple(
+        ExtractedRelation(child, parent, RelationKind.CHILD_OF, HEADING_CONFIDENCE, tuple(evidence))
+        for (child, parent), evidence in grouped.items()
+    )
 
 
 def _levels(start: str, step: Step, max_depth: int, stop: str | None) -> int | None:
