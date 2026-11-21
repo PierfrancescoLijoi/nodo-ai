@@ -23,6 +23,7 @@ from nodo_api.domain.graph import (
     SourceRef,
     Subgraph,
 )
+from nodo_api.domain.hierarchy import ParentSuggestion
 from nodo_api.domain.maintenance import MaintenanceMeeting, PendingJob
 from nodo_api.domain.models import (
     Locale,
@@ -820,6 +821,16 @@ class DocumentExtractor(FragmentExtractor, Protocol):
         locale: Locale,
         known_decisions: tuple[Entity, ...] = (),
     ) -> DocumentExtraction: ...
+
+
+class ParentSuggester(Protocol):
+    def suggest(
+        self,
+        concept: Entity,
+        candidates: tuple[Entity, ...],
+        fragments: tuple[Fragment, ...],
+        locale: Locale,
+    ) -> tuple[ParentSuggestion, ...]: ...
 
 
 class LlmClient(Protocol):

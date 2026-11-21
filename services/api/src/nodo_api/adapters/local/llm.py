@@ -14,6 +14,7 @@ from nodo_api.adapters.azure.openai_extractor import (
     AzureOpenAiExtractor,
     AzureOpenAiFragmentExtractor,
 )
+from nodo_api.adapters.azure.openai_hierarchy import AzureOpenAiParentSuggester
 from nodo_api.adapters.azure.openai_llm import AzureOpenAiLlm
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer
 from nodo_api.domain.graph import Entity, Extraction, Subgraph
@@ -94,3 +95,16 @@ class LocalFragmentExtractor(_LocalServer):
         with self.lease():
             extractor = AzureOpenAiFragmentExtractor(self.client(), MODEL_NAME, EXTRACTION_OPTIONS)
             return extractor.extract(fragments, section_path, locale, known_decisions)
+
+
+class LocalParentSuggester(_LocalServer):
+    def suggest(
+        self,
+        concept: Entity,
+        candidates: tuple[Entity, ...],
+        fragments: tuple[Fragment, ...],
+        locale: Locale,
+    ):
+        with self.lease():
+            suggester = AzureOpenAiParentSuggester(self.client(), MODEL_NAME, EXTRACTION_OPTIONS)
+            return suggester.suggest(concept, candidates, fragments, locale)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Literal
 
 from nodo_api.domain.graph import (
@@ -31,6 +32,13 @@ _LEADING_ENUMERATOR = re.compile(r"^\d+(?:\.\d+)*[.)]?\s+")
 LinkRefusal = Literal["self", "cycle", "too_deep"]
 
 Step = Callable[[frozenset[str]], frozenset[str]]
+
+
+@dataclass(frozen=True, slots=True)
+class ParentSuggestion:
+    candidate_id: str
+    confidence: float
+    evidence: tuple[str, ...]
 
 
 def heading_proposals(
