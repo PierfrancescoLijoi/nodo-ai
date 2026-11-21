@@ -33,7 +33,7 @@ logger = logging.getLogger("nodo_extraction")
 
 # Bump it with any change of the document prompt or schema (a test pins both): it is stored in
 # `source_versions.extraction_version` so an older extraction can be told from a newer one.
-EXTRACTION_VERSION = "doc-2"
+EXTRACTION_VERSION = "doc-3"
 
 
 def extraction_version(model: str) -> str:

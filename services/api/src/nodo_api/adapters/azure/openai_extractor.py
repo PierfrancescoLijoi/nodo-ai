@@ -11,6 +11,7 @@ import math
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -99,6 +100,12 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
     "required": ["summary", "entities", "relations"],
     "additionalProperties": False,
 }
+
+DOCUMENT_RELATION_KINDS = [*MODEL_RELATION_KINDS, RelationKind.CHILD_OF.value]
+DOCUMENT_EXTRACTION_SCHEMA = deepcopy(EXTRACTION_SCHEMA)
+DOCUMENT_EXTRACTION_SCHEMA["properties"]["relations"]["items"]["properties"]["kind"]["enum"] = (
+    DOCUMENT_RELATION_KINDS
+)
 
 _TAG = re.compile(r"</?\s*transcript\s*>", re.IGNORECASE)
 
@@ -213,7 +220,9 @@ DOCUMENT_SYSTEM_PROMPT = (
     "the document states, phrased as a short statement), action (a task someone must do). "
     "Relations: ABOUT (decision or action about a topic, project or system), PROPOSED_BY "
     "(decision by a person), ASSIGNED_TO (action to a person), DEPENDS_ON (between projects, "
-    "systems or topics), SUPERSEDES (a decision in this document that replaces one in the list of "
+    "systems or topics), CHILD_OF (a project, system or topic that is a part, component or "
+    "subtopic of another project, system or topic named in the text: source is the part, target "
+    "is the whole), SUPERSEDES (a decision in this document that replaces one in the list of "
     "existing decisions, referred to as existing:<id>), CONTRADICTS (a decision in tension with an "
     "existing one). The first line inside the document block names the section the text comes "
     "from. Give every entity its own short key (e1, e2, e3, ...) and use those keys in relations. "
@@ -323,7 +332,7 @@ def parse_fragment_extraction(content: str | None, fragment_ids: Sequence[str]) 
             if not (
                 isinstance(source, str)
                 and isinstance(target, str)
-                and kind in MODEL_RELATION_KINDS
+                and kind in DOCUMENT_RELATION_KINDS
                 and type(confidence) in (int, float)
                 and math.isfinite(confidence)
             ):
@@ -371,7 +380,7 @@ class AzureOpenAiFragmentExtractor:
                 "json_schema": {
                     "name": "document_graph",
                     "strict": True,
-                    "schema": EXTRACTION_SCHEMA,
+                    "schema": DOCUMENT_EXTRACTION_SCHEMA,
                 },
             },
             **self._options,
@@ -393,6 +402,8 @@ class AzureOpenAiFragmentExtractor:
 
 
 __all__ = [
+    "DOCUMENT_EXTRACTION_SCHEMA",
+    "DOCUMENT_RELATION_KINDS",
     "EXISTING_PREFIX",
     "AzureOpenAiExtractor",
     "AzureOpenAiFragmentExtractor",

@@ -229,3 +229,9 @@ versions; its numbers show the run-to-run noise of the model.
   recall does not regress (0 for doc-1, 0.09 and 0.06 for doc-2) but stays low.
 - Extraction takes about twice as long with doc-2 (mean 7 689 against 3 417 seconds per 50
   pages, same extrapolation as above): the model writes more entities per window.
+
+### 8.2 With hierarchy extraction (Phase 3, Task 10)
+
+Not measured in this task: the local setup reported the llama.cpp server, speaker separation
+models and exported embedding model missing. The Phase 3 closing gate must compare `doc-2` with
+`doc-3` using the alternating-run protocol above and report the number of `CHILD_OF` proposals.

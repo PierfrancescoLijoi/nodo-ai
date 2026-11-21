@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from nodo_api.adapters.azure.openai_extractor import (
+    DOCUMENT_EXTRACTION_SCHEMA,
     DOCUMENT_SYSTEM_PROMPT,
     EXTRACTION_SCHEMA,
     SYSTEM_PROMPT,
@@ -333,7 +334,7 @@ def test_the_request_has_no_tools_and_asks_for_the_strict_schema() -> None:
     request = model.requests[0]
     assert not {"tools", "tool_choice", "functions", "function_call"} & set(request)
     assert request["response_format"]["json_schema"]["strict"] is True
-    assert request["response_format"]["json_schema"]["schema"] == EXTRACTION_SCHEMA
+    assert request["response_format"]["json_schema"]["schema"] == DOCUMENT_EXTRACTION_SCHEMA
     assert "English" in request["messages"][0]["content"]
 
 
@@ -452,10 +453,10 @@ def test_instruction_inside_a_document_has_no_effect() -> None:
     assert kept["cross"].evidence == ("f0",)
     assert kept["ok"].evidence == ("f1",)
     assert all(set(e.evidence) <= ids for e in clean.entities)
-    assert [r.kind for r in clean.relations] == [RelationKind.DEPENDS_ON]
-    assert clean.relations[0].evidence == ("f0",)
-    assert clean.relations[0].confidence == 1.0
-    assert all(r.kind is not RelationKind.CHILD_OF for r in raw.relations)
+    assert [r.kind for r in clean.relations] == [RelationKind.CHILD_OF, RelationKind.DEPENDS_ON]
+    assert all(r.evidence == ("f0",) for r in clean.relations)
+    assert all(r.confidence == 1.0 for r in clean.relations)
+    assert all(r.kind is not RelationKind.CHILD_OF or r.source == "child2" for r in raw.relations)
 
 
 @pytest.mark.parametrize(
@@ -610,19 +611,19 @@ def test_malformed_items_are_dropped_one_by_one() -> None:
 
 
 def test_extraction_version_names_the_prompt_and_the_model() -> None:
-    assert EXTRACTION_VERSION == "doc-2"
-    assert extraction_version("qwen3") == "doc-2|qwen3"
+    assert EXTRACTION_VERSION == "doc-3"
+    assert extraction_version("qwen3") == "doc-3|qwen3"
 
 
 def test_a_change_of_the_document_prompt_requires_a_new_extraction_version() -> None:
     digest = hashlib.sha256(
-        (DOCUMENT_SYSTEM_PROMPT + json.dumps(EXTRACTION_SCHEMA, sort_keys=True)).encode()
+        (DOCUMENT_SYSTEM_PROMPT + json.dumps(DOCUMENT_EXTRACTION_SCHEMA, sort_keys=True)).encode()
     ).hexdigest()
     # If this fails you changed what the model is told: bump EXTRACTION_VERSION, then update this.
-    assert (EXTRACTION_VERSION, digest) == ("doc-2", PINNED_DOCUMENT_PROMPT)
+    assert (EXTRACTION_VERSION, digest) == ("doc-3", PINNED_DOCUMENT_PROMPT)
 
 
-PINNED_DOCUMENT_PROMPT = "503e0e8f06f2b729924633b80a09dd47c08587549e8356bb9e2cbfcfb67395f9"
+PINNED_DOCUMENT_PROMPT = "f7977368b494f9a86ca3fc919f6562b1f01e47fccb7548770e32e57574a905dd"
 
 
 def test_meeting_extraction_prompt_and_schema_are_unchanged() -> None:
@@ -659,7 +660,7 @@ def test_the_in_memory_engine_wires_a_fragment_extractor(settings) -> None:
     adapters = memory_adapters(settings)
     fragments = (_fragment("f0", 0, None, "Marco decided to go with the queue."),)
     assert adapters.fragment_extractor.extract(fragments, (), Locale.EN, ()).entities
-    assert adapters.extraction_version == "doc-2|keyword"
+    assert adapters.extraction_version == "doc-3|keyword"
 
 
 def test_local_fragment_extractor_takes_the_gpu_lease_and_uses_the_document_prompt() -> None:
