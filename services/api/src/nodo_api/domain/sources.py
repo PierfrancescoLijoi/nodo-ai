@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Sequence
+import unicodedata
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -218,6 +219,56 @@ class Source:
             created_at=meeting.created_at,
             tombstoned_at=meeting.tombstoned_at,
         )
+
+
+MAX_COLLECTIONS = 1000  # per owner
+MAX_COLLECTION_NAME = 120
+
+
+@dataclass(frozen=True, slots=True)
+class Collection:
+    """An owner-made folder of sources (FR-8); structure, never inferred, never deletes sources."""
+
+    id: str
+    workspace_id: str
+    owner_id: str
+    parent_id: str | None
+    name: str
+    created_at: datetime
+    source_count: int = 0  # live sources only
+
+
+def collection_name(name: str) -> str:
+    """The stored form of a collection name. The error message never repeats the name."""
+    cleaned = name.strip()
+    if not cleaned:
+        raise ValueError("A collection name can not be empty")
+    if len(cleaned) > MAX_COLLECTION_NAME:
+        raise ValueError(f"A collection name holds at most {MAX_COLLECTION_NAME} characters")
+    # Cf covers bidi overrides and zero-width characters that make one name pose as another.
+    if any(unicodedata.category(c) in ("Cc", "Cf", "Cs") for c in cleaned):
+        raise ValueError("A collection name can not hold control characters")
+    return cleaned
+
+
+def collection_order(
+    collections: Sequence[Collection], key: Callable[[Collection], str]
+) -> tuple[Collection, ...]:
+    """Parents before children, depth first, siblings by `key` (the normalized name)."""
+    children: dict[str | None, list[Collection]] = {}
+    for collection in collections:
+        children.setdefault(collection.parent_id, []).append(collection)
+
+    def ordered(parent: str | None) -> list[Collection]:
+        return sorted(children.get(parent, ()), key=lambda c: (key(c), c.id), reverse=True)
+
+    out: list[Collection] = []
+    stack = ordered(None)
+    while stack:
+        collection = stack.pop()
+        out.append(collection)
+        stack.extend(ordered(collection.id))
+    return tuple(out)
 
 
 ImportState = Literal[

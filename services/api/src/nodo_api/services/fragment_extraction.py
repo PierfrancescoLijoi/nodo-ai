@@ -10,10 +10,20 @@ Nothing here reads or logs document text: logs carry counts and error codes only
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from nodo_api.domain.graph import DocumentExtraction, Entity, Extraction, ExtractionError
+from nodo_api.domain.graph import (
+    EXISTING_PREFIX,
+    MAX_LABEL,
+    DocumentExtraction,
+    Entity,
+    EntityType,
+    Extraction,
+    ExtractionError,
+    normalize_label,
+)
 from nodo_api.domain.models import Locale
 from nodo_api.domain.sources import Fragment, Section
 from nodo_api.ports import FragmentExtractor
@@ -23,12 +33,67 @@ logger = logging.getLogger("nodo_extraction")
 
 # Bump it with any change of the document prompt or schema (a test pins both): it is stored in
 # `source_versions.extraction_version` so an older extraction can be told from a newer one.
-EXTRACTION_VERSION = "doc-1"
+EXTRACTION_VERSION = "doc-3"
 
 
 def extraction_version(model: str) -> str:
     """The string kept with a source version: the prompt version and the model that answered."""
     return f"{EXTRACTION_VERSION}|{model}"
+
+
+# Keys the model makes up rather than copies from the text: e1, p2, person, speaker 3, entity_4.
+_PLACEHOLDER_KEY = re.compile(
+    r"[a-z]{1,3}[ _-]?[0-9]+|(person|people|speaker|entity|name)[ _-]?[0-9]*"
+)
+
+
+def _has_words(words: str, text: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(words)}(?!\w)", text) is not None
+
+
+def repair_keys(extraction: Extraction, fragments: Sequence[Fragment]) -> Extraction:
+    """Keys and person labels the document model got wrong, fixed before windows are merged.
+
+    A person labelled with a role ("Project lead") and keyed with the name the text holds takes
+    the name as its label; a label found in the cited text is never touched. A key used again
+    is made unique (`key#2`, `key#3`, ...) so validation keeps every entity, and a relation on
+    such a key is dropped because it can not say which entity it meant; an exact repeat of the
+    first holder (same type and label) is not a second entity and is left for validation to drop.
+    The key must appear as whole words, and a placeholder key (`e1`, `person`) is never taken as a
+    name. `existing:` keys are left as they are."""
+    texts = {f.id: normalize_label(f.text) for f in fragments}
+    used = {e.key for e in extraction.entities}
+    seen: dict[str, tuple[EntityType, str]] = {}
+    duplicated: set[str] = set()
+    entities = []
+    for entity in extraction.entities:
+        if entity.type is EntityType.PERSON:
+            cited = [texts[i] for i in entity.evidence if i in texts]
+            label, key = normalize_label(entity.label), normalize_label(entity.key)
+            if (
+                key
+                and not _PLACEHOLDER_KEY.fullmatch(key)
+                and not any(label in t for t in cited)
+                and any(_has_words(key, t) for t in cited)
+            ):
+                entity = replace(entity, label=" ".join(entity.key.split())[:MAX_LABEL])
+        identity = (entity.type, normalize_label(entity.label))
+        if entity.key.startswith(EXISTING_PREFIX) or seen.get(entity.key) == identity:
+            pass
+        elif entity.key in seen:
+            duplicated.add(entity.key)
+            n = 2
+            while f"{entity.key}#{n}" in used:
+                n += 1
+            used.add(f"{entity.key}#{n}")
+            entity = replace(entity, key=f"{entity.key}#{n}")
+        else:
+            seen[entity.key] = identity
+        entities.append(entity)
+    relations = tuple(
+        r for r in extraction.relations if r.source not in duplicated and r.target not in duplicated
+    )
+    return replace(extraction, entities=tuple(entities), relations=relations)
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,7 +265,7 @@ class ChunkedFragmentExtractor:
         skipped: list[str],
     ) -> Extraction | None:
         try:
-            return self._inner.extract(fragments, path, locale, known)
+            return repair_keys(self._inner.extract(fragments, path, locale, known), fragments)
         except ExtractionError as error:
             failures.append(error.code)
             if len(fragments) < 2 or depth >= MAX_SPLITS:

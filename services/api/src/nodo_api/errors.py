@@ -1,3 +1,11 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nodo_api.domain.hierarchy import LinkRefusal
+
+
 class NodoError(Exception):
     code = "internal_error"
     status_code = 500
@@ -27,6 +35,37 @@ class OriginalMissing(ConflictError):
 
     code = "original_missing"
     public_message = "The original file is no longer stored"
+
+
+class CycleRefused(ConflictError):
+    """A parent link would close a cycle (or point at itself)."""
+
+    code = "would_create_cycle"
+    public_message = "The parent link would create a cycle"
+
+
+class DepthRefused(ConflictError):
+    """A parent link would make a path longer than the depth cap."""
+
+    code = "too_deep"
+    public_message = "The parent link would make the hierarchy too deep"
+
+
+class DuplicateName(ConflictError):
+    """A sibling collection already has this name (case and accent insensitive)."""
+
+    code = "duplicate_name"
+    public_message = "A sibling already has this name"
+
+
+class TooManyCollections(ConflictError):
+    code = "too_many_collections"
+    public_message = "The collection limit is reached"
+
+
+def refusal_error(code: LinkRefusal) -> ConflictError:
+    """The 409 for a refused parent link: `self` and `cycle` are both a cycle."""
+    return DepthRefused() if code == "too_deep" else CycleRefused()
 
 
 class ModelUnavailable(NodoError):

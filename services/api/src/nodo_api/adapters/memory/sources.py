@@ -6,7 +6,8 @@ merges them in, the way the SQLite triggers copy meetings into the sources table
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from contextlib import suppress
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -259,6 +260,15 @@ class MemorySourceRepository:
         if cursor is not None:
             owned = [s for s in owned if (s.created_at, s.id) < cursor]
         return tuple(owned[:limit])
+
+    def titles(
+        self, workspace_id: str, user_id: str, source_ids: Sequence[str]
+    ) -> dict[str, str | None]:
+        found: dict[str, str | None] = {}
+        for source_id in source_ids:
+            with suppress(NotFoundError):
+                found[source_id] = self.get_owned(workspace_id, user_id, source_id).title
+        return found
 
     # Helpers for MemoryFragmentRepository.
 

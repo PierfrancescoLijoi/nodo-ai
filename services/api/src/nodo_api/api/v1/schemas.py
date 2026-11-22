@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from nodo_api.domain.models import Answerability, Locale, MeetingState
-from nodo_api.domain.sources import ImportState, SourceKind
+from nodo_api.domain.sources import ImportState, SourceKind, collection_name
 
 
 class FrozenModel(BaseModel):
@@ -116,6 +116,7 @@ class SourceOutput(FrozenModel):
     origin: str | None
     language: Locale | None
     version: int
+    retention_until: datetime | None = None  # when the stored original is erased (FR-4)
 
 
 class SourceList(FrozenModel):
@@ -194,10 +195,13 @@ class SectionOutput(FrozenModel):
     ordinal: int
     level: int
     title: str
+    fragment_count: int = 0  # fragments of the latest version directly in this section
+    first_locator: dict[str, Any] | None = None  # where its first fragment is, in reading order
 
 
 class SourceOutline(FrozenModel):
     sections: tuple[SectionOutput, ...]
+    version: int
 
 
 class FragmentOutput(FrozenModel):
@@ -213,6 +217,7 @@ class FragmentOutput(FrozenModel):
 class SourceFragments(FrozenModel):
     version: int
     fragments: tuple[FragmentOutput, ...]
+    next_offset: int | None = None  # set only when a limit cut the answer short
 
 
 class UploadSessionOutput(FrozenModel):
@@ -361,3 +366,91 @@ class ExportOutput(FrozenModel):
     status: Literal["queued", "running", "ready", "failed"] = "queued"
     expires_at: datetime | None = None
     download_path: str | None = None
+
+
+# --- concept hierarchy (ADR-030): new models only, /v1/graph/* keeps hiding CHILD_OF --------------
+
+
+class ConceptOutput(FrozenModel):
+    id: str
+    type: str
+    label: str
+    status: str | None
+
+
+class SourceMentionOutput(FrozenModel):
+    source_id: str
+    title: str | None
+
+
+class HierarchyEvidenceOutput(FrozenModel):
+    source_id: str
+    fragment_id: str
+    locator: dict[str, Any] | None
+
+
+class HierarchyLinkOutput(FrozenModel):
+    id: str
+    child_id: str
+    parent_id: str
+    status: Literal["proposed", "approved", "rejected"]
+    confidence: float
+    evidence: tuple[HierarchyEvidenceOutput, ...]
+
+
+class ConceptHierarchyOutput(FrozenModel):
+    concept: ConceptOutput
+    mentioned_in: tuple[SourceMentionOutput, ...]
+    nodes: tuple[ConceptOutput, ...]
+    links: tuple[HierarchyLinkOutput, ...]
+    truncated: bool
+
+
+class HierarchyProposalList(FrozenModel):
+    items: tuple[HierarchyLinkOutput, ...]
+    nodes: tuple[ConceptOutput, ...]
+    truncated: bool
+
+
+class HierarchyReviewInput(FrozenModel):
+    status: Literal["approved", "rejected"]
+
+
+class ParentSuggestionInput(FrozenModel):
+    locale: Locale = Locale.EN
+
+
+# --- collections of sources (FR-4, FR-8); local and memory engines, 501 on Azure ----------------
+
+
+def _checked_name(name: str | None) -> str | None:
+    # collection_name raises a ValueError that never repeats the name: a plain 422.
+    return None if name is None else collection_name(name)
+
+
+class CollectionOutput(FrozenModel):
+    id: str
+    parent_id: str | None
+    name: str
+    created_at: datetime
+    source_count: int
+
+
+class CollectionList(FrozenModel):
+    items: tuple[CollectionOutput, ...]
+
+
+class CollectionCreate(FrozenModel):
+    name: str
+    parent_id: str | None = Field(default=None, max_length=64)
+
+    _name = field_validator("name")(_checked_name)
+
+
+class CollectionUpdate(FrozenModel):
+    """`parent_id` sent as null moves to the root; left out, the parent stays."""
+
+    name: str | None = None
+    parent_id: str | None = Field(default=None, max_length=64)
+
+    _name = field_validator("name")(_checked_name)

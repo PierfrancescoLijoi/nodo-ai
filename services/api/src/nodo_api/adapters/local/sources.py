@@ -7,6 +7,7 @@ and are read through the transcript repository."""
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from nodo_api.adapters.local.db import LocalDatabase, from_text, to_text
@@ -322,6 +323,20 @@ class SqliteSourceRepository:
                 params,
             ).fetchall()
         return tuple(_source(row) for row in rows)
+
+    def titles(
+        self, workspace_id: str, user_id: str, source_ids: Sequence[str]
+    ) -> dict[str, str | None]:
+        ids = list(dict.fromkeys(source_ids))
+        if not ids:
+            return {}
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                "SELECT id, title FROM sources WHERE workspace_id = ? AND owner_id = ?"
+                f" AND tombstoned_at IS NULL AND id IN ({', '.join('?' * len(ids))})",
+                (workspace_id, user_id, *ids),
+            ).fetchall()
+        return {row["id"]: row["title"] for row in rows}
 
 
 def _fragment(row: sqlite3.Row) -> Fragment:

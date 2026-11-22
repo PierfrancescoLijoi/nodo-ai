@@ -29,6 +29,7 @@ from nodo_api.resilience import Bulkhead, DependencyUnavailable, is_transient
 from nodo_api.services import (
     EvidenceValidator,
     GraphService,
+    HierarchyService,
     MeetingService,
     QueryService,
     SourceImportService,
@@ -73,6 +74,7 @@ class AppContainer:
     runtime: Any = None
     readiness: tuple[tuple[str, Callable[[], None]], ...] = ()
     query_gate: Bulkhead | None = None
+    suggestion_gate: Bulkhead | None = None
     speech: Any = None  # the speech adapter, for the local push-to-talk path
     sources: Any = None
     fragments: Any = None
@@ -82,6 +84,8 @@ class AppContainer:
     source_blobs: Any = None
     source_import: SourceImportService | None = None
     folder_watcher: Any = None
+    hierarchy: HierarchyService | None = None  # None on Azure: routes answer 501
+    collections: Any = None  # None on Azure: routes answer 501
 
 
 @asynccontextmanager
@@ -223,6 +227,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         settings.known_notice_versions,
         settings.known_retention_policies,
         a.answers,
+        collections=a.collections,
     )
     query_service = QueryService(
         a.meetings,
@@ -247,6 +252,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
             imports=a.imports,
             jobs=a.jobs,
             watch=a.folder_watcher.repository if a.folder_watcher is not None else None,
+            collections=a.collections,
         )
         if all(
             port is not None
@@ -259,6 +265,14 @@ def _container(settings: Settings, key_provider) -> AppContainer:
                 a.jobs,
             )
         )
+        else None
+    )
+    graph_service = GraphService(a.graph, a.audit, a.answers)
+    hierarchy = (
+        HierarchyService(
+            a.hierarchy_store, graph_service, a.fragments, a.sources, a.parent_suggester
+        )
+        if a.hierarchy_store is not None and a.fragments is not None and a.sources is not None
         else None
     )
     return AppContainer(
@@ -274,7 +288,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.audit,
         meeting_service,
         query_service,
-        GraphService(a.graph, a.audit, a.answers),
+        graph_service,
         SyncImportService(
             a.meetings,
             a.transcripts,
@@ -288,6 +302,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.runtime,
         a.readiness,
         Bulkhead("query", settings.max_concurrent_queries, wait_seconds=0.0),
+        Bulkhead("parent_suggestions", 1, wait_seconds=0.0),
         a.speech,
         a.sources,
         a.fragments,
@@ -296,6 +311,8 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.source_blobs,
         a.source_import,
         a.folder_watcher,
+        hierarchy,
+        collections=a.collections,
     )
 
 

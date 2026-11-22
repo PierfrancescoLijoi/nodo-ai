@@ -208,3 +208,19 @@ The app is served by the engine and receives the secret in the address fragment 
 ## Cloud only
 
 `PUT /v1/sync/meetings/{id}` receives one meeting from a local engine (ADR-015). Used by the engine, not by the app.
+## Phase 3 knowledge hierarchy APIs
+
+- `GET /v1/concepts/{concept_id}/hierarchy` walks approved parent links, optionally including
+  proposals, with bounded direction, depth and node count.
+- `GET /v1/hierarchy/proposals` lists reviewable `CHILD_OF` relations.
+- `PATCH /v1/hierarchy/links/{relation_id}` approves or rejects a proposal.
+- `POST /v1/concepts/{concept_id}/parent-suggestions` asks the configured local model for up to
+  three evidence-backed parents and writes them as proposals. Concurrent suggestion calls are
+  refused by a one-slot bulkhead.
+- `GET/POST/PATCH/DELETE /v1/collections` and the member routes manage nested source collections.
+- `GET /v1/sources/{source_id}/outline` returns the section tree, counts and locators.
+- `GET /v1/sources/{source_id}/fragments` returns fragments and accepts section and limit filters.
+
+Cycle attempts answer `would_create_cycle`; paths beyond six links answer `too_deep`. Unsupported
+engines answer `not_available_on_engine`; unavailable local models answer `model_unavailable`.
+The fragments route remains unbounded when `limit` is omitted for compatibility.

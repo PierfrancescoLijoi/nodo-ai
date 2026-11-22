@@ -22,6 +22,7 @@ from nodo_api.errors import ConflictError, NotFoundError, ValidationFailed
 from nodo_api.ports import (
     AuditLog,
     BlobStore,
+    CollectionRepository,
     GraphStore,
     JobQueue,
     MeetingRepository,
@@ -71,8 +72,10 @@ class MeetingService:
         known_notice_versions: tuple[str, ...],
         known_retention_policies: tuple[str, ...],
         answers: AnswerCache | None = None,
+        collections: CollectionRepository | None = None,
     ) -> None:
         self._answers = answers
+        self._collections = collections
         self._meetings = meetings
         self._transcripts = transcripts
         self._blobs = blobs
@@ -298,6 +301,8 @@ class MeetingService:
         self._graph.erase(workspace_id, meeting_id)
         self._blobs.erase(workspace_id, meeting_id)
         self._transcripts.erase(workspace_id, meeting_id)
+        if self._collections is not None:  # the memory store has no tombstone trigger
+            self._collections.forget_source(workspace_id, meeting_id)
         # Raises if it can not be recorded, and deleting is safe to repeat: the cache holds quotes.
         invalidate(self._answers, workspace_id, user_id)
         if first_time:

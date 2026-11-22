@@ -4,7 +4,7 @@ from collections.abc import Collection, Mapping, Sequence
 from contextlib import AbstractContextManager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from nodo_api.domain.answer_cache import AnswerKey, CachedAnswer
 from nodo_api.domain.documents import ParsedDocument
@@ -14,6 +14,7 @@ from nodo_api.domain.graph import (
     DocumentExtraction,
     Entity,
     EntityType,
+    Evidence,
     Extraction,
     GraphWriteResult,
     MeetingDigest,
@@ -23,6 +24,7 @@ from nodo_api.domain.graph import (
     SourceRef,
     Subgraph,
 )
+from nodo_api.domain.hierarchy import CoMention, ParentSuggestion
 from nodo_api.domain.maintenance import MaintenanceMeeting, PendingJob
 from nodo_api.domain.models import (
     Locale,
@@ -46,6 +48,9 @@ from nodo_api.domain.sources import (
     SourceVersion,
     WatchFile,
     WatchFolder,
+)
+from nodo_api.domain.sources import (
+    Collection as SourceCollection,
 )
 
 # Every method takes workspace_id (and, where data belongs to a person, the user or the set of
@@ -196,6 +201,13 @@ class SourceRepository(Protocol):
     ) -> tuple[Source, ...]:
         """Newest first, never tombstoned. Optional state is exact and title query is a
         case-insensitive substring. Pass the last (created_at, id) seen as `cursor`."""
+        ...
+
+    def titles(
+        self, workspace_id: str, user_id: str, source_ids: Sequence[str]
+    ) -> dict[str, str | None]:
+        """Current titles of the owner's live sources among `source_ids`, meetings included, in
+        one read. Missing, deleted or other owners' ids are absent."""
         ...
 
 
@@ -668,6 +680,128 @@ class GraphStore(Protocol):
         ...
 
 
+class CollectionRepository(Protocol):
+    """Owner-made nested collections of sources (FR-4, FR-8). Local and memory only. Names are
+    checked with `collection_name` (ValueError that never repeats the name)."""
+
+    def create(
+        self, workspace_id: str, owner_id: str, *, name: str, parent_id: str | None
+    ) -> SourceCollection:
+        """NotFoundError for a parent that is not the owner's; DuplicateName for a sibling with the
+        same normalized name; TooManyCollections past the limit; DepthRefused when the parent
+        already has six ancestors. Every check and the write are one atomic step."""
+        ...
+
+    def list_owned(self, workspace_id: str, owner_id: str) -> tuple[SourceCollection, ...]:
+        """Parents before children, siblings by normalized name, `source_count` of live sources."""
+        ...
+
+    def get_owned(
+        self, workspace_id: str, owner_id: str, collection_id: str
+    ) -> SourceCollection: ...
+
+    def update(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        collection_id: str,
+        *,
+        name: str | None = None,
+        parent_id: str | Clear | None = None,
+    ) -> SourceCollection:
+        """None leaves a field, CLEAR moves to the root; a move is checked with check_link over
+        the collection tree in the write (CycleRefused, DepthRefused), names as in create."""
+        ...
+
+    def delete(self, workspace_id: str, owner_id: str, collection_id: str) -> int:
+        """The collection and its subtree with their memberships; returns how many collections
+        went. Sources are never touched."""
+        ...
+
+    def add_source(
+        self, workspace_id: str, owner_id: str, collection_id: str, source_id: str
+    ) -> None:
+        """Idempotent. NotFoundError unless the collection and the live source are the owner's,
+        checked together with the insert (a source tombstoned meanwhile is never added)."""
+        ...
+
+    def remove_source(
+        self, workspace_id: str, owner_id: str, collection_id: str, source_id: str
+    ) -> None:
+        """Idempotent."""
+        ...
+
+    def list_sources(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        collection_id: str,
+        limit: int,
+        cursor: tuple[datetime, str] | None,
+    ) -> tuple[Source, ...]:
+        """Live member sources, newest first; NotFoundError for a collection not the owner's."""
+        ...
+
+    def collections_of(self, workspace_id: str, owner_id: str, source_id: str) -> tuple[str, ...]:
+        """Ids of the owner's collections that hold the source."""
+        ...
+
+    def forget_source(self, workspace_id: str, source_id: str) -> None:
+        """Remove every membership of the source (erasure)."""
+        ...
+
+
+class HierarchyStore(Protocol):
+    """Reads over the parent links between concepts (ADR-030). Only the memory and SQLite graph
+    stores implement it; the Azure engine has none."""
+
+    def hierarchy(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        entity_id: str,
+        *,
+        direction: Literal["parents", "children", "both"],
+        depth: int,
+        include_proposed: bool,
+        limit: int,
+    ) -> Subgraph:
+        """Walk CHILD_OF only (approved, plus proposed when asked, never rejected) from the seed,
+        breadth first, at most `depth` levels (ValueError outside 1..MAX_DEPTH). Nodes are unique,
+        seed first; every traversed edge comes once with its evidence; `truncated` when `limit`
+        nodes were reached. NotFoundError when the entity is not the owner's or is an origin
+        node."""
+        ...
+
+    def pending_hierarchy(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        """Proposed CHILD_OF relations, newest first, with their end entities and evidence."""
+        ...
+
+    def child_of(self, workspace_id: str, owner_id: str, relation_id: str) -> Relation:
+        """The owner's CHILD_OF relation, else NotFoundError."""
+        ...
+
+    def mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[Entity, ...]:
+        """The meeting and source nodes the entity is MENTIONED_IN, newest first."""
+        ...
+
+    def co_mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[CoMention, ...]: ...
+
+    def propose_child_of(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        child_id: str,
+        parent_id: str,
+        confidence: float,
+        evidence: tuple[Evidence, ...],
+    ) -> Relation | None: ...
+
+
 class Extractor(Protocol):
     def extract(
         self,
@@ -702,6 +836,16 @@ class DocumentExtractor(FragmentExtractor, Protocol):
         locale: Locale,
         known_decisions: tuple[Entity, ...] = (),
     ) -> DocumentExtraction: ...
+
+
+class ParentSuggester(Protocol):
+    def suggest(
+        self,
+        concept: Entity,
+        candidates: tuple[Entity, ...],
+        fragments: tuple[Fragment, ...],
+        locale: Locale,
+    ) -> tuple[ParentSuggestion, ...]: ...
 
 
 class LlmClient(Protocol):

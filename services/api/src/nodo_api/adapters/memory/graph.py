@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import copy
 import itertools
+import logging
 import math
 import threading
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -34,8 +36,11 @@ from nodo_api.domain.graph import (
     relation_id,
     source_entity_id,
 )
+from nodo_api.domain.hierarchy import CoMention, Direction, check_link, walk_links
 from nodo_api.domain.sources import SourceKind
-from nodo_api.errors import NotFoundError
+from nodo_api.errors import NotFoundError, refusal_error
+
+logger = logging.getLogger("nodo_graph")
 
 Key = tuple[str, str]  # (workspace_id, owner_id)
 
@@ -44,6 +49,7 @@ Key = tuple[str, str]  # (workspace_id, owner_id)
 class _Row:
     relation: Relation
     seq: int
+    batch: int = 0  # the write that created it, as created_at in SQLite (one stamp per write)
 
 
 @dataclass(slots=True)
@@ -113,6 +119,9 @@ class MemoryGraphStore:
             part = copy.deepcopy(self._part(workspace_id, user_id))
             self._drop_meeting_evidence(part, source.id, dropped_fragment_ids)
             self._write(part, workspace_id, user_id, node, source.id, extraction)
+            # The node follows the current title; concepts keep their first-writer label.
+            if node.id in part.entities:
+                part.entities[node.id] = replace(part.entities[node.id], label=node.label)
             self._parts[(workspace_id, user_id)] = part
 
     def _write(
@@ -125,6 +134,7 @@ class MemoryGraphStore:
         extraction: Extraction,
     ) -> None:
         refresh = node.type is EntityType.MEETING
+        before, batch = set(part.relations), next(self._clock)
         self._put_entity(part, node, origin_id, refresh)
         created_at = node.effective_at
         ids: dict[str, str] = {}
@@ -167,12 +177,16 @@ class MemoryGraphStore:
                     1.0,
                     self._evidence(origin_id, _by_key(extraction, key).evidence),
                 )
+        hierarchy = []
         for rel in extraction.relations:
             source, target = (
                 self._resolve(part, ids, rel.source),
                 self._resolve(part, ids, rel.target),
             )
             if source is None or target is None:
+                continue
+            if rel.kind is RelationKind.CHILD_OF:
+                hierarchy.append((source, target, rel))
                 continue
             self._add_relation(
                 part,
@@ -184,6 +198,43 @@ class MemoryGraphStore:
                 rel.confidence,
                 self._evidence(origin_id, rel.evidence),
             )
+        # Parent links one at a time, in extraction order, each checked against those before it.
+        refused: Counter[str] = Counter()
+
+        def kept(item) -> bool:
+            row = part.relations.get(
+                relation_id(workspace_id, owner_id, item[0], RelationKind.CHILD_OF, item[1])
+            )
+            return row is not None and row.relation.status is not ReviewStatus.REJECTED
+
+        # Links already on record go first, so a reviewed link never loses to a new proposal.
+        hierarchy.sort(key=lambda item: not kept(item))
+        for source, target, rel in hierarchy:
+            row = part.relations.get(
+                relation_id(workspace_id, owner_id, source, RelationKind.CHILD_OF, target)
+            )
+            # A row a reimport just stripped of evidence is about to be swept: it counts as new.
+            if row is None or (
+                row.relation.status is not ReviewStatus.REJECTED and not row.relation.evidence
+            ):
+                code = check_link(source, target, *_hierarchy_steps(part))
+                if code is not None:
+                    refused[code] += 1
+                    continue
+            self._add_relation(
+                part,
+                workspace_id,
+                owner_id,
+                source,
+                RelationKind.CHILD_OF,
+                target,
+                rel.confidence,
+                self._evidence(origin_id, rel.evidence),
+            )
+        for code, count in sorted(refused.items()):
+            logger.info("hierarchy_link_refused code=%s count=%d", code, count)
+        for rid in part.relations.keys() - before:
+            part.relations[rid].batch = batch
         self._sweep(part)
         self._restore_supersession(part)
         for row in part.relations.values():
@@ -431,6 +482,15 @@ class MemoryGraphStore:
             raise NotFoundError if row is None else ValueError("A review is approved or rejected")
         if meetings_only and _show(_View(part), row.relation) is None:
             raise NotFoundError  # hidden from that view: nothing is written
+        rel = row.relation
+        if (
+            rel.kind is RelationKind.CHILD_OF
+            and status is ReviewStatus.APPROVED
+            and rel.status is ReviewStatus.REJECTED
+        ):
+            code = check_link(rel.source_id, rel.target_id, *_hierarchy_steps(part, exclude=rel.id))
+            if code is not None:
+                raise refusal_error(code)
         row.relation = replace(row.relation, status=status)
         if row.relation.kind is RelationKind.SUPERSEDES:
             now = datetime.now(UTC)
@@ -627,6 +687,183 @@ class MemoryGraphStore:
                 changes.append(Change(rel.id, new.label, old.label, meeting, new.effective_at))
         return tuple(changes)
 
+    # --------------------------------------------------------------- hierarchy
+
+    def hierarchy(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        entity_id: str,
+        *,
+        direction: Direction,
+        depth: int,
+        include_proposed: bool,
+        limit: int,
+    ) -> Subgraph:
+        part = self._parts.get((workspace_id, owner_id)) or _Partition()
+        seed = part.entities.get(entity_id)
+        if seed is None or seed.type in ORIGIN_TYPES:
+            raise NotFoundError
+        statuses = _LIVE if include_proposed else frozenset({ReviewStatus.APPROVED})
+
+        def links(ids: frozenset[str], up: bool) -> list[Relation]:
+            return [
+                r for r in _child_of(part, statuses) if (r.source_id if up else r.target_id) in ids
+            ]
+
+        order, edges, truncated = walk_links(
+            entity_id, links, direction=direction, depth=depth, limit=limit
+        )
+        nodes = tuple(part.entities[i] for i in order if i in part.entities)
+        return Subgraph(nodes, tuple(edges), truncated)
+
+    def pending_hierarchy(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        part = self._parts.get((workspace_id, owner_id))
+        if part is None:
+            return Subgraph()
+        waiting = sorted(
+            (
+                r
+                for r in part.relations.values()
+                if r.relation.kind is RelationKind.CHILD_OF
+                and r.relation.status is ReviewStatus.PROPOSED
+                and r.relation.evidence
+            ),
+            key=lambda r: (-r.batch, r.relation.id),
+        )
+        chosen = [r.relation for r in waiting[:limit]]
+        ids = list(dict.fromkeys(i for r in chosen for i in (r.source_id, r.target_id)))
+        nodes = tuple(part.entities[i] for i in ids if i in part.entities)
+        return Subgraph(nodes, tuple(chosen), len(waiting) > limit)
+
+    def child_of(self, workspace_id: str, owner_id: str, relation_id_: str) -> Relation:
+        part = self._parts.get((workspace_id, owner_id))
+        row = part.relations.get(relation_id_) if part else None
+        if row is None or row.relation.kind is not RelationKind.CHILD_OF:
+            raise NotFoundError
+        return row.relation
+
+    def mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[Entity, ...]:
+        part = self._parts.get((workspace_id, owner_id))
+        if part is None:
+            return ()
+        nodes = {
+            r.relation.target_id
+            for r in part.relations.values()
+            if r.relation.kind is RelationKind.MENTIONED_IN
+            and r.relation.status is not ReviewStatus.REJECTED
+            and r.relation.source_id == entity_id
+        }
+        found = [part.entities[i] for i in nodes if i in part.entities]
+        found.sort(key=lambda e: (-e.effective_at.timestamp(), e.id))
+        return tuple(found[:limit])
+
+    def co_mentions(
+        self, workspace_id: str, owner_id: str, entity_id: str, limit: int
+    ) -> tuple[CoMention, ...]:
+        part = self._parts.get((workspace_id, owner_id))
+        seed = part.entities.get(entity_id) if part else None
+        if seed is None:
+            raise NotFoundError
+        mentions = {
+            row.relation.source_id: frozenset(row.relation.evidence)
+            for row in part.relations.values()
+            if row.relation.kind is RelationKind.MENTIONED_IN
+            and row.relation.status is not ReviewStatus.REJECTED
+        }
+        shared_with = mentions.get(entity_id, frozenset())
+        linked = {
+            other
+            for row in part.relations.values()
+            if row.relation.kind is RelationKind.CHILD_OF
+            and row.relation.status is not ReviewStatus.REJECTED
+            for other in (
+                [row.relation.target_id]
+                if row.relation.source_id == entity_id
+                else [row.relation.source_id]
+                if row.relation.target_id == entity_id
+                else []
+            )
+        }
+        descendants = set(
+            self.hierarchy(
+                workspace_id,
+                owner_id,
+                entity_id,
+                direction="children",
+                depth=6,
+                include_proposed=True,
+                limit=max(len(part.entities), 1),
+            ).nodes
+        )
+        descendant_ids = {entity.id for entity in descendants}
+        things = {EntityType.PROJECT, EntityType.SYSTEM, EntityType.TOPIC}
+        result = []
+        for candidate_id, candidate_evidence in mentions.items():
+            candidate = part.entities.get(candidate_id)
+            shared = tuple(
+                sorted(shared_with & candidate_evidence, key=lambda e: (e.source_id, e.fragment_id))
+            )
+            if (
+                candidate is not None
+                and candidate.type in things
+                and candidate_id != entity_id
+                and candidate_id not in linked
+                and candidate_id not in descendant_ids
+                and shared
+            ):
+                result.append(CoMention(candidate, shared))
+        result.sort(key=lambda item: (-len(item.evidence), item.entity.label, item.entity.id))
+        return tuple(result[:limit])
+
+    def propose_child_of(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        child_id: str,
+        parent_id: str,
+        confidence: float,
+        evidence: tuple[Evidence, ...],
+    ) -> Relation | None:
+        with self._lock:
+            part = self._parts.get((workspace_id, owner_id))
+            things = {EntityType.PROJECT, EntityType.SYSTEM, EntityType.TOPIC}
+            if (
+                part is None
+                or part.entities.get(child_id) is None
+                or part.entities.get(parent_id) is None
+                or part.entities[child_id].type not in things
+                or part.entities[parent_id].type not in things
+            ):
+                return None
+            mentions = {
+                row.relation.source_id: frozenset(row.relation.evidence)
+                for row in part.relations.values()
+                if row.relation.kind is RelationKind.MENTIONED_IN
+                and row.relation.status is not ReviewStatus.REJECTED
+            }
+            shared = mentions.get(child_id, frozenset()) & mentions.get(parent_id, frozenset())
+            kept = tuple(item for item in evidence if item in shared)
+            if not kept:
+                return None
+            rid = relation_id(workspace_id, owner_id, child_id, RelationKind.CHILD_OF, parent_id)
+            existing = part.relations.get(rid)
+            if existing is None and check_link(child_id, parent_id, *_hierarchy_steps(part)):
+                return None
+            self._add_relation(
+                part,
+                workspace_id,
+                owner_id,
+                child_id,
+                RelationKind.CHILD_OF,
+                parent_id,
+                confidence,
+                kept,
+            )
+            return part.relations[rid].relation
+
 
 class _View:
     """The meetings-only view (/v1, frozen clients): the meeting ids, and the entities a meeting
@@ -653,6 +890,36 @@ def _show(view: _View | None, rel: Relation) -> Relation | None:
     if rel.kind is RelationKind.CHILD_OF or not evidence:
         return None
     return replace(rel, evidence=evidence)
+
+
+_LIVE = frozenset({ReviewStatus.APPROVED, ReviewStatus.PROPOSED})
+
+
+def _child_of(
+    part: _Partition, statuses: frozenset[ReviewStatus], exclude: str | None = None
+) -> list[Relation]:
+    """The parent links with one of `statuses` that still have evidence."""
+    # ponytail: scans the whole partition per call (links x relations); memory is dev/test only.
+    return [
+        r.relation
+        for rid, r in part.relations.items()
+        if r.relation.kind is RelationKind.CHILD_OF
+        and r.relation.status in statuses
+        and r.relation.evidence
+        and rid != exclude
+    ]
+
+
+def _hierarchy_steps(part: _Partition, exclude: str | None = None):
+    """parents_of and children_of over the live parent links: not rejected, with evidence."""
+
+    def parents_of(ids: frozenset[str]) -> frozenset[str]:
+        return frozenset(r.target_id for r in _child_of(part, _LIVE, exclude) if r.source_id in ids)
+
+    def children_of(ids: frozenset[str]) -> frozenset[str]:
+        return frozenset(r.source_id for r in _child_of(part, _LIVE, exclude) if r.target_id in ids)
+
+    return parents_of, children_of
 
 
 def _sorted(group: dict[str, Entity] | None) -> tuple[Entity, ...]:

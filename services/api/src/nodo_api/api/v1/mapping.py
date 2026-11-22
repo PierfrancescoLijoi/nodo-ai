@@ -5,13 +5,18 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from collections.abc import Callable
 from datetime import datetime
 
 from nodo_api.api.v1.schemas import (
+    CollectionOutput,
+    ConceptOutput,
     EvidenceOutput,
     FragmentOutput,
     GraphEdgeOutput,
     GraphNodeOutput,
+    HierarchyEvidenceOutput,
+    HierarchyLinkOutput,
     ImportOutput,
     InsightAction,
     InsightDecision,
@@ -26,14 +31,24 @@ from nodo_api.api.v1.schemas import (
     SubgraphOutput,
 )
 from nodo_api.domain.graph import (
+    Entity,
     EntityType,
+    Evidence,
     MeetingDigest,
     Relation,
     RelationKind,
     Subgraph,
 )
 from nodo_api.domain.models import Meeting, SpeakerSummary
-from nodo_api.domain.sources import Fragment, ImportJob, Section, Source, SourceVersion
+from nodo_api.domain.sources import (
+    Collection,
+    Fragment,
+    ImportJob,
+    Locator,
+    Section,
+    Source,
+    SourceVersion,
+)
 from nodo_api.errors import ValidationFailed
 from nodo_api.services.ingestion import default_title
 
@@ -144,6 +159,17 @@ def source_output(source: Source) -> SourceOutput:
         origin=source.origin,
         language=source.language,
         version=source.version,
+        retention_until=source.retention_until,
+    )
+
+
+def collection_output(collection: Collection) -> CollectionOutput:
+    return CollectionOutput(
+        id=collection.id,
+        parent_id=collection.parent_id,
+        name=collection.name,
+        created_at=collection.created_at,
+        source_count=collection.source_count,
     )
 
 
@@ -177,13 +203,17 @@ def source_version_output(version: SourceVersion) -> SourceVersionOutput:
     )
 
 
-def section_output(section: Section) -> SectionOutput:
+def section_output(
+    section: Section, fragment_count: int = 0, first: Fragment | None = None
+) -> SectionOutput:
     return SectionOutput(
         id=section.id,
         parent_id=section.parent_id,
         ordinal=section.ordinal,
         level=section.level,
         title=section.title,
+        fragment_count=fragment_count,
+        first_locator=json.loads(first.locator.to_json()) if first else None,
     )
 
 
@@ -248,4 +278,36 @@ def edge_output(edge: Relation) -> GraphEdgeOutput:
         evidence=tuple(
             EvidenceOutput(meeting_id=e.meeting_id, segment_id=e.segment_id) for e in edge.evidence
         ),
+    )
+
+
+EVIDENCE_PER_LINK = 3  # keeps a hierarchy response bounded; the fragment is read for these only
+
+
+def concept_output(entity: Entity) -> ConceptOutput:
+    return ConceptOutput(
+        id=entity.id, type=entity.type.value, label=entity.label, status=entity.status
+    )
+
+
+def hierarchy_link_output(
+    edge: Relation, locate: Callable[[Evidence], Locator | None]
+) -> HierarchyLinkOutput:
+    evidence = []
+    for item in edge.evidence[:EVIDENCE_PER_LINK]:
+        locator = locate(item)
+        evidence.append(
+            HierarchyEvidenceOutput(
+                source_id=item.source_id,
+                fragment_id=item.fragment_id,
+                locator=json.loads(locator.to_json()) if locator is not None else None,
+            )
+        )
+    return HierarchyLinkOutput(
+        id=edge.id,
+        child_id=edge.source_id,
+        parent_id=edge.target_id,
+        status=edge.status.value,
+        confidence=edge.confidence,
+        evidence=tuple(evidence),
     )

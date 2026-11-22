@@ -593,3 +593,6 @@ NODO AI is open source under the [MIT License](LICENSE). Copyright 2026 Pierfran
   tests.
 - A live Azure subscription certification, provider latency run, production load/soak test and
   disaster-recovery rehearsal are still required before claiming production readiness.
+Phase 3 adds local concept hierarchies, nested source collections and document outline APIs.
+Hierarchy links are evidence-backed proposals with cycle and six-level depth guards; Azure parity
+remains planned for Phase 10.

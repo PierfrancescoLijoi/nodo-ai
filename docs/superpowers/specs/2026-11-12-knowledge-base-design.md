@@ -330,3 +330,11 @@ RTX 4050 Laptop 6 GB) on ten annotated fictional documents; details in
 
 Exact column types and indexes; chunk sizes and token budgets (measured, not guessed); prompt texts;
 catalog contents per hardware tier; installer tooling details; wording of UI strings (four languages).
+### Phase 3 outcome
+
+The local knowledge base now supports guarded multi-parent concept hierarchies, reviewable
+proposals from headings, extraction and on-demand suggestions, nested source collections, and
+source outline/section-fragment APIs. The guard includes pending proposals, so an incorrect pending
+direction can block its opposite until rejected. A partial reimport only proposes hierarchy for
+the re-extracted sections. Approved relations whose fragments disappear are swept rather than
+marked `needs_reconfirmation`; page staleness remains Phase 5.
