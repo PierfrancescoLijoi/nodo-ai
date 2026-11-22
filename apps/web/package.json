@@ -47,5 +47,11 @@
     "prettier": "^3.9.10",
     "typescript": "~6.0.3",
     "vitest": "^5.0.5"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-linux-x64-gnu": "1.2.15",
+    "@rolldown/binding-win32-x64-msvc": "1.2.15",
+    "lightningcss-linux-x64-gnu": "1.33.0",
+    "lightningcss-win32-x64-msvc": "1.33.0"
   }
 }
