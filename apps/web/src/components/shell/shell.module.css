@@ -101,6 +101,10 @@
   outline: none;
 }
 
+.mainWide {
+  max-width: 1540px;
+}
+
 .pageHeader {
   display: flex;
   flex-wrap: wrap;
@@ -179,7 +183,7 @@
     inset: auto 0 0;
     z-index: 10;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     padding-bottom: env(safe-area-inset-bottom);
     border-top: 1px solid var(--border);
     background: var(--surface);

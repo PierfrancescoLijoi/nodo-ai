@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Brain,
   ChatCircleText,
   ClipboardText,
   GearSix,
@@ -21,7 +22,14 @@ import styles from './shell.module.css';
 
 interface Destination {
   href: string;
-  label: 'tabs.home' | 'tabs.meetings' | 'tabs.ask' | 'tabs.graph' | 'review.title' | 'common.settings';
+  label:
+    | 'tabs.home'
+    | 'tabs.meetings'
+    | 'tabs.ask'
+    | 'tabs.brain'
+    | 'tabs.graph'
+    | 'review.title'
+    | 'common.settings';
   icon: Icon;
 }
 
@@ -29,6 +37,7 @@ const PRIMARY: Destination[] = [
   { href: '/', label: 'tabs.home', icon: House },
   { href: '/meetings/', label: 'tabs.meetings', icon: Notebook },
   { href: '/ask/', label: 'tabs.ask', icon: ChatCircleText },
+  { href: '/brain/', label: 'tabs.brain', icon: Brain },
   { href: '/graph/', label: 'tabs.graph', icon: TreeStructure },
 ];
 
@@ -105,7 +114,12 @@ export function AppShell({ connection, children }: { connection: Connection; chi
           </nav>
           <span className={styles.source}>{source}</span>
         </aside>
-        <main id="main" ref={main} tabIndex={-1} className={styles.main}>
+        <main
+          id="main"
+          ref={main}
+          tabIndex={-1}
+          className={`${styles.main} ${isCurrent(pathname, '/brain/') ? styles.mainWide : ''}`}
+        >
           {children}
         </main>
         <nav className={styles.tabbar} aria-label={t('web.navLabel')}>

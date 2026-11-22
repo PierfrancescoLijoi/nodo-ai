@@ -3,5 +3,6 @@ out/
 coverage/
 playwright-report/
 test-results/
+tmp-shots/
 next-env.d.ts
 *.tsbuildinfo

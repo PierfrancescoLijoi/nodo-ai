@@ -29,7 +29,7 @@ export interface Repository {
   nameSpeaker(meetingId: string, speakerId: string, name: string | null): Promise<Meeting>;
   listChanges(): Promise<Change[]>;
   ask(question: string, locale: Locale): Promise<Answer>;
-  getGraph(options?: { seedId?: string }): Promise<Graph>;
+  getGraph(options?: { seedId?: string; depth?: 1 | 2; limit?: number }): Promise<Graph>;
   listReviews(): Promise<ReviewItem[]>;
   reviewRelation(id: string, decision: ReviewDecision): Promise<void>;
   startExport(): Promise<ExportJob>;
@@ -178,10 +178,12 @@ export function createRepository(
 
     async getGraph(options) {
       const seed = options?.seedId ? `&seed_id=${encodeURIComponent(options.seedId)}` : '';
+      const depth = options?.depth ?? 1;
+      const limit = Math.min(200, Math.max(1, options?.limit ?? 40));
       return mapGraph(
         parse(
           wire.subgraph,
-          await client.get(`/v1/graph/subgraph?depth=1&limit=40&include_proposed=true${seed}`),
+          await client.get(`/v1/graph/subgraph?depth=${depth}&limit=${limit}&include_proposed=true${seed}`),
         ),
       );
     },
