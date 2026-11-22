@@ -10,8 +10,16 @@ from uuid import uuid4
 from nodo_api.domain.answer_cache import CachedAnswer
 from nodo_api.domain.graph import ORIGIN_TYPES, Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
+from nodo_api.domain.sources import Fragment
 from nodo_api.errors import NotFoundError
-from nodo_api.ports import GraphStore, LlmClient, MeetingRepository, Retriever, TranscriptRepository
+from nodo_api.ports import (
+    FragmentRepository,
+    GraphStore,
+    LlmClient,
+    MeetingRepository,
+    Retriever,
+    TranscriptRepository,
+)
 from nodo_api.resilience import DependencyUnavailable, Overloaded
 from nodo_api.services.answer_cache import AnswerCache, Lookup
 from nodo_api.services.entity_index import EntityIndexer
@@ -86,23 +94,26 @@ def entity_support(graph: Subgraph) -> dict[str, frozenset[tuple[str, str]]]:
 class EvidenceValidator:
     """Nothing the model says is trusted: citations and entities must be backed by evidence."""
 
-    def __init__(self, transcripts: TranscriptRepository) -> None:
+    def __init__(
+        self, transcripts: TranscriptRepository, fragments: FragmentRepository | None = None
+    ) -> None:
         self._transcripts = transcripts
+        self._fragments = fragments
 
     def validate(
         self,
         workspace_id: str,
         generated: GeneratedAnswer,
-        retrieved: tuple[TranscriptSegment, ...],
+        retrieved: tuple[TranscriptSegment | Fragment, ...],
         graph: Subgraph | None = None,
         owns: Callable[[str], bool] | None = None,
     ) -> GeneratedAnswer:
-        retrieved_keys = {(segment.meeting_id, segment.id) for segment in retrieved}
+        retrieved_keys = {self._key(item) for item in retrieved}
         valid = tuple(
             citation
             for citation in generated.citations
-            if (citation.meeting_id, citation.segment_id) in retrieved_keys
-            and (owns is None or owns(citation.meeting_id))
+            if self._citation_key(citation) in retrieved_keys
+            and (owns is None or owns(citation.evidence_source_id))
             and self._accessible(workspace_id, citation)
         )
         if not valid:
@@ -110,7 +121,7 @@ class EvidenceValidator:
         answerability = generated.answerability
         if len(valid) < len(generated.citations):
             answerability = Answerability.PARTIAL
-        cited = {(c.meeting_id, c.segment_id) for c in valid}
+        cited = {self._citation_key(c) for c in valid}
         entities = self._entities(generated, entity_support(graph or Subgraph()), cited)
         return replace(
             generated, answerability=answerability, citations=valid, related_entities=entities
@@ -122,10 +133,26 @@ class EvidenceValidator:
         """An answer given earlier may be repeated only while every quote it cites is still there,
         word for word, in a meeting the person still owns."""
         return bool(citations) and all(
-            owns(c.meeting_id) and self._accessible(workspace_id, c) for c in citations
+            owns(c.evidence_source_id) and self._accessible(workspace_id, c) for c in citations
         )
 
     def _accessible(self, workspace_id: str, citation: Citation) -> bool:
+        if citation.source_id is not None or citation.fragment_id is not None:
+            if self._fragments is None or not citation.source_id or not citation.fragment_id:
+                return False
+            fragment = self._fragments.get_fragment(
+                workspace_id, citation.source_id, citation.fragment_id
+            )
+            return (
+                fragment is not None
+                and bool(citation.quote.strip())
+                and citation.source_version is not None
+                and citation.source_version > 0
+                and fragment.version == citation.source_version
+                and citation.locator is not None
+                and fragment.locator == citation.locator
+                and citation.quote in fragment.text
+            )
         segment = self._transcripts.get_segment(
             workspace_id, citation.meeting_id, citation.segment_id
         )
@@ -134,6 +161,16 @@ class EvidenceValidator:
             and segment.end_ms == citation.end_ms
             and segment.text == citation.quote
         )
+
+    @staticmethod
+    def _key(item: TranscriptSegment | Fragment) -> tuple[str, str]:
+        if isinstance(item, Fragment):
+            return item.source_id, item.id
+        return item.meeting_id, item.id
+
+    @staticmethod
+    def _citation_key(citation: Citation) -> tuple[str, str]:
+        return citation.evidence_source_id, citation.evidence_fragment_id
 
     @staticmethod
     def _entities(

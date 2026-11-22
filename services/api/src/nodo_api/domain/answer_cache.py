@@ -39,28 +39,43 @@ class CachedAnswer:
 
 
 def citations_to_json(citations: tuple[Citation, ...]) -> list[dict[str, Any]]:
-    return [
-        {
-            "meeting_id": c.meeting_id,
-            "segment_id": c.segment_id,
-            "start_ms": c.start_ms,
-            "end_ms": c.end_ms,
-            "quote": c.quote,
-            "speaker_id": c.speaker_id,
+    items: list[dict[str, Any]] = []
+    for citation in citations:
+        item: dict[str, Any] = {
+            "meeting_id": citation.meeting_id,
+            "segment_id": citation.segment_id,
+            "start_ms": citation.start_ms,
+            "end_ms": citation.end_ms,
+            "quote": citation.quote,
+            "speaker_id": citation.speaker_id,
         }
-        for c in citations
-    ]
+        if citation.source_id is not None:
+            item["source_id"] = citation.source_id
+        if citation.fragment_id is not None:
+            item["fragment_id"] = citation.fragment_id
+        if citation.source_version is not None:
+            item["source_version"] = citation.source_version
+        if citation.locator is not None:
+            item["locator"] = citation.locator.to_json()
+        items.append(item)
+    return items
 
 
 def citations_from_json(items: list[dict[str, Any]]) -> tuple[Citation, ...]:
+    from nodo_api.domain.sources import Locator
+
     return tuple(
         Citation(
-            i["meeting_id"],
-            i["segment_id"],
-            i["start_ms"],
-            i["end_ms"],
+            i.get("meeting_id", ""),
+            i.get("segment_id", ""),
+            i.get("start_ms", 0),
+            i.get("end_ms", 0),
             i["quote"],
-            i["speaker_id"],
+            i.get("speaker_id", ""),
+            i.get("source_id"),
+            i.get("fragment_id"),
+            i.get("source_version"),
+            Locator.from_json(i["locator"]) if i.get("locator") is not None else None,
         )
         for i in items
     )
