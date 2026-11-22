@@ -98,6 +98,7 @@ export interface GraphEdge {
   kind: RelationKind;
   status?: 'proposed' | 'approved';
   confidence?: number;
+  meetingIds?: string[];
 }
 
 export interface Graph {
