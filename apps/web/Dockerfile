@@ -11,7 +11,7 @@ COPY . .
 # nginx header file, with the deployment's connection origins left as a variable.
 RUN npm run build && node scripts/render-edge.mjs out edge
 
-FROM nginxinc/nginx-unprivileged:1.30.7-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine AS runtime
 # The stable nginx line, and on top the fixes Alpine has published since the base image was built
 # (openssl, curl, zlib, expat ...), so what runs is what a build today would give. Back to the image's own user after.
 USER root
