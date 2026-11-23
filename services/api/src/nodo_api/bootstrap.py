@@ -56,6 +56,7 @@ class Adapters:
     collections: Any = None  # nested collections of sources (FR-8); local and memory, None on Azure
     parent_suggester: Any = None  # reviewable concept parent suggestions; local and memory only
     section_summaries: Any = None  # version-pinned section context; local and memory only
+    section_summary_service: Any = None  # lazy/best-effort generator for that derived context
 
 
 @dataclass(slots=True)
@@ -191,6 +192,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         collections=MemoryCollectionRepository(sources),
         parent_suggester=KeywordParentSuggester(),
         section_summaries=section_summaries,
+        section_summary_service=section_summary_service,
         # No poll thread here: nothing scans unless a caller runs scan_once.
         folder_watcher=FolderWatcher(
             MemoryWatchFolderRepository(), source_import, source_blobs, source_blobs.root

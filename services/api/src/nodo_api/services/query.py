@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +29,7 @@ from nodo_api.resilience import DependencyUnavailable, Overloaded
 from nodo_api.services.answer_cache import AnswerCache, Lookup
 from nodo_api.services.context import expand_context
 from nodo_api.services.entity_index import EntityIndexer
+from nodo_api.services.section_summaries import SectionSummaryService
 from nodo_api.telemetry import instruments, span, timed
 
 MAX_GRAPH_DEPTH = 2
@@ -42,6 +44,7 @@ MAX_TERMS = 8
 RRF_K = 60
 MAX_CONTEXT_TOKENS = 2_000
 _WORD = re.compile(r"\w+")
+logger = logging.getLogger("nodo_query")
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +258,7 @@ class QueryService:
         sources: SourceRepository | None = None,
         fragment_index: FragmentIndex | None = None,
         fragments: FragmentRepository | None = None,
+        section_summaries: SectionSummaryService | None = None,
     ) -> None:
         self._answers = answers
         self._meetings = meetings
@@ -267,6 +271,7 @@ class QueryService:
         self._sources = sources
         self._fragment_index = fragment_index
         self._fragments = fragments
+        self._section_summaries = section_summaries
 
     def _owner_check(self, workspace_id: str, user_id: str) -> Callable[[str], bool]:
         """Second look at every cited meeting (a handful), independent of the search filter."""
@@ -449,10 +454,10 @@ class QueryService:
             meeting_hits = _available(meetings)
             fragment_hits = _available(fragments) if fragments is not None else ()
         evidence = _fuse_evidence(meeting_hits, fragment_hits)
-        return self._expand_context(workspace_id, evidence)
+        return self._expand_context(workspace_id, evidence, request.ui_locale)
 
     def _expand_context(
-        self, workspace_id: str, evidence: tuple[Fragment, ...]
+        self, workspace_id: str, evidence: tuple[Fragment, ...], locale: Locale
     ) -> tuple[Fragment, ...]:
         if self._fragments is None:
             return evidence
@@ -462,7 +467,19 @@ class QueryService:
                 nearby.extend(self._fragments.latest(workspace_id, source_id))
             except NotFoundError:
                 continue
-        return expand_context(evidence, nearby, (), MAX_CONTEXT_TOKENS).fragments
+        summaries = []
+        if self._section_summaries is not None:
+            for section_id in dict.fromkeys(f.section_id for f in evidence if f.section_id):
+                try:
+                    summary = self._section_summaries.get_or_generate(
+                        workspace_id, section_id, nearby, locale
+                    )
+                except Exception as error:
+                    logger.warning("section_summary_skipped type=%s", type(error).__name__)
+                else:
+                    if summary is not None:
+                        summaries.append(summary)
+        return expand_context(evidence, nearby, summaries, MAX_CONTEXT_TOKENS).fragments
 
     def _context_graph(
         self,
