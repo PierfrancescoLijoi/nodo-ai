@@ -314,7 +314,19 @@ class QueryService:
         if self._answers is None:
             return Lookup()
         return self._answers.lookup(
-            workspace_id, user_id, request.question, request.ui_locale, filters
+            workspace_id,
+            user_id,
+            request.question,
+            request.ui_locale,
+            filters,
+            {
+                "citation_format": request.citation_format.value,
+                "scope_mode": request.scope.mode.value,
+                "source_ids": sorted(request.scope.source_ids)
+                if request.scope.source_ids
+                else None,
+                "context_version": "section-v1",
+            },
         )
 
     def _from_cache(
