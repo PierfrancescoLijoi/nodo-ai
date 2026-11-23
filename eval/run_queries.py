@@ -40,7 +40,7 @@ from nodo_api.services.query import EvidenceValidator, QueryRequest, QueryServic
 
 ROOT = Path(__file__).resolve().parent
 OWNERS = {"workspace-north": "user-north-01", "workspace-south": "user-south-01"}
-MEMORY_LLM_EVIDENCE_CAP = 5
+MEMORY_LLM_EVIDENCE_CAP = 3
 
 
 class LimitedRetriever:
@@ -236,14 +236,17 @@ def main() -> int:
                     "memory-llm needs an installed llama-server and GGUF model"
                 )
             server = LlamaServer(
-                paths.llama_server, paths.llm_gguf, Path(folder) / "llama.pid"
+                paths.llama_server,
+                paths.llm_gguf,
+                Path(folder) / "llama.pid",
+                context=4096,
             )
             adapters.llm = LocalLlm(
                 server,
                 GpuArbiter(),
                 {
                     "temperature": 0.0,
-                    "max_tokens": 256,
+                    "max_tokens": 128,
                     "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
                 },
             )
