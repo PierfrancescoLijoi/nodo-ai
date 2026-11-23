@@ -84,7 +84,7 @@ class QueryResult(GeneratedAnswer):
     query_trace_id: str = ""
     degraded: bool = False  # the language model was unavailable: sources only, no written answer
     model_version: str = "mock-llm-v1"
-    retrieval_version: str = "hybrid-graph-v1"
+    retrieval_version: str = "hybrid-source-v2"
 
 
 def _citation_for_fragment(fragment: Fragment) -> Citation:
@@ -330,6 +330,7 @@ class QueryService:
                 if request.scope.source_ids
                 else None,
                 "context_version": "section-v1",
+                "retrieval_version": "hybrid-source-v2",
             },
         )
 
