@@ -69,6 +69,20 @@ def test_page_can_keep_an_approved_revision_while_a_refresh_proposal_exists():
         PageProposal("proposal-2", page.id, (), PageProvenance("model", "prompt"), NOW)
 
 
+def test_new_page_is_proposed_before_its_first_approved_revision():
+    page = Page(
+        "page-2",
+        "workspace-1",
+        "owner-1",
+        PageKind.CONCEPT,
+        "concept-2",
+        PageStatus.PROPOSED,
+        NOW,
+    )
+
+    assert page.current_revision is None
+
+
 def test_machine_provenance_is_complete_and_human_provenance_is_empty():
     assert PageProvenance("model-v1", "prompt-v1").machine_generated
     assert not PageProvenance().machine_generated
