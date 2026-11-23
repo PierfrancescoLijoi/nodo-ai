@@ -68,3 +68,12 @@ class SectionSummaryService:
         except NotFoundError:
             return None  # replacement or deletion won the race
         return summary
+
+
+class FirstFragmentSectionSummarizer:
+    """Deterministic in-memory adapter for tests and the demo engine."""
+
+    model_version = "memory-summary-v1"
+
+    def summarize(self, locale: Locale, fragments: tuple[Fragment, ...]) -> str:
+        return " ".join(fragment.text for fragment in fragments)[:MAX_SUMMARY_CHARS]

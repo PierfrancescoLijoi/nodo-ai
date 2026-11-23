@@ -118,6 +118,10 @@ def memory_adapters(settings: Settings) -> Adapters:
     from nodo_api.adapters.memory.extractor import KeywordExtractor
     from nodo_api.adapters.memory.fragment_extractor import KeywordFragmentExtractor
     from nodo_api.services.folder_watch import FolderWatcher
+    from nodo_api.services.section_summaries import (
+        FirstFragmentSectionSummarizer,
+        SectionSummaryService,
+    )
     from nodo_api.services.source_import import SourceImportService
 
     meetings = MemoryMeetingRepository()
@@ -131,6 +135,9 @@ def memory_adapters(settings: Settings) -> Adapters:
     audit = MemoryAuditLog()
     fragments = MemoryFragmentRepository(sources, transcripts)
     section_summaries = MemorySectionSummaryRepository(sources, fragments)
+    section_summary_service = SectionSummaryService(
+        section_summaries, FirstFragmentSectionSummarizer()
+    )
     imports = MemoryImportJobRepository(sources)
     fragment_index = MemoryFragmentIndex(sources)
     fragment_extractor = ChunkedFragmentExtractor(
@@ -156,6 +163,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         control=queue,
         speech=MemorySpeech(),
         speech_locales=settings.speech_candidate_locales,
+        section_summaries=section_summary_service,
     )
     return Adapters(
         meetings,
