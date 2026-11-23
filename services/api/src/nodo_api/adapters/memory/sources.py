@@ -411,6 +411,12 @@ class MemorySectionSummaryRepository:
     def get(
         self, workspace_id: str, source_id: str, section_id: str, source_version: int
     ) -> SectionSummary | None:
+        try:
+            source = self._sources.get_for_processing(workspace_id, source_id)
+        except NotFoundError:
+            return None
+        if source.version != source_version:
+            return None
         return self._summaries.get((workspace_id, source_id, section_id, source_version))
 
     def put(self, workspace_id: str, summary: SectionSummary) -> None:

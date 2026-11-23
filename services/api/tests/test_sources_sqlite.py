@@ -7,12 +7,17 @@ import pytest
 
 from nodo_api.adapters.local.db import LocalDatabase
 from nodo_api.adapters.local.repos import SqliteMeetingRepository, SqliteTranscriptRepository
-from nodo_api.adapters.local.sources import SqliteFragmentRepository, SqliteSourceRepository
+from nodo_api.adapters.local.sources import (
+    SqliteFragmentRepository,
+    SqliteSectionSummaryRepository,
+    SqliteSourceRepository,
+)
 from nodo_api.domain.models import Locale, Meeting, MeetingState, RecordingAttestation
+from tests.section_summary_contract import SectionSummaryContract
 from tests.source_contract import T0, FragmentContract, SourceContract
 
 
-class TestSqliteSources(SourceContract, FragmentContract):
+class TestSqliteSources(SourceContract, FragmentContract, SectionSummaryContract):
     @pytest.fixture
     def db(self, tmp_path):
         db = LocalDatabase(tmp_path / "nodo.db")
@@ -26,6 +31,10 @@ class TestSqliteSources(SourceContract, FragmentContract):
     @pytest.fixture
     def fragments(self, db):
         return SqliteFragmentRepository(db)
+
+    @pytest.fixture
+    def summaries(self, db):
+        return SqliteSectionSummaryRepository(db)
 
     @pytest.fixture
     def ws(self):
