@@ -22,9 +22,7 @@ class PageKind(StrEnum):
 
 
 class PageStatus(StrEnum):
-    PROPOSED = "proposed"
     APPROVED = "approved"
-    REJECTED = "rejected"
     STALE = "stale"
 
 
@@ -111,6 +109,27 @@ class PageRevision:
 
 
 @dataclass(frozen=True, slots=True)
+class PageProposal:
+    """A replaceable machine draft kept beside, never inside, an authoritative Page revision."""
+
+    id: str
+    page_id: str
+    claims: tuple[PageClaim, ...]
+    provenance: PageProvenance
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        if not self.id or not self.page_id:
+            raise ValueError("A Page proposal needs id and page")
+        if not self.provenance.machine_generated:
+            raise ValueError("A Page proposal needs machine provenance")
+        if not self.claims:
+            raise ValueError("A Page proposal needs a claim")
+        if any(not claim.machine_generated for claim in self.claims):
+            raise ValueError("A Page proposal contains only machine-generated claims")
+
+
+@dataclass(frozen=True, slots=True)
 class Page:
     id: str
     workspace_id: str
@@ -126,7 +145,5 @@ class Page:
             raise ValueError("A Page needs id, workspace, owner and subject")
         if self.current_revision is not None and self.current_revision < 1:
             raise ValueError("A Page revision starts at 1")
-        if self.status is PageStatus.PROPOSED and self.current_revision is not None:
-            raise ValueError("A proposed Page cannot have a revision")
         if self.status in {PageStatus.APPROVED, PageStatus.STALE} and self.current_revision is None:
             raise ValueError("An approved or stale Page needs a revision")

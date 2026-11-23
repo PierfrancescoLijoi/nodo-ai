@@ -7,6 +7,7 @@ from nodo_api.domain.pages import (
     PageCitation,
     PageClaim,
     PageKind,
+    PageProposal,
     PageProvenance,
     PageRevision,
     PageStatus,
@@ -42,7 +43,7 @@ def test_page_revision_is_append_only_numbered_and_has_claims_in_body_order():
         PageRevision("page-1", 0, "Fact", "user-1", NOW, (claim,))
 
 
-def test_page_keeps_current_revision_separate_from_a_proposal_status():
+def test_page_can_keep_an_approved_revision_while_a_refresh_proposal_exists():
     page = Page(
         "page-1",
         "workspace-1",
@@ -55,17 +56,17 @@ def test_page_keeps_current_revision_separate_from_a_proposal_status():
     )
 
     assert page.current_revision == 2
-    with pytest.raises(ValueError, match="proposed Page cannot have a revision"):
-        Page(
-            "page-2",
-            "workspace-1",
-            "owner-1",
-            PageKind.CONCEPT,
-            "concept-1",
-            PageStatus.PROPOSED,
-            NOW,
-            current_revision=1,
-        )
+    proposal = PageProposal(
+        "proposal-1",
+        page.id,
+        (PageClaim(0, (0, 4), "Fact", "hash", (citation(),), True),),
+        PageProvenance("model", "prompt"),
+        NOW,
+    )
+
+    assert proposal.page_id == page.id
+    with pytest.raises(ValueError, match="needs a claim"):
+        PageProposal("proposal-2", page.id, (), PageProvenance("model", "prompt"), NOW)
 
 
 def test_machine_provenance_is_complete_and_human_provenance_is_empty():

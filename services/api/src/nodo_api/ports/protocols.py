@@ -34,7 +34,7 @@ from nodo_api.domain.models import (
     SpokenPhrase,
     TranscriptSegment,
 )
-from nodo_api.domain.pages import Page, PageClaim, PageProvenance, PageRevision
+from nodo_api.domain.pages import Page, PageProposal, PageRevision
 from nodo_api.domain.retention import AudioDue
 from nodo_api.domain.source_files import UploadSession
 from nodo_api.domain.sources import (
@@ -341,12 +341,7 @@ class PageRepository(Protocol):
     synchronous deletion path; an implementation must not defer it to a background worker.
     """
 
-    def put_proposal(
-        self,
-        page: Page,
-        claims: tuple[PageClaim, ...],
-        provenance: PageProvenance,
-    ) -> None:
+    def put_proposal(self, page: Page, proposal: PageProposal) -> None:
         """Store or replace an unapproved proposal. Implementations reject invalid state."""
         ...
 
@@ -356,7 +351,7 @@ class PageRepository(Protocol):
 
     def proposal(
         self, workspace_id: str, owner_id: str, page_id: str
-    ) -> tuple[tuple[PageClaim, ...], PageProvenance] | None:
+    ) -> PageProposal | None:
         """Read an owner's pending proposal; approved revisions are never returned as a proposal."""
         ...
 
