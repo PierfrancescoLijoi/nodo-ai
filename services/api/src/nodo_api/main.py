@@ -234,10 +234,12 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.retriever,
         a.graph,
         a.llm,
-        EvidenceValidator(a.transcripts),
+        EvidenceValidator(a.transcripts, a.fragments),
         settings.graph_node_limit,
         a.entity_indexer,
         a.answers,
+        a.sources,
+        a.fragment_index,
     )
     source_service = (
         SourceService(

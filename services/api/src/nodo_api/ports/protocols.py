@@ -493,9 +493,12 @@ class Retriever(Protocol):
         query: str,
         filters: dict[str, Any] | None,
         limit: int,
+        *,
+        source_ids: frozenset[str] | None = None,
     ) -> tuple[TranscriptSegment, ...]:
         """Only segments of meetings this owner owns. The owner is a field of every indexed
-        document, so the access check costs the same however many meetings there are."""
+        document, so the access check costs the same however many meetings there are. `source_ids`
+        narrows the search to those meeting sources; an empty set returns no evidence."""
         ...
 
     def count(self, workspace_id: str, meeting_id: str) -> int:
@@ -854,7 +857,7 @@ class LlmClient(Protocol):
         workspace_id: str,
         question: str,
         locale: Locale,
-        evidence: tuple[TranscriptSegment, ...],
+        evidence: tuple[Fragment, ...],
         graph: Subgraph,
     ) -> Any: ...
 

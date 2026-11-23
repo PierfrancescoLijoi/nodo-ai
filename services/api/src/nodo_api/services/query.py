@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
@@ -11,14 +12,16 @@ from nodo_api.domain.answer_cache import CachedAnswer
 from nodo_api.domain.graph import ORIGIN_TYPES, Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
 from nodo_api.domain.retrieval import CitationFormat, ResolvedQueryScope
-from nodo_api.domain.sources import Fragment
+from nodo_api.domain.sources import Fragment, FragmentHit
 from nodo_api.errors import NotFoundError
 from nodo_api.ports import (
+    FragmentIndex,
     FragmentRepository,
     GraphStore,
     LlmClient,
     MeetingRepository,
     Retriever,
+    SourceRepository,
     TranscriptRepository,
 )
 from nodo_api.resilience import DependencyUnavailable, Overloaded
@@ -35,6 +38,7 @@ MAX_ENTITY_LENGTH = 64
 SEED_ENTITIES = 5
 SEMANTIC_SEEDS = 3  # a few: a near miss only adds a neighbourhood to the model's context
 MAX_TERMS = 8
+RRF_K = 60
 _WORD = re.compile(r"\w+")
 
 
@@ -79,6 +83,55 @@ class QueryResult(GeneratedAnswer):
     degraded: bool = False  # the language model was unavailable: sources only, no written answer
     model_version: str = "mock-llm-v1"
     retrieval_version: str = "hybrid-graph-v1"
+
+
+def _citation_for_fragment(fragment: Fragment) -> Citation:
+    """Build a citation without trusting generated fields during model degradation."""
+    if fragment.locator.time_ms is not None:
+        return Citation(
+            fragment.source_id,
+            fragment.id,
+            fragment.locator.time_ms[0],
+            fragment.locator.time_ms[1],
+            fragment.text,
+            fragment.speaker_id or "",
+        )
+    return Citation(
+        quote=fragment.text,
+        source_id=fragment.source_id,
+        fragment_id=fragment.id,
+        source_version=fragment.version,
+        locator=fragment.locator,
+    )
+
+
+def _fuse_evidence(
+    meetings: tuple[TranscriptSegment, ...], fragments: tuple[FragmentHit, ...]
+) -> tuple[Fragment, ...]:
+    """Reciprocal-rank fusion, with a deterministic source/ordinal tie-breaker."""
+    ranked: dict[tuple[str, str], tuple[Fragment, float]] = {}
+    for rank, segment in enumerate(meetings, start=1):
+        fragment = Fragment.from_segment(segment, rank - 1)
+        ranked[(fragment.source_id, fragment.id)] = (fragment, 1.0 / (RRF_K + rank))
+    for rank, hit in enumerate(fragments, start=1):
+        fragment = hit.fragment
+        key = (fragment.source_id, fragment.id)
+        score = 1.0 / (RRF_K + rank)
+        earlier = ranked.get(key)
+        ranked[key] = (fragment, score + (earlier[1] if earlier else 0.0))
+    ordered = sorted(
+        ranked.values(),
+        key=lambda item: (-item[1], item[0].source_id, item[0].ordinal, item[0].id),
+    )
+    return tuple(fragment for fragment, _ in ordered[:MAX_EVIDENCE])
+
+
+def _available(future: Any) -> tuple[Any, ...]:
+    """A temporarily unavailable index may reduce recall, never relax the authorized filter."""
+    try:
+        return future.result()
+    except (DependencyUnavailable, Overloaded):
+        return ()
 
 
 def entity_support(graph: Subgraph) -> dict[str, frozenset[tuple[str, str]]]:
@@ -197,6 +250,8 @@ class QueryService:
         graph_node_limit: int,
         entities: EntityIndexer | None = None,
         answers: AnswerCache | None = None,
+        sources: SourceRepository | None = None,
+        fragment_index: FragmentIndex | None = None,
     ) -> None:
         self._answers = answers
         self._meetings = meetings
@@ -206,19 +261,24 @@ class QueryService:
         self._validator = validator
         self._graph_node_limit = graph_node_limit
         self._entities = entities
+        self._sources = sources
+        self._fragment_index = fragment_index
 
     def _owner_check(self, workspace_id: str, user_id: str) -> Callable[[str], bool]:
         """Second look at every cited meeting (a handful), independent of the search filter."""
         cache: dict[str, bool] = {}
 
-        def owns(meeting_id: str) -> bool:
-            if meeting_id not in cache:
+        def owns(source_id: str) -> bool:
+            if source_id not in cache:
                 try:
-                    self._meetings.get_owned(workspace_id, user_id, meeting_id)
-                    cache[meeting_id] = True
+                    if self._sources is not None:
+                        self._sources.get_owned(workspace_id, user_id, source_id)
+                    else:
+                        self._meetings.get_owned(workspace_id, user_id, source_id)
+                    cache[source_id] = True
                 except NotFoundError:
-                    cache[meeting_id] = False
-            return cache[meeting_id]
+                    cache[source_id] = False
+            return cache[source_id]
 
         return owns
 
@@ -290,9 +350,7 @@ class QueryService:
         owns: Callable[[str], bool],
     ) -> QueryResult:
         with span("query.retrieve") as retrieval:
-            evidence = self._retriever.search(
-                workspace_id, user_id, request.question, filters, MAX_EVIDENCE
-            )[:MAX_EVIDENCE]
+            evidence = self._retrieve(workspace_id, user_id, request, filters)
             retrieval.set_attribute("nodo.evidence", len(evidence))
         with span("query.graph"):
             vector = lookup.ticket.vector if lookup.ticket is not None else None
@@ -319,12 +377,59 @@ class QueryService:
         )
 
     @staticmethod
-    def _sources_only(evidence: tuple[TranscriptSegment, ...]) -> GeneratedAnswer:
+    def _sources_only(evidence: tuple[Fragment, ...]) -> GeneratedAnswer:
         citations = tuple(
-            Citation(s.meeting_id, s.id, s.start_ms, s.end_ms, s.text, s.speaker_id)
-            for s in evidence[:MAX_DEGRADED_SOURCES]
+            _citation_for_fragment(fragment) for fragment in evidence[:MAX_DEGRADED_SOURCES]
         )
         return GeneratedAnswer("", Answerability.PARTIAL, citations, ())
+
+    def _retrieve(
+        self,
+        workspace_id: str,
+        user_id: str,
+        request: QueryRequest,
+        filters: dict[str, Any] | None,
+    ) -> tuple[Fragment, ...]:
+        """Fuse authorized meeting and document searches with stable reciprocal-rank ordering.
+
+        The legacy route remains meeting-only. Source scopes query both indexes concurrently, and
+        every adapter receives the resolved source ids before it reads any candidate text.
+        """
+        scope = request.scope
+        if scope.mode.value == "legacy":
+            segments = self._retriever.search(
+                workspace_id, user_id, request.question, filters, MAX_EVIDENCE
+            )
+            return tuple(
+                Fragment.from_segment(segment, ordinal) for ordinal, segment in enumerate(segments)
+            )
+
+        source_ids = scope.source_ids
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="nodo-query") as pool:
+            meetings = pool.submit(
+                self._retriever.search,
+                workspace_id,
+                user_id,
+                request.question,
+                filters,
+                MAX_EVIDENCE,
+                source_ids=source_ids,
+            )
+            fragments = (
+                pool.submit(
+                    self._fragment_index.search,
+                    workspace_id,
+                    user_id,
+                    request.question,
+                    MAX_EVIDENCE,
+                    source_ids=source_ids,
+                )
+                if self._fragment_index is not None
+                else None
+            )
+            meeting_hits = _available(meetings)
+            fragment_hits = _available(fragments) if fragments is not None else ()
+        return _fuse_evidence(meeting_hits, fragment_hits)
 
     def _context_graph(
         self, workspace_id: str, user_id: str, question: str, vector: Sequence[float] | None = None
