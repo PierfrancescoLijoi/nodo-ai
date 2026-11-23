@@ -1,6 +1,6 @@
 # Golden-set evaluation
 
-The fixture set exercises grounded answers across meetings, languages, projects, deletion state, and workspace boundaries. The data is fictional and stable so CI results can be compared over time.
+The fixture set exercises grounded answers across meetings, languages, projects, deletion state, and workspace boundaries. Sixty hand-authored cases are expanded deterministically into 150 versioned wording variants, preserving each case's expected and forbidden evidence. The data is fictional and stable so CI results can be compared over time.
 
 Metrics follow the product blueprint:
 

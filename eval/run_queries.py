@@ -33,6 +33,7 @@ from nodo_api.domain.models import (
     TranscriptSegment,
 )
 from nodo_api.services.query import EvidenceValidator, QueryRequest, QueryService
+from golden import expanded_cases
 
 ROOT = Path(__file__).resolve().parent
 OWNERS = {"workspace-north": "user-north-01", "workspace-south": "user-south-01"}
@@ -182,11 +183,11 @@ def main() -> int:
         return 2
     backend, output = sys.argv[1], Path(sys.argv[2])
     locale = sys.argv[3] if len(sys.argv) > 3 else "en"
-    cases = [
+    cases = expanded_cases([
         json.loads(line)
         for line in (ROOT / "golden_set/cases.jsonl").read_text("utf-8").splitlines()
         if line
-    ]
+    ])
     meetings = json.loads(
         (ROOT / "golden_set/fixtures/meetings.json").read_text("utf-8")
     )["meetings"]
