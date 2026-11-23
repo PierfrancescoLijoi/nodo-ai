@@ -48,7 +48,7 @@ PROMPT_FINGERPRINT = hashlib.sha256(
     (SYSTEM_PROMPT + json.dumps(ANSWER_SCHEMA, sort_keys=True)).encode()
 ).hexdigest()[:12]
 
-_TAG = re.compile(r"</?\s*evidence\s*>", re.IGNORECASE)
+_TAG = re.compile(r"</?\s*(?:evidence|section-context)\s*>", re.IGNORECASE)
 
 
 def _clock(ms: int) -> str:
