@@ -34,6 +34,7 @@ from nodo_api.domain.models import (
     SpokenPhrase,
     TranscriptSegment,
 )
+from nodo_api.domain.pages import Page, PageClaim, PageProvenance, PageRevision
 from nodo_api.domain.retention import AudioDue
 from nodo_api.domain.source_files import UploadSession
 from nodo_api.domain.sources import (
@@ -330,6 +331,55 @@ class SectionSummaryRepository(Protocol):
         ...
 
     def erase_source(self, workspace_id: str, source_id: str) -> None: ...
+
+
+class PageRepository(Protocol):
+    """Authoritative, local Wiki Pages (ADR-031).
+
+    These methods are deliberately separate from source and fragment repositories: an approved
+    revision is user data, whereas a proposal is rebuildable. `redact_source` is part of the
+    synchronous deletion path; an implementation must not defer it to a background worker.
+    """
+
+    def put_proposal(
+        self,
+        page: Page,
+        claims: tuple[PageClaim, ...],
+        provenance: PageProvenance,
+    ) -> None:
+        """Store or replace an unapproved proposal. Implementations reject invalid state."""
+        ...
+
+    def get_owned(self, workspace_id: str, owner_id: str, page_id: str) -> Page:
+        """Return metadata only when it belongs to the owner, otherwise raise NotFoundError."""
+        ...
+
+    def proposal(
+        self, workspace_id: str, owner_id: str, page_id: str
+    ) -> tuple[tuple[PageClaim, ...], PageProvenance] | None:
+        """Read an owner's pending proposal; approved revisions are never returned as a proposal."""
+        ...
+
+    def append_revision(self, workspace_id: str, owner_id: str, revision: PageRevision) -> Page:
+        """Approve a proposal or append a human edit. Revision numbers must be contiguous."""
+        ...
+
+    def revisions(
+        self, workspace_id: str, owner_id: str, page_id: str
+    ) -> tuple[PageRevision, ...]:
+        """Return current and historical revisions newest first."""
+        ...
+
+    def mark_stale_for_source(self, workspace_id: str, source_id: str) -> tuple[str, ...]:
+        """Mark approved Pages whose claims cite a superseded source; return affected ids."""
+        ...
+
+    def redact_source(self, workspace_id: str, source_id: str) -> tuple[str, ...]:
+        """Synchronously redact all dependent revision claims before source fragments are erased.
+
+        A mapping failure must redact the whole revision. Returns Pages affected by the deletion.
+        """
+        ...
 
 
 class ImportJobRepository(Protocol):

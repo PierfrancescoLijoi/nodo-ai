@@ -57,6 +57,7 @@ class Adapters:
     parent_suggester: Any = None  # reviewable concept parent suggestions; local and memory only
     section_summaries: Any = None  # version-pinned section context; local and memory only
     section_summary_service: Any = None  # lazy/best-effort generator for that derived context
+    pages: Any = None  # cited Wiki pages; local and memory only until Phase 10
 
 
 @dataclass(slots=True)
