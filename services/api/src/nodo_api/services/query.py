@@ -477,14 +477,16 @@ class QueryService:
         ]
         legacy = scope is None or scope.mode.value == "legacy"
         source_ids = None if legacy else scope.source_ids
+        graph_scope = {"meetings_only": legacy}
+        if not legacy:
+            graph_scope["source_ids"] = source_ids
         seeds = list(
             self._graph.find_entities(
                 workspace_id,
                 user_id,
                 terms,
                 SEED_ENTITIES,
-                meetings_only=legacy,
-                source_ids=source_ids,
+                **graph_scope,
             )
         )
         if self._entities is not None:
@@ -506,6 +508,5 @@ class QueryService:
             fanout=GRAPH_FANOUT,
             include_proposed=False,
             as_of=None,
-            meetings_only=legacy,
-            source_ids=source_ids,
+            **graph_scope,
         )
