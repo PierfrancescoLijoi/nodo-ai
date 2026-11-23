@@ -354,7 +354,9 @@ class QueryService:
             retrieval.set_attribute("nodo.evidence", len(evidence))
         with span("query.graph"):
             vector = lookup.ticket.vector if lookup.ticket is not None else None
-            graph = self._context_graph(workspace_id, user_id, request.question, vector)
+            graph = self._context_graph(
+                workspace_id, user_id, request.question, vector, request.scope
+            )
         degraded = False
         try:
             with span("query.model"):
@@ -432,16 +434,27 @@ class QueryService:
         return _fuse_evidence(meeting_hits, fragment_hits)
 
     def _context_graph(
-        self, workspace_id: str, user_id: str, question: str, vector: Sequence[float] | None = None
+        self,
+        workspace_id: str,
+        user_id: str,
+        question: str,
+        vector: Sequence[float] | None = None,
+        scope: ResolvedQueryScope | None = None,
     ) -> Subgraph:
         """Entities the question names, plus their reviewed neighbourhood, within hard bounds."""
         terms = tuple(dict.fromkeys(w for w in _WORD.findall(question.lower()) if len(w) >= 3))[
             :MAX_TERMS
         ]
-        # Answers read meetings only: documents reach them through later routes, not this one.
+        legacy = scope is None or scope.mode.value == "legacy"
+        source_ids = None if legacy else scope.source_ids
         seeds = list(
             self._graph.find_entities(
-                workspace_id, user_id, terms, SEED_ENTITIES, meetings_only=True
+                workspace_id,
+                user_id,
+                terms,
+                SEED_ENTITIES,
+                meetings_only=legacy,
+                source_ids=source_ids,
             )
         )
         if self._entities is not None:
@@ -463,5 +476,6 @@ class QueryService:
             fanout=GRAPH_FANOUT,
             include_proposed=False,
             as_of=None,
-            meetings_only=True,
+            meetings_only=legacy,
+            source_ids=source_ids,
         )

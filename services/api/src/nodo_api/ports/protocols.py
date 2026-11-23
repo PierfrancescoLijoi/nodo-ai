@@ -589,11 +589,14 @@ class GraphStore(Protocol):
         types: frozenset[EntityType] | None = None,
         *,
         meetings_only: bool = False,
+        source_ids: frozenset[str] | None = None,
     ) -> tuple[Entity, ...]:
         """`meetings_only` (on every read /v1 uses) is the view frozen clients get: relations a
         meeting evidences (never CHILD_OF) with only their meeting evidence, and entities a meeting
         mentions. It is applied before limits, fanout and seeds, so documents never displace
-        meeting data. A store that holds no source data may ignore it."""
+        meeting data. `source_ids` filters relation evidence inside the store before seeds or
+        limits are applied; an empty set produces no graph. A store that holds no source data may
+        ignore the source filter."""
         ...
 
     def overview(
@@ -616,6 +619,7 @@ class GraphStore(Protocol):
         include_proposed: bool,
         as_of: datetime | None,
         meetings_only: bool = False,
+        source_ids: frozenset[str] | None = None,
     ) -> Subgraph: ...
 
     def review_relation(
