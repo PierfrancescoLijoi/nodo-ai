@@ -45,6 +45,15 @@ def find_gguf(repo_dir: str, pattern: str = "*.gguf") -> Path | None:
     return None
 
 
+def first_gguf(*candidates: tuple[str, str]) -> Path | None:
+    """The locally installed model wins; no download or model-manager mutation happens here."""
+    for repo_dir, pattern in candidates:
+        found = find_gguf(repo_dir, pattern)
+        if found is not None:
+            return found
+    return None
+
+
 def find_snapshot(repo_dir: str, required: str) -> Path | None:
     """Newest cached Hugging Face snapshot containing the required relative file."""
     snapshots = sorted(
@@ -76,6 +85,11 @@ class LocalModelPaths:
         root = models_dir or data_dir() / "models"
         server = root / "llama.cpp" / "llama-server.exe"
         server = server if server.exists() else root / "llama.cpp" / "llama-server"
+        if not server.exists():
+            import shutil
+
+            installed = shutil.which("llama-server")
+            server = Path(installed) if installed else server
         diarization = root / "diarization"
         embeddings = root / "embeddings" / "multilingual-e5-base"
         reranker = find_snapshot(
@@ -86,7 +100,13 @@ class LocalModelPaths:
 
         return cls(
             llama_server=server if server.exists() else None,
-            llm_gguf=find_gguf("models--Qwen--Qwen3-4B-GGUF", "Qwen3-4B-*.gguf"),
+            llm_gguf=first_gguf(
+                (
+                    "models--ggml-org--Qwen2.5-VL-3B-Instruct-GGUF",
+                    "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+                ),
+                ("models--Qwen--Qwen3-4B-GGUF", "Qwen3-4B-*.gguf"),
+            ),
             diarization_dir=diarization if diarization.exists() else None,
             embedding_dir=embeddings if (embeddings / "model.int8.onnx").exists() else None,
             reranker_dir=reranker,

@@ -17,6 +17,10 @@ python eval/validate_golden_set.py
 
 `run_queries.py` loads the fixtures into the real stores, asks every case in the chosen language through the query service and writes predictions that `score_results.py` compares with the expected and forbidden lists (`memory` for the wiring, `local` for the models the desktop app uses; a second pass measures the answer cache). Deleted segments and segments from other workspaces must never be returned. Results: `docs/benchmarks/`.
 
+When the E5 local embedding export is unavailable but llama.cpp and a GGUF are installed, use
+`memory-llm`: it retains the owner-filtered in-memory retrieval path while measuring the real local
+model's grounded answer and citations.
+
 The local adapter can experimentally rerank the top 20 ACL-filtered hybrid candidates with the
 small multilingual ONNX cross-encoder. It is disabled by default. Certify it with an A/B run for
 every language; never accept a

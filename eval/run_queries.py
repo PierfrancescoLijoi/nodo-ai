@@ -2,9 +2,12 @@
 
     services/api/.venv/Scripts/python eval/run_queries.py memory results.jsonl [locale]
     services/api/.venv/Scripts/python eval/run_queries.py local results.jsonl [locale]
+    services/api/.venv/Scripts/python eval/run_queries.py memory-llm results.jsonl [locale]
 
 `memory` uses the mock retriever and model: it proves the wiring, workspace and owner isolation and
-the handling of deleted text, not answer quality. `local` uses what the desktop app uses (SQLite,
+the handling of deleted text, not answer quality. `memory-llm` pairs that authorization-hardened
+retriever with the installed local model, so it can measure answer grounding without requiring the
+local embedding export. `local` uses what the desktop app uses (SQLite,
 the E5 embedder, the local language model), so latency and quality are the product's. Each fixture
 meeting is stored and indexed as a finished meeting; segments marked tombstoned are left out, as the
 real erasure leaves them out. The graph starts empty: this measures search plus answer.
@@ -24,6 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from golden import expanded_cases
 from nodo_api.config import Settings
 from nodo_api.domain.models import (
     Locale,
@@ -33,10 +37,25 @@ from nodo_api.domain.models import (
     TranscriptSegment,
 )
 from nodo_api.services.query import EvidenceValidator, QueryRequest, QueryService
-from golden import expanded_cases
 
 ROOT = Path(__file__).resolve().parent
 OWNERS = {"workspace-north": "user-north-01", "workspace-south": "user-south-01"}
+MEMORY_LLM_EVIDENCE_CAP = 5
+
+
+class LimitedRetriever:
+    """Evaluation-only cap for a practical prompt size on the local 3B model."""
+
+    def __init__(self, inner: Any, cap: int) -> None:
+        self._inner, self._cap = inner, cap
+
+    def search(self, workspace_id, owner_id, query, filters, limit, **kwargs):
+        return self._inner.search(
+            workspace_id, owner_id, query, filters, min(limit, self._cap), **kwargs
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
 
 def build_adapters(backend: str, data_dir: Path):
@@ -178,16 +197,20 @@ def compare_passes(
 
 
 def main() -> int:
-    if len(sys.argv) < 3 or sys.argv[1] not in ("memory", "local"):
+    if len(sys.argv) < 3 or sys.argv[1] not in ("memory", "memory-llm", "local"):
         print(__doc__)
         return 2
     backend, output = sys.argv[1], Path(sys.argv[2])
     locale = sys.argv[3] if len(sys.argv) > 3 else "en"
-    cases = expanded_cases([
-        json.loads(line)
-        for line in (ROOT / "golden_set/cases.jsonl").read_text("utf-8").splitlines()
-        if line
-    ])
+    cases = expanded_cases(
+        [
+            json.loads(line)
+            for line in (ROOT / "golden_set/cases.jsonl")
+            .read_text("utf-8")
+            .splitlines()
+            if line
+        ]
+    )
     meetings = json.loads(
         (ROOT / "golden_set/fixtures/meetings.json").read_text("utf-8")
     )["meetings"]
@@ -195,7 +218,38 @@ def main() -> int:
     temp_root = ROOT.parent / "tmp"
     temp_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="nodo-eval-", dir=temp_root) as folder:
-        settings, adapters = build_adapters(backend, Path(folder))
+        settings, adapters = build_adapters(
+            "memory" if backend == "memory-llm" else backend, Path(folder)
+        )
+        server = None
+        if backend == "memory-llm":
+            from nodo_api.adapters.local.llm import LocalLlm
+            from nodo_api.adapters.local.models import (
+                GpuArbiter,
+                LlamaServer,
+                LocalModelPaths,
+            )
+
+            paths = LocalModelPaths.discover()
+            if paths.llama_server is None or paths.llm_gguf is None:
+                raise RuntimeError(
+                    "memory-llm needs an installed llama-server and GGUF model"
+                )
+            server = LlamaServer(
+                paths.llama_server, paths.llm_gguf, Path(folder) / "llama.pid"
+            )
+            adapters.llm = LocalLlm(
+                server,
+                GpuArbiter(),
+                {
+                    "temperature": 0.0,
+                    "max_tokens": 256,
+                    "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+                },
+            )
+            adapters.retriever = LimitedRetriever(
+                adapters.retriever, MEMORY_LLM_EVIDENCE_CAP
+            )
         print(json.dumps(load_fixtures(adapters, meetings)))
         llm = CountingLlm(adapters.llm)
         service = QueryService(
@@ -238,6 +292,8 @@ def main() -> int:
         )
         if adapters.runtime is not None:
             adapters.runtime.stop()
+        if server is not None:
+            server.stop()
     return 0
 
 

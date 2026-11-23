@@ -56,6 +56,12 @@ class _LocalServer:
 
 
 class LocalLlm(_LocalServer):
+    def __init__(
+        self, server: LlamaServer, arbiter: GpuArbiter, options: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(server, arbiter)
+        self._answer_options = options or ANSWER_OPTIONS
+
     def answer(
         self,
         workspace_id: str,
@@ -66,7 +72,7 @@ class LocalLlm(_LocalServer):
         summaries: tuple[SectionSummary, ...] = (),
     ) -> Any:
         with self.lease():
-            llm = AzureOpenAiLlm(self.client(), MODEL_NAME, ANSWER_OPTIONS)
+            llm = AzureOpenAiLlm(self.client(), MODEL_NAME, self._answer_options)
             return llm.answer(workspace_id, question, locale, evidence, graph, summaries)
 
 
