@@ -147,7 +147,7 @@ flowchart LR
   VAL -->|none| UN[unanswerable, no citations]
 ```
 
-Control lives in code. The model never chooses `workspace_id`, never sees unauthorised data, and its citations are accepted only if they point to segments that were retrieved and visible to the caller. LangGraph is allowed only for the planner and tool loop in this path (ADR-003).
+Control lives in code. The model never chooses `workspace_id`, never sees unauthorised data, and its citations are accepted only if they point to Fragments retrieved and visible to the caller. Source-scoped retrieval resolves ownership before querying either index; graph traversal filters relation evidence before nodes and edges consume bounds. LangGraph is allowed only for the planner and tool loop in this path (ADR-003).
 
 ## 8. Multilingual architecture (en, pl, it, da)
 

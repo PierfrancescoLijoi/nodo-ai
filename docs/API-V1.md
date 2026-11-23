@@ -147,7 +147,7 @@ used by `POST /v1/query`, which answers from meetings only.
 
 ## Questions
 
-`POST /v1/query` body `{ question, ui_locale, filters? }` returns `{ answer, answerability: "supported"|"partial"|"unanswerable", citations: { meeting_id, segment_id, speaker_id, start_ms, end_ms, quote }[], related_entities: string[], query_trace_id, model_version, retrieval_version }`, degraded }`. `degraded: true` means the language model could not be reached: `answer` then says so, `citations` still hold the retrieved sources, and the app should show them as sources, not as an answer (ADR-017). A later request may succeed.
+`POST /v1/query` body `{ question, ui_locale, filters?, scope?, citation_format? }` returns `{ answer, answerability: "supported"|"partial"|"unanswerable", citations, related_entities, query_trace_id, model_version, retrieval_version, degraded }`. The default `scope` and `citation_format` are both `legacy`, preserving the meeting-only response shape. Source scopes (`all`, `collection`, `sources`, `sources_only`) require `citation_format: "source"`; they are resolved against owner-scoped Sources before retrieval. A source-neutral citation additionally carries `{ source_id, fragment_id, source_version, locator }`, where `locator` identifies a timestamp, page, slide or character range. `degraded: true` means the language model could not be reached: `answer` is empty and citations still identify retrieved sources, which the app should show as sources rather than an answer (ADR-017). A later request may succeed.
 
 ## Graph
 
