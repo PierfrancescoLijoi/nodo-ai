@@ -158,6 +158,29 @@
             "title": "End Ms",
             "type": "integer"
           },
+          "fragment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fragment Id"
+          },
+          "locator": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locator"
+          },
           "meeting_id": {
             "title": "Meeting Id",
             "type": "string"
@@ -169,6 +192,28 @@
           "segment_id": {
             "title": "Segment Id",
             "type": "string"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version"
           },
           "speaker_id": {
             "default": "",

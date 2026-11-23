@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from functools import partial
 from typing import Annotated, Literal
@@ -37,6 +38,7 @@ from nodo_api.api.v1.mapping import (
 from nodo_api.api.v1.schemas import (
     ChangeOutput,
     ChangesOutput,
+    CitationOutput,
     CollectionCreate,
     CollectionList,
     CollectionOutput,
@@ -562,11 +564,35 @@ def _ask(
     at once and tells the rest to come back, so a burst of questions can not starve reads."""
     container = request.app.state.container
     with container.query_gate:
-        return container.query_service.query(
+        result = container.query_service.query(
             actor.workspace_id,
             actor.user_id,
             _query_request(text, locale, filters, scope, citation_format),
         )
+    return QueryOutput(
+        answer=result.answer,
+        answerability=result.answerability,
+        citations=tuple(
+            CitationOutput(
+                meeting_id=c.meeting_id,
+                segment_id=c.segment_id,
+                start_ms=c.start_ms,
+                end_ms=c.end_ms,
+                quote=c.quote,
+                speaker_id=c.speaker_id,
+                source_id=c.source_id,
+                fragment_id=c.fragment_id,
+                source_version=c.source_version,
+                locator=json.loads(c.locator.to_json()) if c.locator else None,
+            )
+            for c in result.citations
+        ),
+        related_entities=result.related_entities,
+        query_trace_id=result.query_trace_id,
+        model_version=result.model_version,
+        retrieval_version=result.retrieval_version,
+        degraded=result.degraded,
+    )
 
 
 @router.post("/voice-query", response_model=QueryOutput)

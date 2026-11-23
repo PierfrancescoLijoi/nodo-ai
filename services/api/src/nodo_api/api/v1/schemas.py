@@ -308,6 +308,10 @@ class CitationOutput(FrozenModel):
     end_ms: int
     quote: str
     speaker_id: str = ""
+    source_id: str | None = None
+    fragment_id: str | None = None
+    source_version: int | None = None
+    locator: dict[str, Any] | None = None
 
 
 class QueryOutput(FrozenModel):
