@@ -20,6 +20,7 @@ from nodo_api.domain.sources import (
     Fragment,
     Locator,
     Section,
+    SectionSummary,
     Source,
     SourceKind,
     SourceVersion,
@@ -553,3 +554,67 @@ class SqliteFragmentRepository:
         except NotFoundError:
             return ()
         return tuple(Fragment.from_segment(s, i) for i, s in enumerate(segments))
+
+
+class SqliteSectionSummaryRepository:
+    def __init__(self, db: LocalDatabase) -> None:
+        self._db = db
+
+    def get(
+        self, workspace_id: str, source_id: str, section_id: str, source_version: int
+    ) -> SectionSummary | None:
+        with self._db.transaction(write=False) as conn:
+            row = conn.execute(
+                "SELECT ss.* FROM section_summaries ss JOIN sources s"
+                " ON s.workspace_id = ss.workspace_id AND s.id = ss.source_id"
+                " WHERE ss.workspace_id = ? AND ss.source_id = ? AND ss.section_id = ?"
+                " AND ss.source_version = ? AND s.version = ss.source_version"
+                " AND s.tombstoned_at IS NULL",
+                (workspace_id, source_id, section_id, source_version),
+            ).fetchone()
+        return self._summary(row) if row else None
+
+    def put(self, workspace_id: str, summary: SectionSummary) -> None:
+        with self._db.transaction() as conn:
+            current = conn.execute(
+                "SELECT 1 FROM sources s JOIN sections sec ON sec.workspace_id = s.workspace_id"
+                " AND sec.source_id = s.id WHERE s.workspace_id = ? AND s.id = ?"
+                " AND s.version = ? AND s.tombstoned_at IS NULL AND sec.id = ?",
+                (workspace_id, summary.source_id, summary.source_version, summary.section_id),
+            ).fetchone()
+            if current is None:
+                raise NotFoundError
+            conn.execute(
+                "INSERT OR REPLACE INTO section_summaries (workspace_id, source_id, section_id,"
+                " source_version, model_version, prompt_version, text, token_count)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    workspace_id,
+                    summary.source_id,
+                    summary.section_id,
+                    summary.source_version,
+                    summary.model_version,
+                    summary.prompt_version,
+                    summary.text,
+                    summary.token_count,
+                ),
+            )
+
+    def erase_source(self, workspace_id: str, source_id: str) -> None:
+        with self._db.transaction() as conn:
+            conn.execute(
+                "DELETE FROM section_summaries WHERE workspace_id = ? AND source_id = ?",
+                (workspace_id, source_id),
+            )
+
+    @staticmethod
+    def _summary(row: sqlite3.Row) -> SectionSummary:
+        return SectionSummary(
+            row["source_id"],
+            row["section_id"],
+            row["source_version"],
+            row["model_version"],
+            row["prompt_version"],
+            row["text"],
+            row["token_count"],
+        )

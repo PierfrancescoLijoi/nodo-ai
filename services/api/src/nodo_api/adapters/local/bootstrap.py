@@ -38,7 +38,11 @@ from nodo_api.adapters.local.reranker import OnnxReranker
 from nodo_api.adapters.local.retention import SqliteRetentionStore
 from nodo_api.adapters.local.search import SqliteRetriever
 from nodo_api.adapters.local.source_blobs import LocalSourceBlobStore
-from nodo_api.adapters.local.sources import SqliteFragmentRepository, SqliteSourceRepository
+from nodo_api.adapters.local.sources import (
+    SqliteFragmentRepository,
+    SqliteSectionSummaryRepository,
+    SqliteSourceRepository,
+)
 from nodo_api.adapters.local.speech import LocalSpeechToText
 from nodo_api.adapters.local.sync import LocalSyncService
 from nodo_api.adapters.local.watch_folders import SqliteWatchFolderRepository
@@ -310,6 +314,7 @@ def local_adapters(settings: Settings):
     )
     sources = SqliteSourceRepository(db)
     fragments = SqliteFragmentRepository(db)
+    section_summaries = SqliteSectionSummaryRepository(db)
     imports = SqliteImportJobRepository(db)
     fragment_index = SqliteFragmentIndex(db, embedder, min_margin=settings.local_search_margin)
     source_blobs = LocalSourceBlobStore(
@@ -410,4 +415,5 @@ def local_adapters(settings: Settings):
         hierarchy_store=graph,
         collections=SqliteCollectionRepository(db),
         parent_suggester=parent_suggester,
+        section_summaries=section_summaries,
     )

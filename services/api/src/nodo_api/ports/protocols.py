@@ -43,6 +43,7 @@ from nodo_api.domain.sources import (
     ImportJob,
     IndexResult,
     Section,
+    SectionSummary,
     Source,
     SourceKind,
     SourceVersion,
@@ -315,6 +316,20 @@ class FragmentRepository(Protocol):
     ) -> tuple[SourceVersion, ...]:
         """Recorded versions, newest first. NotFoundError unless the user owns a live source."""
         ...
+
+
+class SectionSummaryRepository(Protocol):
+    def get(
+        self, workspace_id: str, source_id: str, section_id: str, source_version: int
+    ) -> SectionSummary | None:
+        """Return only a summary for that exact source version."""
+        ...
+
+    def put(self, workspace_id: str, summary: SectionSummary) -> None:
+        """Replace a summary only while the source and section are current."""
+        ...
+
+    def erase_source(self, workspace_id: str, source_id: str) -> None: ...
 
 
 class ImportJobRepository(Protocol):

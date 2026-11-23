@@ -19,7 +19,11 @@ from nodo_api.adapters.memory.graph import MemoryGraphStore
 from nodo_api.adapters.memory.imports import MemoryImportJobRepository
 from nodo_api.adapters.memory.parent_suggester import KeywordParentSuggester
 from nodo_api.adapters.memory.source_blobs import MemorySourceBlobStore
-from nodo_api.adapters.memory.sources import MemoryFragmentRepository, MemorySourceRepository
+from nodo_api.adapters.memory.sources import (
+    MemoryFragmentRepository,
+    MemorySectionSummaryRepository,
+    MemorySourceRepository,
+)
 from nodo_api.adapters.memory.watch_folders import MemoryWatchFolderRepository
 
 __all__ = [
@@ -30,6 +34,7 @@ __all__ = [
     "MemoryExportStore",
     "MemoryFragmentIndex",
     "MemoryFragmentRepository",
+    "MemorySectionSummaryRepository",
     "MemoryGraphStore",
     "MemoryImportJobRepository",
     "MemoryJobQueue",

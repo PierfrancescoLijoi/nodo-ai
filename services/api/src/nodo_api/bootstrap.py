@@ -55,6 +55,7 @@ class Adapters:
     hierarchy_store: Any = None  # concept parent links (ADR-030); local and memory, None on Azure
     collections: Any = None  # nested collections of sources (FR-8); local and memory, None on Azure
     parent_suggester: Any = None  # reviewable concept parent suggestions; local and memory only
+    section_summaries: Any = None  # version-pinned section context; local and memory only
 
 
 @dataclass(slots=True)
@@ -103,6 +104,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemoryMaintenanceStore,
         MemoryMeetingRepository,
         MemoryRetentionStore,
+        MemorySectionSummaryRepository,
         MemorySourceBlobStore,
         MemorySourceRepository,
         MemorySpeech,
@@ -128,6 +130,7 @@ def memory_adapters(settings: Settings) -> Adapters:
     queue = MemoryJobQueue()
     audit = MemoryAuditLog()
     fragments = MemoryFragmentRepository(sources, transcripts)
+    section_summaries = MemorySectionSummaryRepository(sources, fragments)
     imports = MemoryImportJobRepository(sources)
     fragment_index = MemoryFragmentIndex(sources)
     fragment_extractor = ChunkedFragmentExtractor(
@@ -179,6 +182,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         hierarchy_store=graph,
         collections=MemoryCollectionRepository(sources),
         parent_suggester=KeywordParentSuggester(),
+        section_summaries=section_summaries,
         # No poll thread here: nothing scans unless a caller runs scan_once.
         folder_watcher=FolderWatcher(
             MemoryWatchFolderRepository(), source_import, source_blobs, source_blobs.root
