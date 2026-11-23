@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -10,6 +10,7 @@ from uuid import uuid4
 from nodo_api.domain.answer_cache import CachedAnswer
 from nodo_api.domain.graph import ORIGIN_TYPES, Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
+from nodo_api.domain.retrieval import CitationFormat, ResolvedQueryScope
 from nodo_api.domain.sources import Fragment
 from nodo_api.errors import NotFoundError
 from nodo_api.ports import (
@@ -60,6 +61,8 @@ class QueryRequest:
     question: str
     ui_locale: Locale
     filters: QueryFilters | None = None
+    scope: ResolvedQueryScope = field(default_factory=ResolvedQueryScope.legacy)
+    citation_format: CitationFormat = CitationFormat.LEGACY
 
 
 @dataclass(frozen=True, slots=True)

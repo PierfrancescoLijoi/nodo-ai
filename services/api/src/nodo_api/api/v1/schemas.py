@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from nodo_api.domain.models import Answerability, Locale, MeetingState
+from nodo_api.domain.retrieval import MAX_QUERY_SOURCES, CitationFormat, QueryScopeMode
 from nodo_api.domain.sources import ImportState, SourceKind, collection_name
 
 
@@ -267,10 +268,30 @@ class QueryFiltersInput(FrozenModel):
     project: str | None = Field(default=None, max_length=64)
 
 
+class QueryScopeInput(FrozenModel):
+    mode: QueryScopeMode = QueryScopeMode.LEGACY
+    collection_id: str | None = Field(default=None, min_length=1, max_length=64)
+    source_ids: tuple[str, ...] = Field(default=(), max_length=MAX_QUERY_SOURCES)
+
+    @model_validator(mode="after")
+    def valid_shape(self):
+        if self.mode is QueryScopeMode.COLLECTION:
+            valid = self.collection_id is not None and not self.source_ids
+        elif self.mode is QueryScopeMode.SOURCES:
+            valid = self.collection_id is None and bool(self.source_ids)
+        else:
+            valid = self.collection_id is None and not self.source_ids
+        if not valid or len(set(self.source_ids)) != len(self.source_ids):
+            raise ValueError("Invalid query scope")
+        return self
+
+
 class QueryInput(FrozenModel):
     question: str = Field(min_length=1, max_length=2000)
     ui_locale: Locale
     filters: QueryFiltersInput | None = None
+    scope: QueryScopeInput = QueryScopeInput()
+    citation_format: CitationFormat = CitationFormat.LEGACY
 
 
 class VoiceQueryInput(FrozenModel):

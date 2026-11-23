@@ -57,6 +57,7 @@ from nodo_api.api.v1.schemas import (
     QueryFiltersInput,
     QueryInput,
     QueryOutput,
+    QueryScopeInput,
     ReviewInput,
     ReviewOutput,
     ReviewRelationInput,
@@ -81,6 +82,12 @@ from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
 from nodo_api.domain.hierarchy import MAX_DEPTH
+from nodo_api.domain.retrieval import (
+    CitationFormat,
+    QueryScope,
+    ResolvedQueryScope,
+    resolve_query_scope,
+)
 from nodo_api.domain.source_files import UploadRejected
 from nodo_api.domain.sources import CLEAR, Fragment, SourceKind
 from nodo_api.errors import (
@@ -529,16 +536,36 @@ def review_meeting(meeting_id: str, payload: ReviewInput, actor: PrincipalDep, r
 
 @router.post("/query", response_model=QueryOutput)
 def query(payload: QueryInput, actor: PrincipalDep, request: Request):
-    return _ask(request, actor, payload.question, payload.ui_locale, payload.filters)
+    scope = _resolved_query_scope(request, actor, payload.scope, payload.citation_format)
+    return _ask(
+        request,
+        actor,
+        payload.question,
+        payload.ui_locale,
+        payload.filters,
+        scope=scope,
+        citation_format=payload.citation_format,
+    )
 
 
-def _ask(request: Request, actor: Principal, text: str, locale, filters):
+def _ask(
+    request: Request,
+    actor: Principal,
+    text: str,
+    locale,
+    filters,
+    *,
+    scope=None,
+    citation_format: CitationFormat = CitationFormat.LEGACY,
+):
     """Questions are the expensive request (a model call each). A replica answers a limited number
     at once and tells the rest to come back, so a burst of questions can not starve reads."""
     container = request.app.state.container
     with container.query_gate:
         return container.query_service.query(
-            actor.workspace_id, actor.user_id, _query_request(text, locale, filters)
+            actor.workspace_id,
+            actor.user_id,
+            _query_request(text, locale, filters, scope, citation_format),
         )
 
 
@@ -669,9 +696,38 @@ def delete_meeting(meeting_id: str, actor: PrincipalDep, request: Request) -> Re
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _query_request(question, locale, filters: QueryFiltersInput | None) -> QueryRequest:
+def _query_request(
+    question,
+    locale,
+    filters: QueryFiltersInput | None,
+    scope=None,
+    citation_format: CitationFormat = CitationFormat.LEGACY,
+) -> QueryRequest:
     service_filters = QueryFilters(**filters.model_dump()) if filters else None
-    return QueryRequest(question, locale, service_filters)
+    return QueryRequest(
+        question,
+        locale,
+        service_filters,
+        scope or ResolvedQueryScope.legacy(),
+        citation_format,
+    )
+
+
+def _resolved_query_scope(
+    request: Request,
+    actor: Principal,
+    value: QueryScopeInput,
+    citation_format: CitationFormat,
+):
+    container = request.app.state.container
+    return resolve_query_scope(
+        actor.workspace_id,
+        actor.user_id,
+        QueryScope(value.mode, value.collection_id, value.source_ids),
+        citation_format,
+        container.sources,
+        container.collections,
+    )
 
 
 MAX_SYNC_BYTES = 40 * 1024 * 1024  # a long meeting with many versions is a few MB

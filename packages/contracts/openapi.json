@@ -144,6 +144,14 @@
         "title": "ChangesOutput",
         "type": "object"
       },
+      "CitationFormat": {
+        "enum": [
+          "legacy",
+          "source"
+        ],
+        "title": "CitationFormat",
+        "type": "string"
+      },
       "CitationOutput": {
         "properties": {
           "end_ms": {
@@ -1406,6 +1414,10 @@
       },
       "QueryInput": {
         "properties": {
+          "citation_format": {
+            "$ref": "#/components/schemas/CitationFormat",
+            "default": "legacy"
+          },
           "filters": {
             "anyOf": [
               {
@@ -1421,6 +1433,13 @@
             "minLength": 1,
             "title": "Question",
             "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/QueryScopeInput",
+            "default": {
+              "mode": "legacy",
+              "source_ids": []
+            }
           },
           "ui_locale": {
             "$ref": "#/components/schemas/Locale"
@@ -1485,6 +1504,49 @@
         ],
         "title": "QueryOutput",
         "type": "object"
+      },
+      "QueryScopeInput": {
+        "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/QueryScopeMode",
+            "default": "legacy"
+          },
+          "source_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Source Ids",
+            "type": "array"
+          }
+        },
+        "title": "QueryScopeInput",
+        "type": "object"
+      },
+      "QueryScopeMode": {
+        "enum": [
+          "legacy",
+          "all",
+          "collection",
+          "sources",
+          "sources_only"
+        ],
+        "title": "QueryScopeMode",
+        "type": "string"
       },
       "ReviewInput": {
         "properties": {
