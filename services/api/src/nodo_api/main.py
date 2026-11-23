@@ -240,6 +240,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.answers,
         a.sources,
         a.fragment_index,
+        a.fragments,
     )
     source_service = (
         SourceService(
