@@ -19,7 +19,7 @@ from nodo_api.adapters.azure.openai_llm import AzureOpenAiLlm
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer
 from nodo_api.domain.graph import Entity, Extraction, Subgraph
 from nodo_api.domain.models import Locale, TranscriptSegment
-from nodo_api.domain.sources import Fragment
+from nodo_api.domain.sources import Fragment, SectionSummary
 
 REQUEST_TIMEOUT_SECONDS = 900
 ANSWER_OPTIONS: dict[str, Any] = {
@@ -61,12 +61,13 @@ class LocalLlm(_LocalServer):
         workspace_id: str,
         question: str,
         locale: Locale,
-        evidence: tuple[TranscriptSegment, ...],
+        evidence: tuple[TranscriptSegment | Fragment, ...],
         graph: Subgraph,
+        summaries: tuple[SectionSummary, ...] = (),
     ) -> Any:
         with self.lease():
             llm = AzureOpenAiLlm(self.client(), MODEL_NAME, ANSWER_OPTIONS)
-            return llm.answer(workspace_id, question, locale, evidence, graph)
+            return llm.answer(workspace_id, question, locale, evidence, graph, summaries)
 
 
 class LocalExtractor(_LocalServer):

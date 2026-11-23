@@ -58,6 +58,10 @@ from nodo_api.services.fragment_extraction import ChunkedFragmentExtractor, extr
 from nodo_api.services.index_maintenance import IndexMaintenanceService
 from nodo_api.services.ingestion import IngestionService
 from nodo_api.services.retention import RetentionService
+from nodo_api.services.section_summaries import (
+    FirstFragmentSectionSummarizer,
+    SectionSummaryService,
+)
 from nodo_api.services.source_import import SourceImportService
 from nodo_api.worker import Worker
 
@@ -315,6 +319,9 @@ def local_adapters(settings: Settings):
     sources = SqliteSourceRepository(db)
     fragments = SqliteFragmentRepository(db)
     section_summaries = SqliteSectionSummaryRepository(db)
+    section_summary_service = SectionSummaryService(
+        section_summaries, FirstFragmentSectionSummarizer()
+    )
     imports = SqliteImportJobRepository(db)
     fragment_index = SqliteFragmentIndex(db, embedder, min_margin=settings.local_search_margin)
     source_blobs = LocalSourceBlobStore(
@@ -343,6 +350,7 @@ def local_adapters(settings: Settings):
         token_fits=embedder.within_ceiling,
         speech=speech,
         speech_locales=settings.speech_candidate_locales,
+        section_summaries=section_summary_service,
     )
     watcher = FolderWatcher(SqliteWatchFolderRepository(db), source_import, source_blobs, root)
     source = SyncSource(
@@ -416,4 +424,5 @@ def local_adapters(settings: Settings):
         collections=SqliteCollectionRepository(db),
         parent_suggester=parent_suggester,
         section_summaries=section_summaries,
+        section_summary_service=section_summary_service,
     )

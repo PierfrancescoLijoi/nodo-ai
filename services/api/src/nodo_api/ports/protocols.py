@@ -878,6 +878,7 @@ class LlmClient(Protocol):
         locale: Locale,
         evidence: tuple[Fragment, ...],
         graph: Subgraph,
+        summaries: tuple[SectionSummary, ...] = (),
     ) -> Any: ...
 
 

@@ -13,7 +13,7 @@ from nodo_api.domain.answer_cache import CachedAnswer
 from nodo_api.domain.graph import ORIGIN_TYPES, Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
 from nodo_api.domain.retrieval import CitationFormat, ResolvedQueryScope
-from nodo_api.domain.sources import Fragment, FragmentHit
+from nodo_api.domain.sources import Fragment, FragmentHit, estimate_tokens
 from nodo_api.errors import NotFoundError
 from nodo_api.ports import (
     FragmentIndex,
@@ -27,7 +27,7 @@ from nodo_api.ports import (
 )
 from nodo_api.resilience import DependencyUnavailable, Overloaded
 from nodo_api.services.answer_cache import AnswerCache, Lookup
-from nodo_api.services.context import expand_context
+from nodo_api.services.context import Context, expand_context
 from nodo_api.services.entity_index import EntityIndexer
 from nodo_api.services.section_summaries import SectionSummaryService
 from nodo_api.telemetry import instruments, span, timed
@@ -373,6 +373,7 @@ class QueryService:
     ) -> QueryResult:
         with span("query.retrieve") as retrieval:
             evidence = self._retrieve(workspace_id, user_id, request, filters)
+            context = self._expand_context(workspace_id, evidence, request.ui_locale)
             retrieval.set_attribute("nodo.evidence", len(evidence))
         with span("query.graph"):
             vector = lookup.ticket.vector if lookup.ticket is not None else None
@@ -383,14 +384,21 @@ class QueryService:
         try:
             with span("query.model"):
                 generated = self._llm.answer(
-                    workspace_id, request.question, request.ui_locale, evidence, graph
+                    workspace_id,
+                    request.question,
+                    request.ui_locale,
+                    context.fragments,
+                    graph,
+                    context.summaries,
                 )
         except (DependencyUnavailable, Overloaded):
             # Search worked and the model did not: the sentences found are still useful.
-            degraded, generated = True, self._sources_only(evidence)
+            degraded, generated = True, self._sources_only(context.fragments)
             instruments.query_degraded.add(1)
         with span("query.validate"):
-            validated = self._validator.validate(workspace_id, generated, evidence, graph, owns)
+            validated = self._validator.validate(
+                workspace_id, generated, context.fragments, graph, owns
+            )
         return QueryResult(
             answer=validated.answer,
             answerability=validated.answerability,
@@ -453,14 +461,13 @@ class QueryService:
             )
             meeting_hits = _available(meetings)
             fragment_hits = _available(fragments) if fragments is not None else ()
-        evidence = _fuse_evidence(meeting_hits, fragment_hits)
-        return self._expand_context(workspace_id, evidence, request.ui_locale)
+        return _fuse_evidence(meeting_hits, fragment_hits)
 
     def _expand_context(
         self, workspace_id: str, evidence: tuple[Fragment, ...], locale: Locale
-    ) -> tuple[Fragment, ...]:
+    ) -> Context:
         if self._fragments is None:
-            return evidence
+            return Context(evidence, (), sum(estimate_tokens(f.text) for f in evidence))
         nearby: list[Fragment] = []
         for source_id in dict.fromkeys(fragment.source_id for fragment in evidence):
             try:
@@ -479,7 +486,7 @@ class QueryService:
                 else:
                     if summary is not None:
                         summaries.append(summary)
-        return expand_context(evidence, nearby, summaries, MAX_CONTEXT_TOKENS).fragments
+        return expand_context(evidence, nearby, summaries, MAX_CONTEXT_TOKENS)
 
     def _context_graph(
         self,

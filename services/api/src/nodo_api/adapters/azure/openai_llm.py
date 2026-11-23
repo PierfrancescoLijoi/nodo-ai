@@ -11,7 +11,7 @@ from typing import Any
 
 from nodo_api.domain.graph import Subgraph
 from nodo_api.domain.models import Answerability, Citation, Locale, TranscriptSegment
-from nodo_api.domain.sources import Fragment
+from nodo_api.domain.sources import Fragment, SectionSummary
 from nodo_api.telemetry import instruments
 
 LANGUAGE_NAMES = {
@@ -60,6 +60,17 @@ def _evidence_block(evidence: tuple[Fragment, ...]) -> str:
         for index, s in enumerate(evidence, start=1)
     ]
     return "<evidence>\n" + "\n\n".join(items) + "\n</evidence>"
+
+
+def _summary_block(summaries: tuple[SectionSummary, ...]) -> str:
+    if not summaries:
+        return ""
+    items = [
+        f"[{index}] source={summary.source_id} section={summary.section_id}\n"
+        f"{_TAG.sub(' ', summary.text)}"
+        for index, summary in enumerate(summaries, start=1)
+    ]
+    return "\n<section-context>\n" + "\n\n".join(items) + "\n</section-context>"
 
 
 def _evidence_header(index: int, fragment: Fragment) -> str:
@@ -112,6 +123,7 @@ class AzureOpenAiLlm:
         locale: Locale,
         evidence: tuple[Fragment | TranscriptSegment, ...],
         graph: Subgraph,
+        summaries: tuple[SectionSummary, ...] = (),
     ) -> Any:
         if not evidence:
             return _unanswerable()
@@ -125,7 +137,10 @@ class AzureOpenAiLlm:
                 },
                 {
                     "role": "user",
-                    "content": f"{_evidence_block(fragments)}\n\nQuestion: {question}",
+                    "content": (
+                        f"{_evidence_block(fragments)}{_summary_block(summaries)}"
+                        f"\n\nQuestion: {question}"
+                    ),
                 },
             ],
             response_format={

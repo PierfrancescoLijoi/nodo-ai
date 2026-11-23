@@ -528,6 +528,7 @@ class MockLlm:
         locale: Locale,
         evidence: tuple[Fragment, ...],
         graph: Subgraph,
+        summaries=(),
     ):
         from nodo_api.services.query import GeneratedAnswer
 
