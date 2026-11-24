@@ -111,12 +111,20 @@ class SourceService:
         )
         if self._index is not None:  # the memory index has no trigger backstop
             self._index.erase_source(workspace_id, source_id)
-        self._graph.erase(workspace_id, source_id)
-        if self._pages is not None:
-            # Authoritative revisions may hold copied source text. Redact them before the
-            # fragments vanish, while their claim spans and hashes can still be checked.
-            self._pages.redact_source(workspace_id, source_id)
-        self._fragments.erase(workspace_id, source_id)
+        database = getattr(self._fragments, "_db", None)
+        page_database = getattr(self._pages, "_db", None) if self._pages is not None else None
+        if database is not None and database is page_database:
+            # Local adapters share one SQLite transaction. A crash cannot commit the fragment
+            # erasure while leaving source text in a Wiki revision (ADR-031).
+            with database.transaction():
+                self._graph.erase(workspace_id, source_id)
+                self._pages.redact_source(workspace_id, source_id)
+                self._fragments.erase(workspace_id, source_id)
+        else:
+            self._graph.erase(workspace_id, source_id)
+            if self._pages is not None:
+                self._pages.redact_source(workspace_id, source_id)
+            self._fragments.erase(workspace_id, source_id)
         if self._blobs is not None:
             self._blobs.erase(workspace_id, source_id)  # every version, .part files, open links
         if self._imports is not None:
