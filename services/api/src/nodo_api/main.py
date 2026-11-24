@@ -31,6 +31,7 @@ from nodo_api.services import (
     GraphService,
     HierarchyService,
     MeetingService,
+    PageHealthService,
     PageService,
     QueryService,
     SourceImportService,
@@ -89,6 +90,7 @@ class AppContainer:
     collections: Any = None  # None on Azure: routes answer 501
     pages: Any = None  # None on Azure: Wiki APIs answer 501
     page_service: PageService | None = None
+    page_health: PageHealthService | None = None
 
 
 @asynccontextmanager
@@ -288,6 +290,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         if a.pages is not None
         else None
     )
+    page_health = PageHealthService(a.pages, a.fragments) if a.pages is not None else None
     return AppContainer(
         settings,
         AuthManager(settings, key_provider),
@@ -328,6 +331,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         collections=a.collections,
         pages=a.pages,
         page_service=page_service,
+        page_health=page_health,
     )
 
 

@@ -486,6 +486,17 @@ class PageList(FrozenModel):
     items: tuple[PageOutput, ...]
 
 
+class PageFindingOutput(FrozenModel):
+    kind: str
+    page_id: str
+    revision: int | None
+    claim_ordinal: int | None
+
+
+class PageHealthOutput(FrozenModel):
+    items: tuple[PageFindingOutput, ...]
+
+
 class CollectionCreate(FrozenModel):
     name: str
     parent_id: str | None = Field(default=None, max_length=64)

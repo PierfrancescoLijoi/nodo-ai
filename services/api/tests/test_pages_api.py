@@ -48,6 +48,7 @@ def test_pages_are_owner_scoped_and_rejection_is_repeatable(app, client, auth_he
     assert first.status_code == again.status_code == 200
     assert first.json()["status"] == again.json()["status"] == "rejected"
     assert client.get("/v1/pages", headers=auth_headers).json()["items"][0]["id"] == page.id
+    assert client.get("/v1/pages/health", headers=auth_headers).json() == {"items": []}
 
 
 def test_page_commands_require_authentication_and_idempotency_key(app, client):

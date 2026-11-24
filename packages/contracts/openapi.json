@@ -1390,6 +1390,64 @@
         "title": "MeetingState",
         "type": "string"
       },
+      "PageFindingOutput": {
+        "properties": {
+          "claim_ordinal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Ordinal"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "page_id": {
+            "title": "Page Id",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "required": [
+          "kind",
+          "page_id",
+          "revision",
+          "claim_ordinal"
+        ],
+        "title": "PageFindingOutput",
+        "type": "object"
+      },
+      "PageHealthOutput": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PageFindingOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PageHealthOutput",
+        "type": "object"
+      },
       "PageList": {
         "properties": {
           "items": {
@@ -3921,6 +3979,24 @@
           }
         },
         "summary": "List Pages"
+      }
+    },
+    "/v1/pages/health": {
+      "get": {
+        "operationId": "page_health_v1_pages_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageHealthOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Page Health"
       }
     },
     "/v1/pages/{page_id}": {

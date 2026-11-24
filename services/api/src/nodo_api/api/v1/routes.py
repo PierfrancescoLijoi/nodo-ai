@@ -54,6 +54,8 @@ from nodo_api.api.v1.schemas import (
     MeetingCreate,
     MeetingList,
     MeetingOutput,
+    PageFindingOutput,
+    PageHealthOutput,
     PageList,
     PageOutput,
     PageRevisionOutput,
@@ -230,6 +232,25 @@ def list_pages(
 ):
     pages = _pages(request.app.state.container).list_owned(actor.workspace_id, actor.user_id)
     return PageList(items=tuple(_page_output(page) for page in pages[:limit]))
+
+
+@router.get("/pages/health", response_model=PageHealthOutput)
+def page_health(actor: PrincipalDep, request: Request):
+    service = request.app.state.container.page_health
+    if service is None:
+        raise NotAvailableOnEngine
+    findings = service.verify(actor.workspace_id, actor.user_id)
+    return PageHealthOutput(
+        items=tuple(
+            PageFindingOutput(
+                kind=finding.kind.value,
+                page_id=finding.page_id,
+                revision=finding.revision,
+                claim_ordinal=finding.claim_ordinal,
+            )
+            for finding in findings
+        )
+    )
 
 
 @router.get("/pages/{page_id}", response_model=PageOutput)
