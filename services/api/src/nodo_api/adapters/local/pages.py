@@ -68,6 +68,14 @@ class SqlitePageRepository:
         with self._db.transaction(write=False) as conn:
             return self._get(conn, workspace_id, owner_id, page_id)
 
+    def list_owned(self, workspace_id: str, owner_id: str) -> tuple[Page, ...]:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                "SELECT * FROM pages WHERE workspace_id = ? AND owner_id = ? ORDER BY created_at DESC, id DESC",
+                (workspace_id, owner_id),
+            ).fetchall()
+            return tuple(_page(row) for row in rows)
+
     def proposal(self, workspace_id: str, owner_id: str, page_id: str) -> PageProposal | None:
         with self._db.transaction(write=False) as conn:
             self._get(conn, workspace_id, owner_id, page_id)

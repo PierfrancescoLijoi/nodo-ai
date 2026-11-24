@@ -349,6 +349,10 @@ class PageRepository(Protocol):
         """Return metadata only when it belongs to the owner, otherwise raise NotFoundError."""
         ...
 
+    def list_owned(self, workspace_id: str, owner_id: str) -> tuple[Page, ...]:
+        """Return the owner's Pages newest first; proposals are represented by Page status."""
+        ...
+
     def proposal(
         self, workspace_id: str, owner_id: str, page_id: str
     ) -> PageProposal | None:

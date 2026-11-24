@@ -40,6 +40,18 @@ class MemoryPageRepository:
             raise NotFoundError
         return page
 
+    def list_owned(self, workspace_id: str, owner_id: str) -> tuple[Page, ...]:
+        return tuple(
+            sorted(
+                (
+                    page
+                    for (ws, _), page in self._pages.items()
+                    if ws == workspace_id and page.owner_id == owner_id
+                ),
+                key=lambda page: (page.created_at, page.id), reverse=True,
+            )
+        )
+
     def proposal(self, workspace_id: str, owner_id: str, page_id: str) -> PageProposal | None:
         self.get_owned(workspace_id, owner_id, page_id)
         return self._proposals.get((workspace_id, page_id))
