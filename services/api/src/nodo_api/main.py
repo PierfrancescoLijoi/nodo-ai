@@ -31,6 +31,7 @@ from nodo_api.services import (
     GraphService,
     HierarchyService,
     MeetingService,
+    PageService,
     QueryService,
     SourceImportService,
     SourceService,
@@ -87,6 +88,7 @@ class AppContainer:
     hierarchy: HierarchyService | None = None  # None on Azure: routes answer 501
     collections: Any = None  # None on Azure: routes answer 501
     pages: Any = None  # None on Azure: Wiki APIs answer 501
+    page_service: PageService | None = None
 
 
 @asynccontextmanager
@@ -281,6 +283,11 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         if a.hierarchy_store is not None and a.fragments is not None and a.sources is not None
         else None
     )
+    page_service = (
+        PageService(a.pages, EvidenceValidator(a.transcripts, a.fragments))
+        if a.pages is not None
+        else None
+    )
     return AppContainer(
         settings,
         AuthManager(settings, key_provider),
@@ -320,6 +327,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         hierarchy,
         collections=a.collections,
         pages=a.pages,
+        page_service=page_service,
     )
 
 
