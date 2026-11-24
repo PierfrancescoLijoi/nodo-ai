@@ -149,6 +149,30 @@ used by `POST /v1/query`, which answers from meetings only.
 
 `POST /v1/query` body `{ question, ui_locale, filters?, scope?, citation_format? }` returns `{ answer, answerability: "supported"|"partial"|"unanswerable", citations, related_entities, query_trace_id, model_version, retrieval_version, degraded }`. The default `scope` and `citation_format` are both `legacy`, preserving the meeting-only response shape. Source scopes (`all`, `collection`, `sources`, `sources_only`) require `citation_format: "source"`; they are resolved against owner-scoped Sources before retrieval. A source-neutral citation additionally carries `{ source_id, fragment_id, source_version, locator }`, where `locator` identifies a timestamp, page, slide or character range. `degraded: true` means the language model could not be reached: `answer` is empty and citations still identify retrieved sources, which the app should show as sources rather than an answer (ADR-017). A later request may succeed.
 
+## Wiki pages (local and memory engines)
+
+`GET /v1/pages` lists the caller's pages and `GET /v1/pages/{id}` returns page metadata. A
+missing page and another user's page both return `404`. `GET /v1/pages/{id}/revisions` returns
+newest-first revision bodies with their ordered claim spans and citations. Page metadata contains
+`kind` (`concept`, `source_summary`, or `saved_answer`), `status` (`proposed`, `approved`,
+`rejected`, or `stale`), subject id and current revision number.
+
+`POST /v1/pages/{id}/approve` and `POST /v1/pages/{id}/reject` require an `Idempotency-Key`.
+Approval promotes the pending machine proposal to the next immutable revision; rejection retains
+the draft for audit but never changes an existing approved revision. `PATCH /v1/pages/{id}` also
+requires that header and appends a human revision. Its body is `{ body_md, claims }`, where a claim
+has `{ span_start, span_end, citations }`; each citation names a caller-owned current source
+fragment and includes `{ source_id, fragment_id, source_version, locator, quote }`. The server
+derives claim text and its integrity hash from the body, then verifies every cited quote against
+the fragment. An uncited claim is allowed and is reported by health lint. Replaying an unchanged
+edit does not append a duplicate revision.
+
+`GET /v1/pages/health` returns deterministic findings for stale pages, uncited human claims and
+dangling evidence. These APIs are local-only until Phase 10; other engines return `501
+not_available_on_engine`. Source deletion redacts dependent claims from every revision before
+fragment removal. Existing backups and vaults exported before deletion are external copies and
+cannot be retrospectively erased.
+
 ## Graph
 
 `GET /v1/graph/subgraph` with one of `seed_id` (entity id) or `entity` (text search on labels), or neither for an overview of recent entities. Other parameters: `depth` 1 to 2 (default 2), `include_proposed` (default false), `as_of` (ISO date, default now), `limit` 1 to 200 nodes (default 60). Returns:
