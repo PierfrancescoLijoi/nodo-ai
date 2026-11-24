@@ -36,6 +36,32 @@ class PageService:
     def approve(self, workspace_id: str, owner_id: str, revision: PageRevision) -> Page:
         return self._pages.append_revision(workspace_id, owner_id, revision)
 
+    def edit(
+        self,
+        workspace_id: str,
+        owner_id: str,
+        page_id: str,
+        body_md: str,
+        claims: tuple[PageClaim, ...],
+        evidence: tuple[Fragment, ...],
+    ) -> Page:
+        page = self._pages.get_owned(workspace_id, owner_id, page_id)
+        validated = tuple(
+            self._validated_claim(workspace_id, claim, evidence)
+            if claim.citations
+            else claim
+            for claim in claims
+        )
+        revision = PageRevision(
+            page_id,
+            (page.current_revision or 0) + 1,
+            body_md,
+            owner_id,
+            datetime.now(UTC),
+            validated,
+        )
+        return self._pages.append_revision(workspace_id, owner_id, revision)
+
     def approve_proposal(self, workspace_id: str, owner_id: str, page_id: str) -> Page:
         page = self._pages.get_owned(workspace_id, owner_id, page_id)
         proposal = self._pages.proposal(workspace_id, owner_id, page_id)

@@ -12,6 +12,7 @@ from nodo_api.domain.pages import (
     PageKind,
     PageProposal,
     PageProvenance,
+    PageRevision,
     PageStatus,
     claim_text_hash,
 )
@@ -52,3 +53,23 @@ def test_approval_turns_the_pending_proposal_into_an_authoritative_revision():
 
     assert approved.current_revision == 1
     assert store.revisions("ws", "owner", "p")[0].body_md == "Fact"
+
+
+def test_human_edit_appends_a_revision_without_overwriting_history():
+    now = datetime(2026, 11, 24, tzinfo=UTC)
+    store = MemoryPageRepository()
+    page = Page("p", "ws", "owner", PageKind.CONCEPT, "c", PageStatus.PROPOSED, now)
+    citation = PageCitation("source", "fragment", 1, Locator(chars=(0, 4)), "Fact")
+    claim = PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (citation,), True)
+    store.put_proposal(
+        page, PageProposal("pp", "p", "Fact", (claim,), PageProvenance("m", "p"), now)
+    )
+    store.append_revision("ws", "owner", PageRevision("p", 1, "Fact", "owner", now, (claim,)))
+    _meetings, transcripts = MemoryMeetingRepository(), MemoryTranscriptRepository()
+    service = PageService(store, EvidenceValidator(transcripts))
+    human = PageClaim(0, (0, 4), "Note", claim_text_hash("Note"), ())
+
+    edited = service.edit("ws", "owner", "p", "Note", (human,), ())
+
+    assert edited.current_revision == 2
+    assert [item.body_md for item in store.revisions("ws", "owner", "p")] == ["Note", "Fact"]
