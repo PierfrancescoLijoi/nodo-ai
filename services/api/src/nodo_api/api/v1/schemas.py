@@ -482,6 +482,10 @@ class PageRevisionOutput(FrozenModel):
     machine_generated: bool
 
 
+class PageList(FrozenModel):
+    items: tuple[PageOutput, ...]
+
+
 class CollectionCreate(FrozenModel):
     name: str
     parent_id: str | None = Field(default=None, max_length=64)

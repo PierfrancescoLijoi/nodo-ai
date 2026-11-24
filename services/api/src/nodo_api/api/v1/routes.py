@@ -54,6 +54,7 @@ from nodo_api.api.v1.schemas import (
     MeetingCreate,
     MeetingList,
     MeetingOutput,
+    PageList,
     PageOutput,
     PageRevisionOutput,
     ParentSuggestionInput,
@@ -210,9 +211,7 @@ def _pages(container):
     return container.pages
 
 
-@router.get("/pages/{page_id}", response_model=PageOutput)
-def get_page(page_id: str, actor: PrincipalDep, request: Request):
-    page = _pages(request.app.state.container).get_owned(actor.workspace_id, actor.user_id, page_id)
+def _page_output(page):
     return PageOutput(
         id=page.id,
         kind=page.kind.value,
@@ -221,6 +220,22 @@ def get_page(page_id: str, actor: PrincipalDep, request: Request):
         current_revision=page.current_revision,
         created_at=page.created_at,
     )
+
+
+@router.get("/pages", response_model=PageList)
+def list_pages(
+    actor: PrincipalDep,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    pages = _pages(request.app.state.container).list_owned(actor.workspace_id, actor.user_id)
+    return PageList(items=tuple(_page_output(page) for page in pages[:limit]))
+
+
+@router.get("/pages/{page_id}", response_model=PageOutput)
+def get_page(page_id: str, actor: PrincipalDep, request: Request):
+    page = _pages(request.app.state.container).get_owned(actor.workspace_id, actor.user_id, page_id)
+    return _page_output(page)
 
 
 @router.get("/pages/{page_id}/revisions", response_model=tuple[PageRevisionOutput, ...])
@@ -246,14 +261,7 @@ def approve_page(page_id: str, actor: PrincipalDep, request: Request):
     if service is None:
         raise NotAvailableOnEngine
     page = service.approve_proposal(actor.workspace_id, actor.user_id, page_id)
-    return PageOutput(
-        id=page.id,
-        kind=page.kind.value,
-        subject_id=page.subject_id,
-        status=page.status.value,
-        current_revision=page.current_revision,
-        created_at=page.created_at,
-    )
+    return _page_output(page)
 @router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)
 def create_source(
     payload: SourceCreate,
