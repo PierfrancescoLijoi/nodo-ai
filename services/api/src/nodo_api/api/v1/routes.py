@@ -61,6 +61,7 @@ from nodo_api.api.v1.schemas import (
     PageHealthOutput,
     PageList,
     PageOutput,
+    PageRefreshInput,
     PageRevisionOutput,
     ParentSuggestionInput,
     ProcessingConfirmation,
@@ -381,6 +382,33 @@ def edit_page(
         payload.body_md,
         tuple(claims),
         tuple(evidence.values()),
+    )
+    return _page_output(page)
+
+
+@router.post("/pages/{page_id}/refresh", response_model=PageOutput)
+def refresh_page(
+    page_id: str,
+    payload: PageRefreshInput,
+    actor: PrincipalDep,
+    request: Request,
+    _idempotency_key: PageCommandKey,
+):
+    container = request.app.state.container
+    service = container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    page = _pages(container).get_owned(actor.workspace_id, actor.user_id, page_id)
+    sources, fragments = _source_stores(container)
+    evidence = []
+    for source_id in dict.fromkeys(payload.source_ids):
+        sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+        evidence.extend(fragments.latest(actor.workspace_id, source_id))
+    service.compile(
+        page,
+        tuple(evidence),
+        model_version="extractive-page-compiler-v1",
+        prompt_version="page-refresh-v1",
     )
     return _page_output(page)
 @router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)
