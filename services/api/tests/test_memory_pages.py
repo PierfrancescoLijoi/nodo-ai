@@ -84,3 +84,24 @@ def test_invalid_revision_span_fails_closed_to_whole_revision_marker():
     store.redact_source("ws", "source-a")
 
     assert store.revisions("ws", "owner", value.id)[0].body_md == REMOVED_MARKER
+
+
+def test_refresh_proposal_keeps_the_human_revision_authoritative():
+    store = MemoryPageRepository()
+    value = page()
+    first = claim(0, (0, 5), "Alpha", "source-a")
+    store.put_proposal(value, proposal(value, first))
+    store.append_revision("ws", "owner", PageRevision(value.id, 1, "Alpha", "owner", NOW, (first,)))
+    refreshed = PageProposal(
+        "refresh",
+        value.id,
+        "Beta",
+        (claim(0, (0, 4), "Beta", "source-b"),),
+        PageProvenance("model", "prompt"),
+        NOW,
+    )
+
+    store.put_proposal(store.get_owned("ws", "owner", value.id), refreshed)
+
+    assert store.revisions("ws", "owner", value.id)[0].body_md == "Alpha"
+    assert store.proposal("ws", "owner", value.id) == refreshed
