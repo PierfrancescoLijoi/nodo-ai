@@ -4,9 +4,18 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from nodo_api.domain.models import Answerability, Citation
-from nodo_api.domain.pages import Page, PageClaim, PageProposal, PageRevision
+from nodo_api.domain.pages import (
+    Page,
+    PageCitation,
+    PageClaim,
+    PageProposal,
+    PageProvenance,
+    PageRevision,
+    claim_text_hash,
+)
 from nodo_api.domain.sources import Fragment
 from nodo_api.errors import ValidationFailed
 from nodo_api.ports import PageRepository
@@ -32,6 +41,54 @@ class PageService:
         if len(valid) != len(proposal.claims):
             raise ValidationFailed("A Page proposal contains unsupported claims")
         self._pages.put_proposal(page, replace(proposal, claims=valid))
+
+    def compile(
+        self,
+        page: Page,
+        evidence: tuple[Fragment, ...],
+        *,
+        model_version: str,
+        prompt_version: str,
+    ) -> PageProposal:
+        """Create a conservative cited draft from authorized evidence."""
+        if not evidence:
+            raise ValidationFailed("A Page compiler needs evidence")
+        parts, claims = [], []
+        offset = 0
+        for ordinal, fragment in enumerate(evidence):
+            text = fragment.text
+            if parts:
+                offset += 2
+            parts.append(text)
+            claims.append(
+                PageClaim(
+                    ordinal,
+                    (offset, offset + len(text)),
+                    text,
+                    claim_text_hash(text),
+                    (
+                        PageCitation(
+                            fragment.source_id,
+                            fragment.id,
+                            fragment.version,
+                            fragment.locator,
+                            text,
+                        ),
+                    ),
+                    machine_generated=True,
+                )
+            )
+            offset += len(text)
+        proposal = PageProposal(
+            f"page-proposal-{uuid4().hex}",
+            page.id,
+            "\n\n".join(parts),
+            tuple(claims),
+            PageProvenance(model_version, prompt_version),
+            datetime.now(UTC),
+        )
+        self.propose(page, proposal, evidence)
+        return proposal
 
     def approve(self, workspace_id: str, owner_id: str, revision: PageRevision) -> Page:
         return self._pages.append_revision(workspace_id, owner_id, revision)
