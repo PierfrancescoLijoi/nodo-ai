@@ -40,6 +40,8 @@ class PageService:
         page = self._pages.get_owned(workspace_id, owner_id, page_id)
         proposal = self._pages.proposal(workspace_id, owner_id, page_id)
         if proposal is None:
+            if page.current_revision is not None:
+                return page  # idempotent retry after the proposal was promoted
             raise ValidationFailed("There is no pending Page proposal")
         revision = PageRevision(
             page_id,

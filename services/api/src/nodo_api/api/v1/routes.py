@@ -240,6 +240,20 @@ def get_page_revisions(page_id: str, actor: PrincipalDep, request: Request):
     )
 
 
+@router.post("/pages/{page_id}/approve", response_model=PageOutput)
+def approve_page(page_id: str, actor: PrincipalDep, request: Request):
+    service = request.app.state.container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    page = service.approve_proposal(actor.workspace_id, actor.user_id, page_id)
+    return PageOutput(
+        id=page.id,
+        kind=page.kind.value,
+        subject_id=page.subject_id,
+        status=page.status.value,
+        current_revision=page.current_revision,
+        created_at=page.created_at,
+    )
 @router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)
 def create_source(
     payload: SourceCreate,
