@@ -28,6 +28,7 @@ from nodo_api.adapters.local.llm import (
 )
 from nodo_api.adapters.local.maintenance import LocalIndexService, SqliteMaintenanceStore
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer, LocalModelPaths, data_dir
+from nodo_api.adapters.local.pages import SqlitePageRepository
 from nodo_api.adapters.local.queue import LocalWorkerLoop, SqliteJobQueue
 from nodo_api.adapters.local.repos import (
     SqliteAuditLog,
@@ -319,6 +320,7 @@ def local_adapters(settings: Settings):
     sources = SqliteSourceRepository(db)
     fragments = SqliteFragmentRepository(db)
     section_summaries = SqliteSectionSummaryRepository(db)
+    pages = SqlitePageRepository(db)
     section_summary_service = SectionSummaryService(
         section_summaries, FirstFragmentSectionSummarizer()
     )
@@ -425,4 +427,5 @@ def local_adapters(settings: Settings):
         parent_suggester=parent_suggester,
         section_summaries=section_summaries,
         section_summary_service=section_summary_service,
+        pages=pages,
     )

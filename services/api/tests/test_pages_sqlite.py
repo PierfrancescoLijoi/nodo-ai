@@ -1,0 +1,41 @@
+from datetime import UTC, datetime
+
+from nodo_api.adapters.local.db import LocalDatabase
+from nodo_api.adapters.local.pages import SqlitePageRepository
+from nodo_api.domain.pages import (
+    Page,
+    PageCitation,
+    PageClaim,
+    PageKind,
+    PageProposal,
+    PageProvenance,
+    PageRevision,
+    PageStatus,
+    claim_text_hash,
+)
+from nodo_api.domain.sources import Locator
+
+
+def test_sqlite_page_revision_and_redaction_round_trip(tmp_path):
+    now = datetime(2026, 11, 24, tzinfo=UTC)
+    db = LocalDatabase(tmp_path / "pages.db")
+    try:
+        store = SqlitePageRepository(db)
+        page = Page("page", "ws", "owner", PageKind.CONCEPT, "concept", PageStatus.PROPOSED, now)
+        citation = PageCitation("source", "fragment", 1, Locator(chars=(0, 5)), "Alpha")
+        claim = PageClaim(0, (0, 5), "Alpha", claim_text_hash("Alpha"), (citation,), True)
+        proposal = PageProposal(
+            "proposal", page.id, (claim,), PageProvenance("model", "prompt"), now
+        )
+        store.put_proposal(page, proposal)
+
+        approved = store.append_revision(
+            "ws", "owner", PageRevision(page.id, 1, "Alpha", "owner", now, (claim,))
+        )
+        assert approved.status is PageStatus.APPROVED
+        assert store.revisions("ws", "owner", page.id)[0].claims == (claim,)
+
+        assert store.redact_source("ws", "source") == (page.id,)
+        assert store.revisions("ws", "owner", page.id)[0].body_md == "removed: source deleted"
+    finally:
+        db.close()

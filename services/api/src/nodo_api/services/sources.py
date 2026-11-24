@@ -17,6 +17,7 @@ from nodo_api.ports import (
     GraphStore,
     ImportJobRepository,
     JobControl,
+    PageRepository,
     SourceBlobStore,
     SourceRepository,
     WatchFolderRepository,
@@ -50,6 +51,7 @@ class SourceService:
         jobs: JobControl | None = None,
         watch: WatchFolderRepository | None = None,
         collections: CollectionRepository | None = None,
+        pages: PageRepository | None = None,
     ) -> None:
         self._sources = sources
         self._fragments = fragments
@@ -63,6 +65,7 @@ class SourceService:
         self._jobs = jobs
         self._watch = watch
         self._collections = collections
+        self._pages = pages
 
     def delete(self, workspace_id: str, user_id: str, source_id: str) -> None:
         """Tombstone (state `deleting`, title, origin note and content hash forgotten), stop the
@@ -109,6 +112,10 @@ class SourceService:
         if self._index is not None:  # the memory index has no trigger backstop
             self._index.erase_source(workspace_id, source_id)
         self._graph.erase(workspace_id, source_id)
+        if self._pages is not None:
+            # Authoritative revisions may hold copied source text. Redact them before the
+            # fragments vanish, while their claim spans and hashes can still be checked.
+            self._pages.redact_source(workspace_id, source_id)
         self._fragments.erase(workspace_id, source_id)
         if self._blobs is not None:
             self._blobs.erase(workspace_id, source_id)  # every version, .part files, open links

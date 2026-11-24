@@ -257,6 +257,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
             jobs=a.jobs,
             watch=a.folder_watcher.repository if a.folder_watcher is not None else None,
             collections=a.collections,
+            pages=a.pages,
         )
         if all(
             port is not None
