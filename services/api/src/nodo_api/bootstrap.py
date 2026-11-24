@@ -105,6 +105,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemoryJobQueue,
         MemoryMaintenanceStore,
         MemoryMeetingRepository,
+        MemoryPageRepository,
         MemoryRetentionStore,
         MemorySectionSummaryRepository,
         MemorySourceBlobStore,
@@ -137,6 +138,7 @@ def memory_adapters(settings: Settings) -> Adapters:
     audit = MemoryAuditLog()
     fragments = MemoryFragmentRepository(sources, transcripts)
     section_summaries = MemorySectionSummaryRepository(sources, fragments)
+    pages = MemoryPageRepository()
     section_summary_service = SectionSummaryService(
         section_summaries, FirstFragmentSectionSummarizer()
     )
@@ -194,6 +196,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         parent_suggester=KeywordParentSuggester(),
         section_summaries=section_summaries,
         section_summary_service=section_summary_service,
+        pages=pages,
         # No poll thread here: nothing scans unless a caller runs scan_once.
         folder_watcher=FolderWatcher(
             MemoryWatchFolderRepository(), source_import, source_blobs, source_blobs.root
