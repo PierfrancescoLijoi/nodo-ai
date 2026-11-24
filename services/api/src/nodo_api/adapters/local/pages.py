@@ -142,9 +142,19 @@ class SqlitePageRepository:
                         self._replace_revision(conn, workspace_id, redacted)
                 conn.execute("DELETE FROM page_proposals WHERE workspace_id = ? AND page_id = ?", (workspace_id, page_id))
                 conn.execute("UPDATE pages SET status = 'stale' WHERE workspace_id = ? AND id = ?", (workspace_id, page_id))
-                if page.kind is PageKind.SOURCE_SUMMARY and page.current_revision is None:
+                if page.kind is PageKind.SOURCE_SUMMARY and self._only_removal_markers(
+                    conn, workspace_id, page_id
+                ):
                     conn.execute("DELETE FROM pages WHERE workspace_id = ? AND id = ?", (workspace_id, page_id))
             return ids
+
+    @staticmethod
+    def _only_removal_markers(conn, workspace_id, page_id):
+        rows = conn.execute(
+            "SELECT body_md FROM page_revisions WHERE workspace_id = ? AND page_id = ?",
+            (workspace_id, page_id),
+        ).fetchall()
+        return not rows or all(row["body_md"] == "removed: source deleted" for row in rows)
 
     def _get_any(self, conn, workspace_id, page_id):
         row = conn.execute("SELECT * FROM pages WHERE workspace_id = ? AND id = ?", (workspace_id, page_id)).fetchone()

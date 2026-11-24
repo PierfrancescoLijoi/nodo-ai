@@ -110,8 +110,11 @@ class MemoryPageRepository:
             if changed:
                 self._pages[key] = replace(page, status=PageStatus.STALE)
                 affected.append(page.id)
-            if page.kind is PageKind.SOURCE_SUMMARY and not revisions and proposal is None:
+            if page.kind is PageKind.SOURCE_SUMMARY and (
+                not revisions or all(revision.body_md == REMOVED_MARKER for revision in revisions)
+            ):
                 self._pages.pop(key)
+                self._proposals.pop(key, None)
         return tuple(affected)
 
 

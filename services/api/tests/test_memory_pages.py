@@ -86,6 +86,21 @@ def test_invalid_revision_span_fails_closed_to_whole_revision_marker():
     assert store.revisions("ws", "owner", value.id)[0].body_md == REMOVED_MARKER
 
 
+def test_source_summary_that_only_contains_removed_text_is_deleted():
+    store = MemoryPageRepository()
+    value = Page(
+        "page", "ws", "owner", PageKind.SOURCE_SUMMARY, "source-a", PageStatus.PROPOSED, NOW
+    )
+    first = claim(0, (0, 5), "Alpha", "source-a")
+    store.put_proposal(value, proposal(value, first))
+    store.append_revision("ws", "owner", PageRevision(value.id, 1, "Alpha", "owner", NOW, (first,)))
+
+    store.redact_source("ws", "source-a")
+
+    with pytest.raises(NotFoundError):
+        store.get_owned("ws", "owner", value.id)
+
+
 def test_refresh_proposal_keeps_the_human_revision_authoritative():
     store = MemoryPageRepository()
     value = page()

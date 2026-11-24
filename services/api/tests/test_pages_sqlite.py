@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from nodo_api.adapters.local.db import LocalDatabase
 from nodo_api.adapters.local.pages import SqlitePageRepository
 from nodo_api.domain.pages import (
@@ -14,6 +16,7 @@ from nodo_api.domain.pages import (
     claim_text_hash,
 )
 from nodo_api.domain.sources import Locator
+from nodo_api.errors import NotFoundError
 
 
 def test_sqlite_page_revision_and_redaction_round_trip(tmp_path):
@@ -91,3 +94,29 @@ def test_sqlite_rejection_keeps_a_proposal_and_survives_restart(tmp_path):
         assert store.proposal("ws", "owner", "page").id == "proposal"
     finally:
         reopened.close()
+
+
+def test_sqlite_deletes_source_summary_with_only_removed_marker(tmp_path):
+    now = datetime(2026, 11, 24, tzinfo=UTC)
+    db = LocalDatabase(tmp_path / "source-summary.db")
+    try:
+        store = SqlitePageRepository(db)
+        page = Page(
+            "page", "ws", "owner", PageKind.SOURCE_SUMMARY, "source", PageStatus.PROPOSED, now
+        )
+        citation = PageCitation("source", "fragment", 1, Locator(chars=(0, 5)), "Alpha")
+        first = PageClaim(0, (0, 5), "Alpha", claim_text_hash("Alpha"), (citation,), True)
+        store.put_proposal(
+            page,
+            PageProposal("proposal", page.id, "Alpha", (first,), PageProvenance("m", "p"), now),
+        )
+        store.append_revision(
+            "ws", "owner", PageRevision(page.id, 1, "Alpha", "owner", now, (first,))
+        )
+
+        store.redact_source("ws", "source")
+
+        with pytest.raises(NotFoundError):
+            store.get_owned("ws", "owner", page.id)
+    finally:
+        db.close()
