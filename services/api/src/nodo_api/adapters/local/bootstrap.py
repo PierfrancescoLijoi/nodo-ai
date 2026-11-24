@@ -353,6 +353,7 @@ def local_adapters(settings: Settings):
         speech=speech,
         speech_locales=settings.speech_candidate_locales,
         section_summaries=section_summary_service,
+        pages=pages,
     )
     watcher = FolderWatcher(SqliteWatchFolderRepository(db), source_import, source_blobs, root)
     source = SyncSource(

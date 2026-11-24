@@ -168,6 +168,7 @@ def memory_adapters(settings: Settings) -> Adapters:
         speech=MemorySpeech(),
         speech_locales=settings.speech_candidate_locales,
         section_summaries=section_summary_service,
+        pages=pages,
     )
     return Adapters(
         meetings,

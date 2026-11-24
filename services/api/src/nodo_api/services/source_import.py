@@ -67,6 +67,7 @@ from nodo_api.ports import (
     ImportJobRepository,
     JobControl,
     JobQueue,
+    PageRepository,
     SourceBlobStore,
     SourceRepository,
     SpeechToText,
@@ -175,6 +176,7 @@ class SourceImportService:
         speech: SpeechToText | None = None,
         speech_locales: tuple[str, ...] = (),
         section_summaries: SectionSummaryService | None = None,
+        pages: PageRepository | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._sources = sources
@@ -198,6 +200,7 @@ class SourceImportService:
         self._speech = speech
         self._speech_locales = speech_locales
         self._section_summaries = section_summaries
+        self._pages = pages
         # Times this service writes (created_at, tombstones). Job and version rows keep the wall
         # clock of their stores (Task 5 decision): they are progress, not facts a test fakes.
         self._clock = clock
@@ -652,6 +655,8 @@ class SourceImportService:
             self._enter(workspace_id, source_id, "indexing", total=len(fragments))
             try:
                 version = self._fragments.add_version(workspace_id, source_id, sections, fragments)
+                if previous is not None and self._pages is not None:
+                    self._pages.mark_stale_for_source(workspace_id, source_id)
                 self._mark_new_version(workspace_id, source_id)
                 self._fragments.record_version(
                     workspace_id,
