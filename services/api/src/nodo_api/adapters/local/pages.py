@@ -58,9 +58,9 @@ class SqlitePageRepository:
                 raise ConflictError
             conn.execute("DELETE FROM page_proposals WHERE workspace_id = ? AND page_id = ?", (page.workspace_id, page.id))
             conn.execute(
-                "INSERT INTO page_proposals VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO page_proposals (workspace_id, page_id, id, model_version, prompt_version, created_at, body_md) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (page.workspace_id, page.id, proposal.id, proposal.provenance.model_version,
-                 proposal.provenance.prompt_version, to_text(proposal.created_at)),
+                 proposal.provenance.prompt_version, to_text(proposal.created_at), proposal.body_md),
             )
             self._write_claims(conn, page.workspace_id, page.id, proposal.claims, proposal_id=proposal.id)
 
@@ -84,7 +84,7 @@ class SqlitePageRepository:
             ).fetchone()
             if row is None:
                 return None
-            return PageProposal(row["id"], page_id, self._claims(conn, workspace_id, page_id, proposal_id=row["id"]),
+            return PageProposal(row["id"], page_id, row["body_md"], self._claims(conn, workspace_id, page_id, proposal_id=row["id"]),
                 PageProvenance(row["model_version"], row["prompt_version"]), from_text(row["created_at"]))
 
     def append_revision(self, workspace_id: str, owner_id: str, revision: PageRevision) -> Page:

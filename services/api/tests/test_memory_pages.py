@@ -31,7 +31,9 @@ def page(status: PageStatus = PageStatus.PROPOSED, revision: int | None = None) 
 
 
 def proposal(value: Page, *claims: PageClaim) -> PageProposal:
-    return PageProposal("proposal", value.id, claims, PageProvenance("model", "prompt"), NOW)
+    return PageProposal(
+        "proposal", value.id, "Alpha", claims, PageProvenance("model", "prompt"), NOW
+    )
 
 
 def test_owner_scoping_and_approval_turn_proposal_into_authoritative_revision():

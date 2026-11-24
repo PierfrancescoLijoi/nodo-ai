@@ -121,13 +121,14 @@ class PageProposal:
 
     id: str
     page_id: str
+    body_md: str
     claims: tuple[PageClaim, ...]
     provenance: PageProvenance
     created_at: datetime
 
     def __post_init__(self) -> None:
-        if not self.id or not self.page_id:
-            raise ValueError("A Page proposal needs id and page")
+        if not self.id or not self.page_id or not self.body_md.strip():
+            raise ValueError("A Page proposal needs id, page and body")
         if not self.provenance.machine_generated:
             raise ValueError("A Page proposal needs machine provenance")
         if not self.claims:

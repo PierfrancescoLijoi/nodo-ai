@@ -30,7 +30,7 @@ def test_proposal_rejects_a_quote_that_is_not_in_its_fragment():
     fragment = Fragment("f", "source", None, 0, "stored fact", Locator(chars=(0, 11)), 1)
     citation = PageCitation("source", "f", 1, fragment.locator, "invented")
     claim = PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (citation,), True)
-    proposal = PageProposal("pp", "p", (claim,), PageProvenance("m", "p"), now)
+    proposal = PageProposal("pp", "p", "Fact", (claim,), PageProvenance("m", "p"), now)
 
     with pytest.raises(ValidationFailed):
         service.propose(page, proposal, (fragment,))

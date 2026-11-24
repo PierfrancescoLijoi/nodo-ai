@@ -60,6 +60,7 @@ def test_page_can_keep_an_approved_revision_while_a_refresh_proposal_exists():
     proposal = PageProposal(
         "proposal-1",
         page.id,
+        "Fact",
         (PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (citation(),), True),),
         PageProvenance("model", "prompt"),
         NOW,
@@ -67,7 +68,7 @@ def test_page_can_keep_an_approved_revision_while_a_refresh_proposal_exists():
 
     assert proposal.page_id == page.id
     with pytest.raises(ValueError, match="needs a claim"):
-        PageProposal("proposal-2", page.id, (), PageProvenance("model", "prompt"), NOW)
+        PageProposal("proposal-2", page.id, "Fact", (), PageProvenance("model", "prompt"), NOW)
 
 
 def test_new_page_is_proposed_before_its_first_approved_revision():

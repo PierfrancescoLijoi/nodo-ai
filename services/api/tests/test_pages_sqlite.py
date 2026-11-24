@@ -25,7 +25,7 @@ def test_sqlite_page_revision_and_redaction_round_trip(tmp_path):
         citation = PageCitation("source", "fragment", 1, Locator(chars=(0, 5)), "Alpha")
         claim = PageClaim(0, (0, 5), "Alpha", claim_text_hash("Alpha"), (citation,), True)
         proposal = PageProposal(
-            "proposal", page.id, (claim,), PageProvenance("model", "prompt"), now
+            "proposal", page.id, "Alpha", (claim,), PageProvenance("model", "prompt"), now
         )
         store.put_proposal(page, proposal)
 

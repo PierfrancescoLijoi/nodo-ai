@@ -23,7 +23,9 @@ def test_health_reports_stale_pages_and_uncited_human_claims():
     machine = PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (citation,), True)
     human = PageClaim(1, (5, 9), "Note", claim_text_hash("Note"), ())
     store = MemoryPageRepository()
-    store.put_proposal(page, PageProposal("pp", "p", (machine,), PageProvenance("m", "p"), now))
+    store.put_proposal(
+        page, PageProposal("pp", "p", "Fact", (machine,), PageProvenance("m", "p"), now)
+    )
     store.append_revision(
         "ws", "owner", PageRevision("p", 1, "Fact Note", "owner", now, (machine, human))
     )

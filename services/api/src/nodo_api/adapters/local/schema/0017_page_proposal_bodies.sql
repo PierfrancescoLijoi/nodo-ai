@@ -1,0 +1,1 @@
+ALTER TABLE page_proposals ADD COLUMN body_md TEXT NOT NULL DEFAULT '';
