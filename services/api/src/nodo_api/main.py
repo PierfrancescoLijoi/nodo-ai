@@ -28,6 +28,7 @@ from nodo_api.middleware import EdgeProtection
 from nodo_api.resilience import Bulkhead, DependencyUnavailable, is_transient
 from nodo_api.services import (
     EvidenceValidator,
+    GraphInsightService,
     GraphService,
     HierarchyService,
     MeetingService,
@@ -91,6 +92,7 @@ class AppContainer:
     pages: Any = None  # None on Azure: Wiki APIs answer 501
     page_service: PageService | None = None
     page_health: PageHealthService | None = None
+    graph_insights: GraphInsightService | None = None
 
 
 @asynccontextmanager
@@ -278,6 +280,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         else None
     )
     graph_service = GraphService(a.graph, a.audit, a.answers)
+    graph_insights = GraphInsightService(a.graph) if a.hierarchy_store is not None else None
     hierarchy = (
         HierarchyService(
             a.hierarchy_store, graph_service, a.fragments, a.sources, a.parent_suggester
@@ -332,6 +335,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         pages=a.pages,
         page_service=page_service,
         page_health=page_health,
+        graph_insights=graph_insights,
     )
 
 
