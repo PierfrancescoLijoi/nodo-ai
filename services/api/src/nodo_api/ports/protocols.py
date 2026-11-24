@@ -671,6 +671,10 @@ class GraphStore(Protocol):
         self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
     ) -> tuple[Entity, ...]: ...
 
+    def analysis_graph(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        """A bounded whole-owner graph for deterministic local analysis."""
+        ...
+
     def recent_decisions(
         self, workspace_id: str, owner_id: str, limit: int
     ) -> tuple[Entity, ...]: ...

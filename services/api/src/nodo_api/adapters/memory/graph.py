@@ -547,6 +547,18 @@ class MemoryGraphStore:
         )
         return tuple(ordered[:limit])
 
+    def analysis_graph(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        part = self._part(workspace_id, owner_id)
+        edges = tuple(
+            row.relation for row in sorted(part.relations.values(), key=lambda row: row.relation.id)
+            if row.relation.status is not ReviewStatus.REJECTED
+        )[:limit]
+        ids = {entity_id for edge in edges for entity_id in (edge.source_id, edge.target_id)}
+        nodes = tuple(
+            part.entities[entity_id] for entity_id in sorted(ids) if entity_id in part.entities
+        )
+        return Subgraph(nodes, edges, len(edges) == limit and len(part.relations) > limit)
+
     def recent_decisions(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Entity, ...]:
         part = self._part(workspace_id, owner_id)
         decisions = [e for e in part.entities.values() if e.type is EntityType.DECISION]

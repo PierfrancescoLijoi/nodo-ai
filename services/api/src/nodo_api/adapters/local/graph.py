@@ -743,6 +743,23 @@ class SqliteGraphStore:
             ).fetchall()
         return tuple(_entity(r) for r in rows)
 
+    def analysis_graph(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                f"SELECT {_RELATION_COLUMNS} FROM relations WHERE workspace_id = ? AND owner_id = ?"
+                " AND status <> 'rejected' ORDER BY id LIMIT ?",
+                (workspace_id, owner_id, limit + 1),
+            ).fetchall()
+            chosen = rows[:limit]
+            ids = list(dict.fromkeys(i for row in chosen for i in (row["source_id"], row["target_id"])))
+            entities = self._entities(conn, workspace_id, owner_id, ids)
+            evidence = self._evidence(conn, workspace_id, owner_id, [row["id"] for row in chosen])
+        return Subgraph(
+            tuple(entities[i] for i in ids if i in entities),
+            tuple(_relation(row, tuple(evidence.get(row["id"], ()))) for row in chosen),
+            len(rows) > limit,
+        )
+
     def recent_decisions(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Entity, ...]:
         with self._db.transaction(write=False) as conn:
             rows = conn.execute(
