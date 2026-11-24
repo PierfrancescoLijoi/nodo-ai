@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 from nodo_api.adapters.memory.pages import MemoryPageRepository
 from nodo_api.domain.pages import (
@@ -23,7 +24,8 @@ def test_vault_export_skips_pending_pages():
         "pending", "ws", "owner", PageKind.CONCEPT, "concept", PageStatus.PROPOSED, now
     )
 
-    assert VaultExportService(store).render("ws", "owner") == {}
+    rendered = VaultExportService(store).render("ws", "owner")
+    assert set(rendered) == {Path("manifest.json")}
 
 
 def test_vault_export_never_keeps_text_from_an_erased_source():

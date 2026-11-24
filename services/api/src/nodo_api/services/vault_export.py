@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -30,4 +32,12 @@ class VaultExportService:
                 f"subject: {page.subject_id}\nrevision: {revision.number}\n---\n\n"
                 f"{revision.body_md}\n"
             )
+        manifest = {
+            "format": "nodo-vault-v1",
+            "files": {
+                str(path).replace("\\", "/"): hashlib.sha256(text.encode("utf-8")).hexdigest()
+                for path, text in sorted(files.items(), key=lambda item: str(item[0]))
+            },
+        }
+        files[Path("manifest.json")] = json.dumps(manifest, sort_keys=True, indent=2) + "\n"
         return files
