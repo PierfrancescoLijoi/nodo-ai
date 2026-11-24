@@ -11,6 +11,7 @@ from nodo_api.domain.pages import (
     PageProvenance,
     PageRevision,
     PageStatus,
+    claim_text_hash,
 )
 from nodo_api.domain.sources import Locator
 
@@ -23,19 +24,19 @@ def citation() -> PageCitation:
 
 def test_machine_claim_needs_a_citation_and_a_valid_span():
     with pytest.raises(ValueError, match="machine-generated claim needs a citation"):
-        PageClaim(0, (0, 4), "Fact", "hash", (), machine_generated=True)
+        PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (), machine_generated=True)
     with pytest.raises(ValueError, match="non-negative range"):
-        PageClaim(0, (-1, 4), "Fact", "hash", (citation(),))
+        PageClaim(0, (-1, 4), "Fact", claim_text_hash("Fact"), (citation(),))
 
 
 def test_human_claim_can_be_uncited_for_health_lint_to_report():
-    claim = PageClaim(0, (0, 4), "Fact", "hash", (), machine_generated=False)
+    claim = PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (), machine_generated=False)
 
     assert claim.citations == ()
 
 
 def test_page_revision_is_append_only_numbered_and_has_claims_in_body_order():
-    claim = PageClaim(0, (0, 4), "Fact", "hash", (citation(),))
+    claim = PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (citation(),))
     revision = PageRevision("page-1", 1, "Fact", "user-1", NOW, (claim,))
 
     assert revision.number == 1
@@ -59,7 +60,7 @@ def test_page_can_keep_an_approved_revision_while_a_refresh_proposal_exists():
     proposal = PageProposal(
         "proposal-1",
         page.id,
-        (PageClaim(0, (0, 4), "Fact", "hash", (citation(),), True),),
+        (PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (citation(),), True),),
         PageProvenance("model", "prompt"),
         NOW,
     )

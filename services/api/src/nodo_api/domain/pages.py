@@ -8,6 +8,7 @@ states unrepresentable at the domain boundary.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -31,6 +32,11 @@ def _range(name: str, value: tuple[int, int]) -> None:
     start, end = value
     if start < 0 or end < start:
         raise ValueError(f"{name} must be a non-negative range with end >= start")
+
+
+def claim_text_hash(text: str) -> str:
+    """Stable integrity marker used to fail closed when redacting historic revision spans."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +71,7 @@ class PageClaim:
         if self.ordinal < 0:
             raise ValueError("A Page claim ordinal cannot be negative")
         _range("A Page claim span", self.span)
-        if not self.text.strip() or not self.text_hash:
+        if not self.text.strip() or self.text_hash != claim_text_hash(self.text):
             raise ValueError("A Page claim needs text and text hash")
         if self.machine_generated and not self.citations:
             raise ValueError("A machine-generated claim needs a citation")
