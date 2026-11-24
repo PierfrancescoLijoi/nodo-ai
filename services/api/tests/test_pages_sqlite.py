@@ -65,3 +65,29 @@ def test_sqlite_refresh_proposal_keeps_the_existing_revision(tmp_path):
         assert store.proposal("ws", "owner", page.id).body_md == "Beta"
     finally:
         db.close()
+
+
+def test_sqlite_rejection_keeps_a_proposal_and_survives_restart(tmp_path):
+    now = datetime(2026, 11, 24, tzinfo=UTC)
+    path = tmp_path / "rejected.db"
+    db = LocalDatabase(path)
+    try:
+        store = SqlitePageRepository(db)
+        page = Page("page", "ws", "owner", PageKind.CONCEPT, "concept", PageStatus.PROPOSED, now)
+        citation = PageCitation("source", "fragment", 1, Locator(chars=(0, 5)), "Alpha")
+        first = PageClaim(0, (0, 5), "Alpha", claim_text_hash("Alpha"), (citation,), True)
+        store.put_proposal(
+            page,
+            PageProposal("proposal", page.id, "Alpha", (first,), PageProvenance("m", "p"), now),
+        )
+        assert store.reject_proposal("ws", "owner", page.id).status is PageStatus.REJECTED
+    finally:
+        db.close()
+
+    reopened = LocalDatabase(path)
+    try:
+        store = SqlitePageRepository(reopened)
+        assert store.get_owned("ws", "owner", "page").status is PageStatus.REJECTED
+        assert store.proposal("ws", "owner", "page").id == "proposal"
+    finally:
+        reopened.close()

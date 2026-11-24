@@ -103,6 +103,19 @@ class SqlitePageRepository:
             conn.execute("UPDATE pages SET status = 'approved', current_revision = ? WHERE workspace_id = ? AND id = ?", (revision.number, workspace_id, revision.page_id))
             return replace(page, status=PageStatus.APPROVED, current_revision=revision.number)
 
+    def reject_proposal(self, workspace_id: str, owner_id: str, page_id: str) -> Page:
+        with self._db.transaction() as conn:
+            page = self._get(conn, workspace_id, owner_id, page_id)
+            if page.status is PageStatus.REJECTED:
+                return page
+            if page.status is not PageStatus.PROPOSED:
+                raise ConflictError
+            conn.execute(
+                "UPDATE pages SET status = 'rejected' WHERE workspace_id = ? AND id = ?",
+                (workspace_id, page_id),
+            )
+            return replace(page, status=PageStatus.REJECTED)
+
     def revisions(self, workspace_id: str, owner_id: str, page_id: str) -> tuple[PageRevision, ...]:
         with self._db.transaction(write=False) as conn:
             self._get(conn, workspace_id, owner_id, page_id)

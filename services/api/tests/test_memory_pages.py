@@ -105,3 +105,15 @@ def test_refresh_proposal_keeps_the_human_revision_authoritative():
 
     assert store.revisions("ws", "owner", value.id)[0].body_md == "Alpha"
     assert store.proposal("ws", "owner", value.id) == refreshed
+
+
+def test_rejection_retains_auditable_draft_and_is_safe_to_retry():
+    store, value = MemoryPageRepository(), page()
+    first = claim(0, (0, 5), "Alpha", "source-a")
+    store.put_proposal(value, proposal(value, first))
+
+    rejected = store.reject_proposal("ws", "owner", value.id)
+
+    assert rejected.status is PageStatus.REJECTED
+    assert store.proposal("ws", "owner", value.id).body_md == "Alpha"
+    assert store.reject_proposal("ws", "owner", value.id) == rejected

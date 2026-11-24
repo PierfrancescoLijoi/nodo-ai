@@ -68,6 +68,16 @@ class MemoryPageRepository:
         self._proposals.pop(key, None)
         return updated
 
+    def reject_proposal(self, workspace_id: str, owner_id: str, page_id: str) -> Page:
+        page = self.get_owned(workspace_id, owner_id, page_id)
+        if page.status is PageStatus.REJECTED:
+            return page
+        if page.status is not PageStatus.PROPOSED:
+            raise ConflictError
+        updated = replace(page, status=PageStatus.REJECTED)
+        self._pages[(workspace_id, page_id)] = updated
+        return updated
+
     def revisions(self, workspace_id: str, owner_id: str, page_id: str) -> tuple[PageRevision, ...]:
         self.get_owned(workspace_id, owner_id, page_id)
         return tuple(reversed(self._revisions.get((workspace_id, page_id), ())))

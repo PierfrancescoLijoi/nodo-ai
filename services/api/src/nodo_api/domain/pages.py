@@ -25,6 +25,7 @@ class PageKind(StrEnum):
 class PageStatus(StrEnum):
     PROPOSED = "proposed"
     APPROVED = "approved"
+    REJECTED = "rejected"
     STALE = "stale"
 
 

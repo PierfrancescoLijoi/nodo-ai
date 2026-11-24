@@ -80,6 +80,9 @@ class PageService:
         )
         return self._pages.append_revision(workspace_id, owner_id, revision)
 
+    def reject_proposal(self, workspace_id: str, owner_id: str, page_id: str) -> Page:
+        return self._pages.reject_proposal(workspace_id, owner_id, page_id)
+
     def _validated_claim(
         self, workspace_id: str, claim: PageClaim, evidence: tuple[Fragment, ...]
     ) -> PageClaim:

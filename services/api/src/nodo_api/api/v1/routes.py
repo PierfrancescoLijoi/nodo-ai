@@ -255,13 +255,31 @@ def get_page_revisions(page_id: str, actor: PrincipalDep, request: Request):
     )
 
 
+PageCommandKey = Annotated[
+    str,
+    Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+]
+
+
 @router.post("/pages/{page_id}/approve", response_model=PageOutput)
-def approve_page(page_id: str, actor: PrincipalDep, request: Request):
+def approve_page(
+    page_id: str, actor: PrincipalDep, request: Request, _idempotency_key: PageCommandKey
+):
     service = request.app.state.container.page_service
     if service is None:
         raise NotAvailableOnEngine
     page = service.approve_proposal(actor.workspace_id, actor.user_id, page_id)
     return _page_output(page)
+
+
+@router.post("/pages/{page_id}/reject", response_model=PageOutput)
+def reject_page(
+    page_id: str, actor: PrincipalDep, request: Request, _idempotency_key: PageCommandKey
+):
+    service = request.app.state.container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    return _page_output(service.reject_proposal(actor.workspace_id, actor.user_id, page_id))
 @router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)
 def create_source(
     payload: SourceCreate,

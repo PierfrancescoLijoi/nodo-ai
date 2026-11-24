@@ -363,6 +363,10 @@ class PageRepository(Protocol):
         """Approve a proposal or append a human edit. Revision numbers must be contiguous."""
         ...
 
+    def reject_proposal(self, workspace_id: str, owner_id: str, page_id: str) -> Page:
+        """Mark the current proposal rejected without deleting its auditable draft."""
+        ...
+
     def revisions(
         self, workspace_id: str, owner_id: str, page_id: str
     ) -> tuple[PageRevision, ...]:
