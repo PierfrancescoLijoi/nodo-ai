@@ -52,6 +52,9 @@ class PageService:
             else claim
             for claim in claims
         )
+        current = self._pages.revisions(workspace_id, owner_id, page_id)
+        if current and current[0].body_md == body_md and current[0].claims == validated:
+            return page
         revision = PageRevision(
             page_id,
             (page.current_revision or 0) + 1,

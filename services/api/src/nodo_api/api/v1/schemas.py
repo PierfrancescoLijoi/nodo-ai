@@ -480,6 +480,43 @@ class PageRevisionOutput(FrozenModel):
     author_id: str
     created_at: datetime
     machine_generated: bool
+    claims: tuple[PageClaimOutput, ...]
+
+
+class PageCitationInput(FrozenModel):
+    source_id: str = Field(min_length=1, max_length=64)
+    fragment_id: str = Field(min_length=1, max_length=128)
+    source_version: int = Field(ge=1)
+    locator: dict[str, Any]
+    quote: str = Field(min_length=1, max_length=10_000)
+
+
+class PageClaimInput(FrozenModel):
+    span_start: int = Field(ge=0)
+    span_end: int = Field(ge=0)
+    citations: tuple[PageCitationInput, ...] = ()
+
+
+class PageEditInput(FrozenModel):
+    body_md: str = Field(min_length=1, max_length=200_000)
+    claims: tuple[PageClaimInput, ...] = ()
+
+
+class PageCitationOutput(FrozenModel):
+    source_id: str
+    fragment_id: str
+    source_version: int
+    locator: dict[str, Any]
+    quote: str
+
+
+class PageClaimOutput(FrozenModel):
+    ordinal: int
+    span_start: int
+    span_end: int
+    text: str
+    machine_generated: bool
+    citations: tuple[PageCitationOutput, ...]
 
 
 class PageList(FrozenModel):

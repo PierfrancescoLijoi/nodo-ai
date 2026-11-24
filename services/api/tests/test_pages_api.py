@@ -60,3 +60,34 @@ def test_page_commands_require_authentication_and_idempotency_key(app, client):
         headers={"Authorization": "Bearer test-dev-token-0123456789"},
     )
     assert response.status_code == 422
+
+
+def test_human_edit_appends_a_revision_and_returns_its_claims(app, client, auth_headers):
+    page = _proposal(app)
+    command = {**auth_headers, "Idempotency-Key": "page-key-2"}
+    assert client.post(f"/v1/pages/{page.id}/approve", headers=command).status_code == 200
+
+    edited = client.patch(
+        f"/v1/pages/{page.id}",
+        headers=command,
+        json={"body_md": "Note", "claims": [{"span_start": 0, "span_end": 4}]},
+    )
+    repeated = client.patch(
+        f"/v1/pages/{page.id}",
+        headers=command,
+        json={"body_md": "Note", "claims": [{"span_start": 0, "span_end": 4}]},
+    )
+    revisions = client.get(f"/v1/pages/{page.id}/revisions", headers=auth_headers)
+
+    assert edited.status_code == repeated.status_code == 200
+    assert [item["number"] for item in revisions.json()] == [2, 1]
+    assert revisions.json()[0]["claims"] == [
+        {
+            "ordinal": 0,
+            "span_start": 0,
+            "span_end": 4,
+            "text": "Note",
+            "machine_generated": False,
+            "citations": [],
+        }
+    ]

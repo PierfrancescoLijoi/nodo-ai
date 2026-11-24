@@ -54,6 +54,9 @@ from nodo_api.api.v1.schemas import (
     MeetingCreate,
     MeetingList,
     MeetingOutput,
+    PageCitationOutput,
+    PageClaimOutput,
+    PageEditInput,
     PageFindingOutput,
     PageHealthOutput,
     PageList,
@@ -89,6 +92,7 @@ from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
 from nodo_api.domain.hierarchy import MAX_DEPTH
+from nodo_api.domain.pages import PageCitation, PageClaim, claim_text_hash
 from nodo_api.domain.retrieval import (
     CitationFormat,
     QueryScope,
@@ -96,7 +100,7 @@ from nodo_api.domain.retrieval import (
     resolve_query_scope,
 )
 from nodo_api.domain.source_files import UploadRejected
-from nodo_api.domain.sources import CLEAR, Fragment, SourceKind
+from nodo_api.domain.sources import CLEAR, Fragment, Locator, SourceKind
 from nodo_api.errors import (
     AuthenticationError,
     NotAvailableOnEngine,
@@ -224,6 +228,36 @@ def _page_output(page):
     )
 
 
+def _page_revision_output(revision):
+    return PageRevisionOutput(
+        number=revision.number,
+        body_md=revision.body_md,
+        author_id=revision.author_id,
+        created_at=revision.created_at,
+        machine_generated=revision.provenance.machine_generated,
+        claims=tuple(
+            PageClaimOutput(
+                ordinal=claim.ordinal,
+                span_start=claim.span[0],
+                span_end=claim.span[1],
+                text=claim.text,
+                machine_generated=claim.machine_generated,
+                citations=tuple(
+                    PageCitationOutput(
+                        source_id=citation.source_id,
+                        fragment_id=citation.fragment_id,
+                        source_version=citation.source_version,
+                        locator=json.loads(citation.locator.to_json()),
+                        quote=citation.quote,
+                    )
+                    for citation in claim.citations
+                ),
+            )
+            for claim in revision.claims
+        ),
+    )
+
+
 @router.get("/pages", response_model=PageList)
 def list_pages(
     actor: PrincipalDep,
@@ -264,16 +298,7 @@ def get_page_revisions(page_id: str, actor: PrincipalDep, request: Request):
     revisions = _pages(request.app.state.container).revisions(
         actor.workspace_id, actor.user_id, page_id
     )
-    return tuple(
-        PageRevisionOutput(
-            number=revision.number,
-            body_md=revision.body_md,
-            author_id=revision.author_id,
-            created_at=revision.created_at,
-            machine_generated=revision.provenance.machine_generated,
-        )
-        for revision in revisions
-    )
+    return tuple(_page_revision_output(revision) for revision in revisions)
 
 
 PageCommandKey = Annotated[
@@ -301,6 +326,63 @@ def reject_page(
     if service is None:
         raise NotAvailableOnEngine
     return _page_output(service.reject_proposal(actor.workspace_id, actor.user_id, page_id))
+
+
+@router.patch("/pages/{page_id}", response_model=PageOutput)
+def edit_page(
+    page_id: str,
+    payload: PageEditInput,
+    actor: PrincipalDep,
+    request: Request,
+    _idempotency_key: PageCommandKey,
+):
+    container = request.app.state.container
+    service = container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    sources, fragments = _source_stores(container)
+    claims, evidence = [], {}
+    for ordinal, item in enumerate(payload.claims):
+        if item.span_end < item.span_start or item.span_end > len(payload.body_md):
+            raise ValidationFailed("A Page claim span is outside the body")
+        text = payload.body_md[item.span_start : item.span_end]
+        if not text.strip():
+            raise ValidationFailed("A Page claim needs body text")
+        citations = []
+        for raw in item.citations:
+            sources.get_owned(actor.workspace_id, actor.user_id, raw.source_id)
+            fragment = fragments.get_fragment(actor.workspace_id, raw.source_id, raw.fragment_id)
+            if fragment is None:
+                raise ValidationFailed("A Page citation fragment is unavailable")
+            locator = Locator.from_json(json.dumps(raw.locator))
+            citations.append(
+                PageCitation(
+                    raw.source_id,
+                    raw.fragment_id,
+                    raw.source_version,
+                    locator,
+                    raw.quote,
+                )
+            )
+            evidence[raw.source_id, raw.fragment_id] = fragment
+        claims.append(
+            PageClaim(
+                ordinal,
+                (item.span_start, item.span_end),
+                text,
+                claim_text_hash(text),
+                tuple(citations),
+            )
+        )
+    page = service.edit(
+        actor.workspace_id,
+        actor.user_id,
+        page_id,
+        payload.body_md,
+        tuple(claims),
+        tuple(evidence.values()),
+    )
+    return _page_output(page)
 @router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)
 def create_source(
     payload: SourceCreate,
