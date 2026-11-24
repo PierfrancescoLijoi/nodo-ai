@@ -22,6 +22,11 @@ from nodo_api.services.pages import PageService
 from nodo_api.services.query import EvidenceValidator
 
 
+class _AcceptingValidator:
+    def validate(self, workspace_id, generated, evidence):
+        return generated
+
+
 def test_proposal_rejects_a_quote_that_is_not_in_its_fragment():
     meetings, transcripts = MemoryMeetingRepository(), MemoryTranscriptRepository()
     fragments = MemoryFragmentRepository(MemorySourceRepository(meetings), transcripts)
@@ -73,3 +78,19 @@ def test_human_edit_appends_a_revision_without_overwriting_history():
 
     assert edited.current_revision == 2
     assert [item.body_md for item in store.revisions("ws", "owner", "p")] == ["Note", "Fact"]
+
+
+def test_compiler_creates_a_cited_proposal_from_authorized_evidence():
+    now = datetime(2026, 11, 24, tzinfo=UTC)
+    store = MemoryPageRepository()
+    page = Page("p", "ws", "owner", PageKind.CONCEPT, "c", PageStatus.PROPOSED, now)
+    fragment = Fragment("f", "source", None, 0, "Stored fact", Locator(chars=(0, 11)), 1)
+    service = PageService(store, _AcceptingValidator())
+
+    proposal = service.compile(
+        page, (fragment,), model_version="extractive-v1", prompt_version="page-v1"
+    )
+
+    assert proposal.body_md == "Stored fact"
+    assert proposal.claims[0].citations[0].fragment_id == "f"
+    assert store.proposal("ws", "owner", "p") == proposal
