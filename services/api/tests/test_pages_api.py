@@ -91,3 +91,19 @@ def test_human_edit_appends_a_revision_and_returns_its_claims(app, client, auth_
             "citations": [],
         }
     ]
+
+
+def test_refresh_does_not_read_a_source_outside_the_owner_scope(app, client, auth_headers):
+    page = _proposal(app)
+    app.state.container.auth.add_dev_token("page-bob-token-0123456789", "user-b", "workspace-a")
+
+    response = client.post(
+        f"/v1/pages/{page.id}/refresh",
+        headers={
+            "Authorization": "Bearer page-bob-token-0123456789",
+            "Idempotency-Key": "page-key-3",
+        },
+        json={"source_ids": ["seed-m1"]},
+    )
+
+    assert response.status_code == 404
