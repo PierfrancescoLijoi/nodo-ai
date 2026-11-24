@@ -34,3 +34,21 @@ def test_proposal_rejects_a_quote_that_is_not_in_its_fragment():
 
     with pytest.raises(ValidationFailed):
         service.propose(page, proposal, (fragment,))
+
+
+def test_approval_turns_the_pending_proposal_into_an_authoritative_revision():
+    now = datetime(2026, 11, 24, tzinfo=UTC)
+    store = MemoryPageRepository()
+    page = Page("p", "ws", "owner", PageKind.CONCEPT, "c", PageStatus.PROPOSED, now)
+    citation = PageCitation("source", "fragment", 1, Locator(chars=(0, 4)), "Fact")
+    claim = PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (citation,), True)
+    store.put_proposal(
+        page, PageProposal("pp", "p", "Fact", (claim,), PageProvenance("m", "p"), now)
+    )
+    _meetings, transcripts = MemoryMeetingRepository(), MemoryTranscriptRepository()
+    service = PageService(store, EvidenceValidator(transcripts))
+
+    approved = service.approve_proposal("ws", "owner", "p")
+
+    assert approved.current_revision == 1
+    assert store.revisions("ws", "owner", "p")[0].body_md == "Fact"

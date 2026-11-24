@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from nodo_api.domain.models import Answerability, Citation
 from nodo_api.domain.pages import Page, PageClaim, PageProposal, PageRevision
@@ -33,6 +34,22 @@ class PageService:
         self._pages.put_proposal(page, replace(proposal, claims=valid))
 
     def approve(self, workspace_id: str, owner_id: str, revision: PageRevision) -> Page:
+        return self._pages.append_revision(workspace_id, owner_id, revision)
+
+    def approve_proposal(self, workspace_id: str, owner_id: str, page_id: str) -> Page:
+        page = self._pages.get_owned(workspace_id, owner_id, page_id)
+        proposal = self._pages.proposal(workspace_id, owner_id, page_id)
+        if proposal is None:
+            raise ValidationFailed("There is no pending Page proposal")
+        revision = PageRevision(
+            page_id,
+            (page.current_revision or 0) + 1,
+            proposal.body_md,
+            owner_id,
+            datetime.now(UTC),
+            proposal.claims,
+            proposal.provenance,
+        )
         return self._pages.append_revision(workspace_id, owner_id, revision)
 
     def _validated_claim(
