@@ -54,6 +54,7 @@ from nodo_api.api.v1.schemas import (
     MeetingCreate,
     MeetingList,
     MeetingOutput,
+    PageOutput,
     ParentSuggestionInput,
     ProcessingConfirmation,
     QueryFiltersInput,
@@ -200,6 +201,25 @@ def _source_delete(container):
     if container.source_service is None:
         raise NotAvailableOnEngine
     return container.source_service
+
+
+def _pages(container):
+    if container.pages is None:
+        raise NotAvailableOnEngine
+    return container.pages
+
+
+@router.get("/pages/{page_id}", response_model=PageOutput)
+def get_page(page_id: str, actor: PrincipalDep, request: Request):
+    page = _pages(request.app.state.container).get_owned(actor.workspace_id, actor.user_id, page_id)
+    return PageOutput(
+        id=page.id,
+        kind=page.kind.value,
+        subject_id=page.subject_id,
+        status=page.status.value,
+        current_revision=page.current_revision,
+        created_at=page.created_at,
+    )
 
 
 @router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)

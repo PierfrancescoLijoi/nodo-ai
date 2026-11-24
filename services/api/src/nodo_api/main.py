@@ -86,6 +86,7 @@ class AppContainer:
     folder_watcher: Any = None
     hierarchy: HierarchyService | None = None  # None on Azure: routes answer 501
     collections: Any = None  # None on Azure: routes answer 501
+    pages: Any = None  # None on Azure: Wiki APIs answer 501
 
 
 @asynccontextmanager
@@ -318,6 +319,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.folder_watcher,
         hierarchy,
         collections=a.collections,
+        pages=a.pages,
     )
 
 

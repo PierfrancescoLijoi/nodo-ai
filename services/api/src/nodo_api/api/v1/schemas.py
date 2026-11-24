@@ -465,6 +465,15 @@ class CollectionList(FrozenModel):
     items: tuple[CollectionOutput, ...]
 
 
+class PageOutput(FrozenModel):
+    id: str
+    kind: str
+    subject_id: str
+    status: str
+    current_revision: int | None
+    created_at: datetime
+
+
 class CollectionCreate(FrozenModel):
     name: str
     parent_id: str | None = Field(default=None, max_length=64)
