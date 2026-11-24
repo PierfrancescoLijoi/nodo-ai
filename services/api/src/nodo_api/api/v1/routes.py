@@ -55,6 +55,7 @@ from nodo_api.api.v1.schemas import (
     MeetingList,
     MeetingOutput,
     PageOutput,
+    PageRevisionOutput,
     ParentSuggestionInput,
     ProcessingConfirmation,
     QueryFiltersInput,
@@ -219,6 +220,23 @@ def get_page(page_id: str, actor: PrincipalDep, request: Request):
         status=page.status.value,
         current_revision=page.current_revision,
         created_at=page.created_at,
+    )
+
+
+@router.get("/pages/{page_id}/revisions", response_model=tuple[PageRevisionOutput, ...])
+def get_page_revisions(page_id: str, actor: PrincipalDep, request: Request):
+    revisions = _pages(request.app.state.container).revisions(
+        actor.workspace_id, actor.user_id, page_id
+    )
+    return tuple(
+        PageRevisionOutput(
+            number=revision.number,
+            body_md=revision.body_md,
+            author_id=revision.author_id,
+            created_at=revision.created_at,
+            machine_generated=revision.provenance.machine_generated,
+        )
+        for revision in revisions
     )
 
 

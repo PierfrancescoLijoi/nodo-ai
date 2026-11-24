@@ -474,6 +474,14 @@ class PageOutput(FrozenModel):
     created_at: datetime
 
 
+class PageRevisionOutput(FrozenModel):
+    number: int
+    body_md: str
+    author_id: str
+    created_at: datetime
+    machine_generated: bool
+
+
 class CollectionCreate(FrozenModel):
     name: str
     parent_id: str | None = Field(default=None, max_length=64)
