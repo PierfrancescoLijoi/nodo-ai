@@ -5,6 +5,7 @@ import type {
   Change,
   ExportJob,
   Graph,
+  GraphInsights,
   Meeting,
   MeetingState,
   MeetingSummary,
@@ -30,6 +31,7 @@ export interface Repository {
   listChanges(): Promise<Change[]>;
   ask(question: string, locale: Locale): Promise<Answer>;
   getGraph(options?: { seedId?: string; depth?: 1 | 2; limit?: number }): Promise<Graph>;
+  getGraphInsights(): Promise<GraphInsights>;
   listReviews(): Promise<ReviewItem[]>;
   reviewRelation(id: string, decision: ReviewDecision): Promise<void>;
   startExport(): Promise<ExportJob>;
@@ -186,6 +188,18 @@ export function createRepository(
           await client.get(`/v1/graph/subgraph?depth=${depth}&limit=${limit}&include_proposed=true${seed}`),
         ),
       );
+    },
+
+    async getGraphInsights() {
+      const raw = parse(wire.graphInsights, await client.get('/v1/graph/insights'));
+      return {
+        isolated: raw.isolated,
+        bridges: raw.bridges,
+        orphanConcepts: raw.orphan_concepts,
+        duplicateConcepts: raw.duplicate_concepts,
+        contradictingDecisions: raw.contradicting_decisions,
+        truncated: raw.truncated,
+      };
     },
 
     async startExport() {

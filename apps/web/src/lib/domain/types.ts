@@ -107,6 +107,15 @@ export interface Graph {
   truncated: boolean;
 }
 
+export interface GraphInsights {
+  isolated: string[];
+  bridges: string[];
+  orphanConcepts: string[];
+  duplicateConcepts: string[];
+  contradictingDecisions: string[];
+  truncated: boolean;
+}
+
 export interface Change {
   id: string;
   newLabel: string;

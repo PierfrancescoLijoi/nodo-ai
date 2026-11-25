@@ -131,6 +131,15 @@ export const changes = z.object({
   ),
 });
 
+export const graphInsights = z.object({
+  isolated: z.array(z.string()),
+  bridges: z.array(z.string()),
+  orphan_concepts: z.array(z.string()),
+  duplicate_concepts: z.array(z.string()),
+  contradicting_decisions: z.array(z.string()),
+  truncated: z.boolean(),
+});
+
 export const exportJob = z.object({
   job_id: z.string(),
   status: z.enum(['queued', 'running', 'ready', 'failed']),

@@ -13,6 +13,7 @@ export const keys = {
   changes: ['changes'] as const,
   graph: (seedId?: string) => ['graph', seedId ?? null] as const,
   reviews: ['reviews'] as const,
+  graphInsights: ['graph-insights'] as const,
 };
 
 export function useMeetings() {
@@ -46,6 +47,11 @@ export function useGraph(seedId?: string) {
 export function useReviews() {
   const repository = useRepository();
   return useQuery({ queryKey: keys.reviews, queryFn: () => repository.listReviews() });
+}
+
+export function useGraphInsights() {
+  const repository = useRepository();
+  return useQuery({ queryKey: keys.graphInsights, queryFn: () => repository.getGraphInsights() });
 }
 
 const POLL_MS = 3000;
