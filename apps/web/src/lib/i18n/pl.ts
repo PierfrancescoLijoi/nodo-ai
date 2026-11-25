@@ -9,9 +9,13 @@ const pl = {
     available: 'Dostępny',
     licence: 'Zobacz licencję',
     unverified: 'Brak niezmiennej sumy kontrolnej: instalacja w aplikacji jest wyłączona.',
+    install: 'Zainstaluj model',
+    installTitle: 'Zainstalować model lokalny?',
+    installBody: 'NODO pobierze zweryfikowane pliki modelu na ten komputer.',
     remove: 'Usuń model',
     removeTitle: 'Usunąć model lokalny?',
     removeBody: 'To trwale usunie wybrane pliki modelu z tego komputera.',
+    actionFailed: 'Nie udało się wykonać operacji na modelu. Spróbuj ponownie.',
   },
   tabs: { home: 'Start', meetings: 'Spotkania', ask: 'Pytaj', brain: 'Mózg', graph: 'Graf' },
   common: {

@@ -11,9 +11,13 @@ const en = {
     available: 'Available',
     licence: 'View licence',
     unverified: 'No immutable checksum: in-app installation is disabled.',
+    install: 'Install model',
+    installTitle: 'Install local model?',
+    installBody: 'NODO will download the verified model files to this computer.',
     remove: 'Remove model',
     removeTitle: 'Remove local model?',
     removeBody: 'This permanently removes the selected model files from this computer.',
+    actionFailed: 'The model operation could not be completed. Please try again.',
   },
   tabs: { home: 'Home', meetings: 'Meetings', ask: 'Ask', brain: 'Brain', graph: 'Graph' },
   common: {

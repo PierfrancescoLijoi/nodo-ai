@@ -9,9 +9,13 @@ const da = {
     available: 'Tilgængelig',
     licence: 'Se licens',
     unverified: 'Ingen uforanderlig kontrolsum: installation i appen er deaktiveret.',
+    install: 'Installér model',
+    installTitle: 'Installér lokal model?',
+    installBody: 'NODO henter de verificerede modelfiler til denne computer.',
     remove: 'Fjern model',
     removeTitle: 'Fjern lokal model?',
     removeBody: 'Dette fjerner permanent de valgte modelfiler fra denne computer.',
+    actionFailed: 'Modelhandlingen kunne ikke fuldføres. Prøv igen.',
   },
   tabs: { home: 'Hjem', meetings: 'Møder', ask: 'Spørg', brain: 'Hjerne', graph: 'Graf' },
   common: {

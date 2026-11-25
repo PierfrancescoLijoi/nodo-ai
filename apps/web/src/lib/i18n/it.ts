@@ -9,10 +9,14 @@ const it = {
     available: 'Disponibile',
     licence: 'Visualizza licenza',
     unverified: 'Nessun checksum immutabile: l’installazione nell’app è disabilitata.',
+    install: 'Installa modello',
+    installTitle: 'Installare il modello locale?',
+    installBody: 'NODO scaricherà su questo computer i file verificati del modello.',
     remove: 'Rimuovi modello',
     removeTitle: 'Rimuovere il modello locale?',
     removeBody:
       'Questa operazione rimuove definitivamente i file del modello selezionato da questo computer.',
+    actionFailed: 'Non è stato possibile completare l’operazione sul modello. Riprova.',
   },
   tabs: { home: 'Home', meetings: 'Meeting', ask: 'Chiedi', brain: 'Cervello', graph: 'Grafo' },
   common: {

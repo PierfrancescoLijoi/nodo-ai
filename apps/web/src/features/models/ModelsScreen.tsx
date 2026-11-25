@@ -12,7 +12,8 @@ export function ModelsScreen() {
   const { t } = useTranslation();
   const engine = useEngine();
   const queryClient = useQueryClient();
-  const [removing, setRemoving] = useState<string>();
+  const [action, setAction] = useState<{ id: string; kind: 'install' | 'remove' }>();
+  const [actionError, setActionError] = useState<string>();
   const catalog = useQuery({
     queryKey: ['local-models'],
     queryFn: () => engine!.getModels(),
@@ -28,6 +29,11 @@ export function ModelsScreen() {
       ) : null}
       {catalog.isPending ? <Skeleton size="tall" /> : null}
       {catalog.isError ? <ErrorNotice onRetry={() => void catalog.refetch()} /> : null}
+      {actionError ? (
+        <Surface tone="warning">
+          <p role="alert">{actionError}</p>
+        </Surface>
+      ) : null}
       {catalog.data ? (
         <>
           <p className={styles.muted}>{t('models.hardware', { tier: catalog.data.hardwareTier })}</p>
@@ -55,28 +61,35 @@ export function ModelsScreen() {
                 <p className={styles.small}>
                   {model.sha256 ? `SHA-256: ${model.sha256}` : t('models.unverified')}
                 </p>
-                {model.installed && model.installable ? (
-                  <Button variant="danger" onClick={() => setRemoving(model.id)}>
-                    {t('models.remove')}
+                {model.installable ? (
+                  <Button
+                    variant={model.installed ? 'danger' : 'secondary'}
+                    onClick={() => {
+                      setActionError(undefined);
+                      setAction({ id: model.id, kind: model.installed ? 'remove' : 'install' });
+                    }}
+                  >
+                    {model.installed ? t('models.remove') : t('models.install')}
                   </Button>
                 ) : null}
               </Surface>
             ))}
           </div>
           <ConfirmDialog
-            open={!!removing}
-            title={t('models.removeTitle')}
-            confirmLabel={t('models.remove')}
-            onCancel={() => setRemoving(undefined)}
+            open={!!action}
+            title={t(action?.kind === 'remove' ? 'models.removeTitle' : 'models.installTitle')}
+            confirmLabel={t(action?.kind === 'remove' ? 'models.remove' : 'models.install')}
+            onCancel={() => setAction(undefined)}
             onConfirm={() => {
-              if (!removing || !engine) return;
-              void engine
-                .removeModel(removing)
+              if (!action || !engine) return;
+              const operation = action.kind === 'remove' ? engine.removeModel : engine.installModel;
+              void operation(action.id)
                 .then(() => queryClient.invalidateQueries({ queryKey: ['local-models'] }))
-                .finally(() => setRemoving(undefined));
+                .catch(() => setActionError(t('models.actionFailed')))
+                .finally(() => setAction(undefined));
             }}
           >
-            <p>{t('models.removeBody')}</p>
+            <p>{t(action?.kind === 'remove' ? 'models.removeBody' : 'models.installBody')}</p>
           </ConfirmDialog>
         </>
       ) : null}
