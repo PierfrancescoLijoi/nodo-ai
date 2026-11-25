@@ -33,6 +33,7 @@ class ModelCatalogEntry:
     relative_paths: tuple[str, ...]
     url: str | None = None
     sha256: str | None = None
+    archive: str | None = None
 
     @property
     def installable(self) -> bool:
@@ -51,13 +52,13 @@ CATALOG: tuple[ModelCatalogEntry, ...] = (
         "llama-cpp", "runtime", "llama.cpp server", "ggml-org", "b11823", 35, "MIT",
         "https://github.com/ggml-org/llama.cpp/blob/master/LICENSE", (HardwareTier.CPU, HardwareTier.GPU_6GB, HardwareTier.GPU_LARGE),
         ("llama.cpp",), "https://github.com/ggml-org/llama.cpp/releases/download/b11823/llama-b11823-bin-win-vulkan-x64.zip",
-        "5f75e297498e1036a70f42f02b40bfdd0fe2bda0749985f7a59dabc624b88ab0",
+        "5f75e297498e1036a70f42f02b40bfdd0fe2bda0749985f7a59dabc624b88ab0", "zip",
     ),
     ModelCatalogEntry(
         "speaker-segmentation", "diarization", "Pyannote segmentation 3.0", "k2-fsa", "3.0", 7, "MIT",
         "https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE", (HardwareTier.CPU, HardwareTier.GPU_6GB, HardwareTier.GPU_LARGE),
         ("diarization",), "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
-        "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
+        "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488", "tar.bz2",
     ),
     ModelCatalogEntry(
         "qwen3-4b-q5", "language", "Qwen3 4B Q5_K_M", "Qwen", "Qwen3-4B", 2900, "Apache-2.0",

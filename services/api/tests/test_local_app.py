@@ -183,6 +183,30 @@ def test_model_removal_requires_approval_and_stays_inside_the_model_root(tmp_pat
     assert not owned.exists() and outside.read_text() == "keep"
 
 
+def test_model_installation_requires_approval_and_uses_only_catalog_entry(
+    tmp_path, monkeypatch
+) -> None:
+    models = tmp_path / "models"
+    entry = CATALOG[0]
+    calls = []
+
+    def fake_install(candidate, root, opener):
+        calls.append((candidate, root, opener))
+        target = candidate.owned_paths(root)[0]
+        target.mkdir(parents=True)
+        return target
+
+    monkeypatch.setattr("nodo_api.api.local.install", fake_install)
+    with TestClient(create_app(_settings(tmp_path / "data", local_models_dir=models))) as local:
+        denied = local.post(f"/v1/local/models/{entry.id}/install", headers=HEADERS, json={})
+        assert denied.status_code == 422 and not calls
+        installed = local.post(
+            f"/v1/local/models/{entry.id}/install", headers=HEADERS, json={"approved": True}
+        )
+    assert installed.status_code == 200 and installed.json()["installed"] is True
+    assert calls and calls[0][0] is entry and calls[0][1] == models
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

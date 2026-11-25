@@ -1,4 +1,7 @@
 import hashlib
+import io
+import zipfile
+from dataclasses import replace
 
 import pytest
 
@@ -11,6 +14,7 @@ from nodo_api.adapters.local.model_catalog import (
     safe_archive_members,
     verify_sha256,
 )
+from nodo_api.adapters.local.model_install import install
 
 
 def test_catalog_ids_are_unique_and_direct_downloads_are_pinned() -> None:
@@ -55,3 +59,22 @@ def test_checksum_verification_rejects_changed_downloads(tmp_path) -> None:
     file.write_bytes(b"verified")
     assert verify_sha256(file, hashlib.sha256(b"verified").hexdigest())
     assert not verify_sha256(file, "0" * 64)
+
+
+def test_direct_download_installs_only_after_hash_and_archive_checks(tmp_path) -> None:
+    content = io.BytesIO()
+    with zipfile.ZipFile(content, "w") as bundle:
+        bundle.writestr("server.exe", b"safe")
+    archive = content.getvalue()
+    entry = CATALOG[0]
+    entry = replace(entry, sha256=hashlib.sha256(archive).hexdigest())
+    target = install(entry, tmp_path, lambda _: io.BytesIO(archive))
+    assert (target / "server.exe").read_bytes() == b"safe"
+    assert not list((tmp_path / ".staging").iterdir())
+
+
+def test_failed_verified_download_does_not_create_target(tmp_path) -> None:
+    entry = CATALOG[0]
+    with pytest.raises(ValueError, match="SHA-256"):
+        install(entry, tmp_path, lambda _: io.BytesIO(b"not the advertised model"))
+    assert not entry.owned_paths(tmp_path)[0].exists()
