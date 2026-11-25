@@ -7,8 +7,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from nodo_api.adapters.memory import MemorySpeech
 from nodo_api.adapters.local.model_catalog import CATALOG
+from nodo_api.adapters.memory import MemorySpeech
 from nodo_api.adapters.memory.extractor import KeywordExtractor
 from nodo_api.config import Settings
 from nodo_api.errors import ModelUnavailable
