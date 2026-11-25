@@ -251,6 +251,31 @@
   box-shadow: var(--brain-shadow);
 }
 
+.tree {
+  position: absolute;
+  z-index: 6;
+  top: 150px;
+  left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 180px;
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--brain-border) 85%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--brain-panel) 92%, transparent);
+  box-shadow: 0 12px 38px rgb(0 0 0 / 22%);
+  backdrop-filter: blur(18px);
+}
+
+.tree p { margin: 0 0 var(--space-1); color: var(--brain-muted); font-size: 11px; text-transform: uppercase; }
+.tree button { min-height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--brain-text); text-align: left; }
+.tree button:hover, .tree button[aria-pressed='true'] { background: rgb(94 197 179 / 18%); color: var(--brain-cyan-solid); }
+
+@media (max-width: 700px) {
+  .tree { display: none; }
+}
+
 .mapShell::after {
   position: absolute;
   z-index: 1;

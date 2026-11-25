@@ -215,6 +215,22 @@ export function BrainExplorer({ graph, expanding = false, onExpand }: BrainExplo
         </div>
       ) : view === 'map' ? (
         <div className={styles.mapShell} data-testid="brain-map-shell" data-immersive="true">
+          <aside className={styles.tree} aria-label={t('graph.viewList')}>
+            <p>{t('brain.filters')}</p>
+            <button type="button" aria-pressed={type === 'all'} onClick={() => setType('all')}>
+              {t('brain.allTypes')}
+            </button>
+            {TYPES.map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={type === value}
+                onClick={() => setType(value)}
+              >
+                {t(`graph.types.${value}`)}
+              </button>
+            ))}
+          </aside>
           <BrainCanvas
             layout={layout}
             selectedId={selectedId}
