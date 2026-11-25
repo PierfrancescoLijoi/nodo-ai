@@ -1,5 +1,6 @@
 const it = {
   app: { name: 'NODO' },
+  models: { title: 'Modelli' },
   tabs: { home: 'Home', meetings: 'Meeting', ask: 'Chiedi', brain: 'Cervello', graph: 'Grafo' },
   common: {
     back: 'Indietro',

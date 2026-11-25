@@ -2,6 +2,7 @@
 // (plural forms excepted, see src/i18n/__tests__/locales.test.ts).
 const en = {
   app: { name: 'NODO' },
+  models: { title: 'Models' },
   tabs: { home: 'Home', meetings: 'Meetings', ask: 'Ask', brain: 'Brain', graph: 'Graph' },
   common: {
     back: 'Back',

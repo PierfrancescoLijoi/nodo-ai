@@ -1,5 +1,6 @@
 const pl = {
   app: { name: 'NODO' },
+  models: { title: 'Modele' },
   tabs: { home: 'Start', meetings: 'Spotkania', ask: 'Pytaj', brain: 'Mózg', graph: 'Graf' },
   common: {
     back: 'Wstecz',

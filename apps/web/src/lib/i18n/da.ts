@@ -1,5 +1,6 @@
 const da = {
   app: { name: 'NODO' },
+  models: { title: 'Modeller' },
   tabs: { home: 'Hjem', meetings: 'Møder', ask: 'Spørg', brain: 'Hjerne', graph: 'Graf' },
   common: {
     back: 'Tilbage',

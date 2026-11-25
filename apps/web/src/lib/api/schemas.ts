@@ -176,6 +176,26 @@ export const localStatus = z.object({
   gpu: z.boolean(),
 });
 
+export const localModels = z.object({
+  hardware_tier: z.string(),
+  models: z.array(
+    z.object({
+      id: z.string(),
+      task: z.string(),
+      name: z.string(),
+      publisher: z.string(),
+      version: z.string(),
+      size_mb: z.number(),
+      licence: z.string(),
+      licence_url: z.string().url(),
+      hardware: z.array(z.string()),
+      sha256: z.string().nullable(),
+      installable: z.boolean(),
+      installed: z.boolean(),
+    }),
+  ),
+});
+
 export const syncProgress = z.object({
   state: progress,
   total: z.number(),
