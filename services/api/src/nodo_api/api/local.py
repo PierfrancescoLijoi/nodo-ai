@@ -15,7 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
 from nodo_api.adapters.local.blob import UploadRejected
-from nodo_api.adapters.local.model_catalog import CATALOG, HardwareTier, installed
+from nodo_api.adapters.local.model_catalog import CATALOG, HardwareTier, installed, remove
 from nodo_api.adapters.local.models import data_dir
 from nodo_api.api.v1.routes import PrincipalDep
 from nodo_api.api.v1.schemas import FrozenModel
@@ -97,6 +97,10 @@ class LocalModelOutput(FrozenModel):
 class LocalModelsOutput(FrozenModel):
     hardware_tier: str
     models: tuple[LocalModelOutput, ...]
+
+
+class LocalModelRemove(FrozenModel):
+    approved: bool = False
 
 
 @router.put("/uploads/{token}", status_code=status.HTTP_204_NO_CONTENT)
@@ -206,6 +210,25 @@ def local_models(_: PrincipalDep, request: Request) -> LocalModelsOutput:
             )
             for entry in CATALOG
         ),
+    )
+
+
+@router.delete("/models/{model_id}", response_model=LocalModelOutput)
+def remove_local_model(
+    model_id: str, body: LocalModelRemove, _: PrincipalDep, request: Request
+) -> LocalModelOutput:
+    if not body.approved:
+        raise ValidationFailed("Model removal requires explicit approval")
+    entry = next((item for item in CATALOG if item.id == model_id), None)
+    if entry is None or not entry.installable:
+        raise NotAvailableOnEngine
+    root = request.app.state.container.settings.local_models_dir or data_dir() / "models"
+    remove(entry, root)
+    return LocalModelOutput(
+        id=entry.id, task=entry.task, name=entry.name, publisher=entry.publisher,
+        version=entry.version, size_mb=entry.size_mb, licence=entry.licence,
+        licence_url=entry.licence_url, hardware=tuple(item.value for item in entry.hardware),
+        sha256=entry.sha256, installable=entry.installable, installed=False,
     )
 
 

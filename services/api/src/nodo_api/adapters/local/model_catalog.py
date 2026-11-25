@@ -6,6 +6,7 @@ shown to the owner but intentionally cannot be installed by the future in-app li
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -87,3 +88,12 @@ def installed(entry: ModelCatalogEntry, root: Path) -> bool:
     """An entry owns only explicit paths; an empty path list is never treated as installed."""
     paths = entry.owned_paths(root)
     return bool(paths) and all(path.exists() for path in paths)
+
+
+def remove(entry: ModelCatalogEntry, root: Path) -> None:
+    """Delete only catalog-owned paths after resolving them beneath the model root."""
+    for path in entry.owned_paths(root):
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
