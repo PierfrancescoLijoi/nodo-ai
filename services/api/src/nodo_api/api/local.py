@@ -213,7 +213,7 @@ def local_models(_: PrincipalDep, request: Request) -> LocalModelsOutput:
     )
 
 
-@router.delete("/models/{model_id}", response_model=LocalModelOutput)
+@router.post("/models/{model_id}/remove", response_model=LocalModelOutput)
 def remove_local_model(
     model_id: str, body: LocalModelRemove, _: PrincipalDep, request: Request
 ) -> LocalModelOutput:

@@ -75,6 +75,7 @@ export interface IndexProgress {
 export interface LocalEngineApi {
   getStatus(): Promise<LocalStatus>;
   getModels(): Promise<LocalModels>;
+  removeModel(id: string): Promise<void>;
   startSync(input: { cloudUrl: string; accessToken: string; force: boolean }): Promise<SyncProgress>;
   getSync(): Promise<SyncProgress>;
   startIndex(mode: IndexMode): Promise<IndexProgress>;
@@ -149,6 +150,9 @@ export function createLocalEngineApi(client: ApiClient): LocalEngineApi {
           installed: model.installed,
         })),
       };
+    },
+    async removeModel(id) {
+      await client.post(`/v1/local/models/${encodeURIComponent(id)}/remove`, { approved: true });
     },
     async startSync({ cloudUrl, accessToken, force }) {
       return mapSync(
