@@ -66,5 +66,5 @@ def test_vault_writer_keeps_unmanaged_notes_and_removes_only_old_managed_pages(t
     writer.write("ws", "owner", tmp_path)
 
     assert note.read_text(encoding="utf-8") == "mine"
-    assert not (tmp_path / "pages" / "p.md").exists()
+    assert not (tmp_path / "source_summary" / "p.md").exists()
     assert (tmp_path / "manifest.json").is_file()

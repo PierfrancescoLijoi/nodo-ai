@@ -28,7 +28,7 @@ class VaultExportService:
             if page.current_revision is None:
                 continue
             revision = self._pages.revisions(workspace_id, owner_id, page.id)[0]
-            files[Path("pages") / f"{page_filename(page.id)}.md"] = (
+            files[Path(page.kind.value) / f"{page_filename(page.id)}.md"] = (
                 "---\n"
                 f"id: {page.id}\nkind: {page.kind.value}\nstatus: {page.status.value}\n"
                 f"subject: {page.subject_id}\nrevision: {revision.number}\n---\n\n"
