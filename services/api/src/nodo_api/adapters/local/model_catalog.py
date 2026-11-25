@@ -6,6 +6,7 @@ shown to the owner but intentionally cannot be installed by the future in-app li
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from dataclasses import dataclass
 from enum import StrEnum
@@ -105,3 +106,11 @@ def safe_archive_members(names: tuple[str, ...]) -> None:
         path = Path(name)
         if name.startswith(("/", "\\")) or path.is_absolute() or ".." in path.parts:
             raise ValueError("model archive contains an unsafe path")
+
+
+def verify_sha256(path: Path, expected: str) -> bool:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while block := handle.read(1 << 20):
+            digest.update(block)
+    return digest.hexdigest() == expected.lower()

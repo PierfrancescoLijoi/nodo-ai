@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 
 from nodo_api.adapters.local.model_catalog import (
@@ -7,6 +9,7 @@ from nodo_api.adapters.local.model_catalog import (
     recommended_entries,
     remove,
     safe_archive_members,
+    verify_sha256,
 )
 
 
@@ -45,3 +48,10 @@ def test_removal_can_only_remove_a_catalog_owned_path(tmp_path) -> None:
 def test_model_archives_cannot_escape_the_model_root(name) -> None:
     with pytest.raises(ValueError):
         safe_archive_members((name,))
+
+
+def test_checksum_verification_rejects_changed_downloads(tmp_path) -> None:
+    file = tmp_path / "model.bin"
+    file.write_bytes(b"verified")
+    assert verify_sha256(file, hashlib.sha256(b"verified").hexdigest())
+    assert not verify_sha256(file, "0" * 64)
