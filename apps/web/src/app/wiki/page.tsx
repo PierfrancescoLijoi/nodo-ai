@@ -4,4 +4,6 @@ import { WikiScreen } from '@/features/wiki/WikiScreen';
 
 export const metadata: Metadata = { title: 'Wiki' };
 
-export default function Page() { return <WikiScreen />; }
+export default function Page() {
+  return <WikiScreen />;
+}

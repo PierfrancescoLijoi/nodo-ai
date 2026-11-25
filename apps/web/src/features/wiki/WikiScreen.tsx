@@ -32,11 +32,18 @@ export function WikiScreen() {
       <div className="split">
         <div className="stack">
           {pages.data?.map((page) => (
-          <Surface key={page.id} as="article">
-            <div className="spread"><h2>{page.subjectId}</h2><Tag label={page.status} tone={page.status === 'stale' ? 'warning' : 'accent'} /></div>
-            <p className="muted">{page.kind} · {page.currentRevision ? `Revision ${page.currentRevision}` : 'Draft'}</p>
-            <Button variant="secondary" onClick={() => setSelected(page.id)}>Open page</Button>
-          </Surface>
+            <Surface key={page.id} as="article">
+              <div className="spread">
+                <h2>{page.subjectId}</h2>
+                <Tag label={page.status} tone={page.status === 'stale' ? 'warning' : 'accent'} />
+              </div>
+              <p className="muted">
+                {page.kind} · {page.currentRevision ? `Revision ${page.currentRevision}` : 'Draft'}
+              </p>
+              <Button variant="secondary" onClick={() => setSelected(page.id)}>
+                Open page
+              </Button>
+            </Surface>
           ))}
         </div>
         <aside className="stack" aria-label="Page detail">
@@ -44,11 +51,22 @@ export function WikiScreen() {
           {revisions.isError ? <ErrorNotice onRetry={() => void revisions.refetch()} /> : null}
           {selectedPage && revisions.data ? (
             <Surface as="article">
-              <div className="spread"><h2>{selectedPage.subjectId}</h2><Tag label={selectedPage.status} tone="accent" /></div>
-              {selectedPage.status === 'proposed' ? <Button onClick={() => void approve()}>Approve proposal</Button> : null}
-              {revisions.data[0] ? <p>{revisions.data[0].body}</p> : <p className="muted">No approved revision yet.</p>}
+              <div className="spread">
+                <h2>{selectedPage.subjectId}</h2>
+                <Tag label={selectedPage.status} tone="accent" />
+              </div>
+              {selectedPage.status === 'proposed' ? (
+                <Button onClick={() => void approve()}>Approve proposal</Button>
+              ) : null}
+              {revisions.data[0] ? (
+                <p>{revisions.data[0].body}</p>
+              ) : (
+                <p className="muted">No approved revision yet.</p>
+              )}
             </Surface>
-          ) : <p className="muted">Select a Wiki page to inspect its revision.</p>}
+          ) : (
+            <p className="muted">Select a Wiki page to inspect its revision.</p>
+          )}
         </aside>
       </div>
     </>

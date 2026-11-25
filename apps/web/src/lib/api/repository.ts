@@ -225,16 +225,22 @@ export function createRepository(
     },
 
     async getWikiRevisions(id) {
-      return parse(wire.pageRevisions, await client.get(`/v1/pages/${encodeURIComponent(id)}/revisions`)).map((revision) => ({
-        number: revision.number,
-        body: revision.body_md,
-        authorId: revision.author_id,
-        machineGenerated: revision.machine_generated,
-      }));
+      return parse(wire.pageRevisions, await client.get(`/v1/pages/${encodeURIComponent(id)}/revisions`)).map(
+        (revision) => ({
+          number: revision.number,
+          body: revision.body_md,
+          authorId: revision.author_id,
+          machineGenerated: revision.machine_generated,
+        }),
+      );
     },
 
     async approveWikiPage(id) {
-      await client.post(`/v1/pages/${encodeURIComponent(id)}/approve`, {}, { headers: { 'Idempotency-Key': newKey() } });
+      await client.post(
+        `/v1/pages/${encodeURIComponent(id)}/approve`,
+        {},
+        { headers: { 'Idempotency-Key': newKey() } },
+      );
     },
 
     async startExport() {

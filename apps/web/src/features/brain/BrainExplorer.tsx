@@ -221,12 +221,7 @@ export function BrainExplorer({ graph, expanding = false, onExpand }: BrainExplo
               {t('brain.allTypes')}
             </button>
             {TYPES.map((value) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={type === value}
-                onClick={() => setType(value)}
-              >
+              <button key={value} type="button" aria-pressed={type === value} onClick={() => setType(value)}>
                 {t(`graph.types.${value}`)}
               </button>
             ))}
@@ -329,7 +324,11 @@ export function BrainExplorer({ graph, expanding = false, onExpand }: BrainExplo
           </Button>
           <Link
             href={`/ask/?node=${encodeURIComponent(selected.label)}&meetings=${encodeURIComponent(
-              [...new Set([selected.meetingId, ...relations.flatMap((edge) => edge.meetingIds ?? [])].filter(Boolean))].join(','),
+              [
+                ...new Set(
+                  [selected.meetingId, ...relations.flatMap((edge) => edge.meetingIds ?? [])].filter(Boolean),
+                ),
+              ].join(','),
             )}`}
           >
             {t('brain.askNode')}

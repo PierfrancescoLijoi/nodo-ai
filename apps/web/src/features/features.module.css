@@ -290,8 +290,16 @@
   padding: 0 var(--space-2);
 }
 
-.brainToolbar h1 { font-size: 18px; line-height: 24px; }
-.brainEyebrow { color: #8b9cac; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.brainToolbar h1 {
+  font-size: 18px;
+  line-height: 24px;
+}
+.brainEyebrow {
+  color: #8b9cac;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 
 .brainWorkspace {
   display: grid;
@@ -304,7 +312,8 @@
   background: #0b1526;
 }
 
-.brainExplorer, .brainInspector {
+.brainExplorer,
+.brainInspector {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -314,22 +323,55 @@
   background: #0a1422;
 }
 
-.brainExplorer { border-right: 1px solid #263547; }
-.brainInspector { border-left: 1px solid #263547; }
-.brainCanvas { position: relative; min-width: 0; padding: var(--space-4); overflow: auto; }
-.brainCanvas .mapFrame { min-height: 510px; border-color: #263547; background: #0b1526; }
+.brainExplorer {
+  border-right: 1px solid #263547;
+}
+.brainInspector {
+  border-left: 1px solid #263547;
+}
+.brainCanvas {
+  position: relative;
+  min-width: 0;
+  padding: var(--space-4);
+  overflow: auto;
+}
+.brainCanvas .mapFrame {
+  min-height: 510px;
+  border-color: #263547;
+  background: #0b1526;
+}
 
 @media (max-width: 1050px) {
-  .brainWorkspace { grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); }
-  .brainInspector { grid-column: 1 / -1; border-top: 1px solid #263547; border-left: 0; }
+  .brainWorkspace {
+    grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  }
+  .brainInspector {
+    grid-column: 1 / -1;
+    border-top: 1px solid #263547;
+    border-left: 0;
+  }
 }
 
 @media (max-width: 720px) {
-  .knowledgeBrain { padding: var(--space-2); border: 0; }
-  .brainWorkspace { grid-template-columns: minmax(0, 1fr); min-height: auto; }
-  .brainExplorer { border-right: 0; border-bottom: 1px solid #263547; max-height: 260px; }
-  .brainInspector { grid-column: auto; }
-  .brainCanvas .mapFrame { min-height: 380px; }
+  .knowledgeBrain {
+    padding: var(--space-2);
+    border: 0;
+  }
+  .brainWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: auto;
+  }
+  .brainExplorer {
+    border-right: 0;
+    border-bottom: 1px solid #263547;
+    max-height: 260px;
+  }
+  .brainInspector {
+    grid-column: auto;
+  }
+  .brainCanvas .mapFrame {
+    min-height: 380px;
+  }
 }
 
 .mapFrame svg {

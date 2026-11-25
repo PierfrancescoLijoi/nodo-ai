@@ -268,12 +268,30 @@
   backdrop-filter: blur(18px);
 }
 
-.tree p { margin: 0 0 var(--space-1); color: var(--brain-muted); font-size: 11px; text-transform: uppercase; }
-.tree button { min-height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--brain-text); text-align: left; }
-.tree button:hover, .tree button[aria-pressed='true'] { background: rgb(94 197 179 / 18%); color: var(--brain-cyan-solid); }
+.tree p {
+  margin: 0 0 var(--space-1);
+  color: var(--brain-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.tree button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--brain-text);
+  text-align: left;
+}
+.tree button:hover,
+.tree button[aria-pressed='true'] {
+  background: rgb(94 197 179 / 18%);
+  color: var(--brain-cyan-solid);
+}
 
 @media (max-width: 700px) {
-  .tree { display: none; }
+  .tree {
+    display: none;
+  }
 }
 
 .mapShell::after {

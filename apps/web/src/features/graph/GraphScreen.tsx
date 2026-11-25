@@ -158,24 +158,28 @@ export function GraphScreen() {
           {data ? <EntityList graph={data} selected={effective} onSelect={select} /> : null}
         </aside>
         <div className={styles.brainCanvas}>
-      {graph.isError ? (
-        <ErrorNotice
-          onRetry={() => {
-            void graph.refetch();
-          }}
-        />
-      ) : null}
-      {graph.isPending ? <Skeleton size="tall" /> : null}
-      {data ? (
-        <>
-          {partial ? <p className={styles.muted}>{t('graph.truncated')}</p> : null}
-          {data.nodes.length === 0 ? <p className={styles.muted}>{t('graph.noRelations')}</p> : null}
-          {view === 'map' ? <GraphMap graph={data} selected={effective} onSelect={select} /> : null}
-        </>
-      ) : null}
+          {graph.isError ? (
+            <ErrorNotice
+              onRetry={() => {
+                void graph.refetch();
+              }}
+            />
+          ) : null}
+          {graph.isPending ? <Skeleton size="tall" /> : null}
+          {data ? (
+            <>
+              {partial ? <p className={styles.muted}>{t('graph.truncated')}</p> : null}
+              {data.nodes.length === 0 ? <p className={styles.muted}>{t('graph.noRelations')}</p> : null}
+              {view === 'map' ? <GraphMap graph={data} selected={effective} onSelect={select} /> : null}
+            </>
+          ) : null}
         </div>
         <aside className={styles.brainInspector} aria-label={t('brain.nodeDetails')}>
-          {data ? <NodeDetail graph={data} nodeId={effective} /> : <p className={styles.muted}>{t('graph.noRelations')}</p>}
+          {data ? (
+            <NodeDetail graph={data} nodeId={effective} />
+          ) : (
+            <p className={styles.muted}>{t('graph.noRelations')}</p>
+          )}
           <LinkButton href="/ask/" variant="secondary">
             {t('tabs.ask')}
           </LinkButton>

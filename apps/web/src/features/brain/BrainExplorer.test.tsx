@@ -58,6 +58,10 @@ describe('BrainExplorer', () => {
       'href',
       '/meeting?id=meeting-1',
     );
+    expect(screen.getByRole('link', { name: 'Ask about this node' })).toHaveAttribute(
+      'href',
+      '/ask?node=Use%20moonlight%20irrigation&meetings=meeting-1',
+    );
   });
 
   it('uses arrow keys between map nodes, Enter opens details, and Escape closes them', () => {

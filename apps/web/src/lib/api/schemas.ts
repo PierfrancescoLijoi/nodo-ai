@@ -141,21 +141,25 @@ export const graphInsights = z.object({
 });
 
 export const pageList = z.object({
-  items: z.array(z.object({
-    id: z.string(),
-    kind: z.enum(['concept', 'source_summary', 'saved_answer']),
-    subject_id: z.string(),
-    status: z.enum(['proposed', 'approved', 'rejected', 'stale']),
-    current_revision: z.number().nullable(),
-  })),
+  items: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(['concept', 'source_summary', 'saved_answer']),
+      subject_id: z.string(),
+      status: z.enum(['proposed', 'approved', 'rejected', 'stale']),
+      current_revision: z.number().nullable(),
+    }),
+  ),
 });
 
-export const pageRevisions = z.array(z.object({
-  number: z.number(),
-  body_md: z.string(),
-  author_id: z.string(),
-  machine_generated: z.boolean(),
-}));
+export const pageRevisions = z.array(
+  z.object({
+    number: z.number(),
+    body_md: z.string(),
+    author_id: z.string(),
+    machine_generated: z.boolean(),
+  }),
+);
 
 export const exportJob = z.object({
   job_id: z.string(),

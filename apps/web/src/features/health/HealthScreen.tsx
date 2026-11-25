@@ -21,13 +21,23 @@ export function HealthScreen() {
       {insights.isError ? <ErrorNotice onRetry={() => void insights.refetch()} /> : null}
       {insights.data ? (
         <div className="stack">
-          {insights.data.truncated ? <p className="muted">Analysis is bounded; refine the graph for a full result.</p> : null}
+          {insights.data.truncated ? (
+            <p className="muted">Analysis is bounded; refine the graph for a full result.</p>
+          ) : null}
           {GROUPS.map(([label, field]) => (
             <Surface key={field} as="section">
               <h2>{label}</h2>
               {insights.data[field].length ? (
-                <ul>{insights.data[field].map((id) => <li key={id} className="mono">{id}</li>)}</ul>
-              ) : <p className="muted">None found.</p>}
+                <ul>
+                  {insights.data[field].map((id) => (
+                    <li key={id} className="mono">
+                      {id}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">None found.</p>
+              )}
             </Surface>
           ))}
         </div>
