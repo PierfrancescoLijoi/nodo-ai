@@ -1,12 +1,16 @@
 'use client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { PageHeader } from '@/components/shell/PageHeader';
-import { ErrorNotice, Skeleton, Surface, Tag } from '@/components/ui/primitives';
+import { Button, ErrorNotice, Skeleton, Surface, Tag } from '@/components/ui/primitives';
 import { useEngine } from '@/providers/data';
 import styles from '../features.module.css';
 
 export function ModelsScreen() {
   const engine = useEngine();
+  const queryClient = useQueryClient();
+  const [removing, setRemoving] = useState<string>();
   const catalog = useQuery({
     queryKey: ['local-models'],
     queryFn: () => engine!.getModels(),
@@ -54,9 +58,29 @@ export function ModelsScreen() {
                     ? `SHA-256: ${model.sha256}`
                     : 'No immutable checksum: in-app installation is disabled.'}
                 </p>
+                {model.installed && model.installable ? (
+                  <Button variant="danger" onClick={() => setRemoving(model.id)}>
+                    Remove model
+                  </Button>
+                ) : null}
               </Surface>
             ))}
           </div>
+          <ConfirmDialog
+            open={!!removing}
+            title="Remove local model?"
+            confirmLabel="Remove"
+            onCancel={() => setRemoving(undefined)}
+            onConfirm={() => {
+              if (!removing || !engine) return;
+              void engine
+                .removeModel(removing)
+                .then(() => queryClient.invalidateQueries({ queryKey: ['local-models'] }))
+                .finally(() => setRemoving(undefined));
+            }}
+          >
+            <p>This permanently removes the selected model files from this computer.</p>
+          </ConfirmDialog>
         </>
       ) : null}
     </>
