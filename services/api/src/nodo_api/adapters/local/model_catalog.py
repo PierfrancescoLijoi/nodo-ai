@@ -97,3 +97,11 @@ def remove(entry: ModelCatalogEntry, root: Path) -> None:
             shutil.rmtree(path)
         elif path.exists():
             path.unlink()
+
+
+def safe_archive_members(names: tuple[str, ...]) -> None:
+    """Reject absolute paths and traversal before extracting a verified model archive."""
+    for name in names:
+        path = Path(name)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("model archive contains an unsafe path")

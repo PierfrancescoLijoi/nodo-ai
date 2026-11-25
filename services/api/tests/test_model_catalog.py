@@ -1,9 +1,12 @@
+import pytest
+
 from nodo_api.adapters.local.model_catalog import (
     CATALOG,
     HardwareTier,
     recommend,
     recommended_entries,
     remove,
+    safe_archive_members,
 )
 
 
@@ -36,3 +39,9 @@ def test_removal_can_only_remove_a_catalog_owned_path(tmp_path) -> None:
     outside.write_text("keep")
     remove(entry, tmp_path)
     assert not owned.exists() and outside.read_text() == "keep"
+
+
+@pytest.mark.parametrize("name", ["../model", "/model", "nested/../../model"])
+def test_model_archives_cannot_escape_the_model_root(name) -> None:
+    with pytest.raises(ValueError):
+        safe_archive_members((name,))
