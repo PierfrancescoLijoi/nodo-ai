@@ -103,5 +103,5 @@ def safe_archive_members(names: tuple[str, ...]) -> None:
     """Reject absolute paths and traversal before extracting a verified model archive."""
     for name in names:
         path = Path(name)
-        if path.is_absolute() or ".." in path.parts:
+        if name.startswith(("/", "\\")) or path.is_absolute() or ".." in path.parts:
             raise ValueError("model archive contains an unsafe path")
