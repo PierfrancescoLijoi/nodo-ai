@@ -538,6 +538,12 @@ class PageHealthOutput(FrozenModel):
     items: tuple[PageFindingOutput, ...]
 
 
+class GraphInsightsOutput(FrozenModel):
+    isolated: tuple[str, ...]
+    bridges: tuple[str, ...]
+    truncated: bool
+
+
 class CollectionCreate(FrozenModel):
     name: str
     parent_id: str | None = Field(default=None, max_length=64)

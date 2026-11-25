@@ -679,6 +679,35 @@
         "title": "GraphEdgeOutput",
         "type": "object"
       },
+      "GraphInsightsOutput": {
+        "properties": {
+          "bridges": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Bridges",
+            "type": "array"
+          },
+          "isolated": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Isolated",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "isolated",
+          "bridges",
+          "truncated"
+        ],
+        "title": "GraphInsightsOutput",
+        "type": "object"
+      },
       "GraphNodeOutput": {
         "properties": {
           "id": {
@@ -3370,6 +3399,24 @@
           }
         },
         "summary": "Graph Changes"
+      }
+    },
+    "/v1/graph/insights": {
+      "get": {
+        "operationId": "graph_insights_v1_graph_insights_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphInsightsOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Graph Insights"
       }
     },
     "/v1/graph/relations/{relation_id}": {

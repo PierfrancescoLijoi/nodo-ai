@@ -47,6 +47,7 @@ from nodo_api.api.v1.schemas import (
     ExportInput,
     ExportOutput,
     GraphEdgeOutput,
+    GraphInsightsOutput,
     HierarchyLinkOutput,
     HierarchyProposalList,
     HierarchyReviewInput,
@@ -216,6 +217,17 @@ def _pages(container):
     if container.pages is None:
         raise NotAvailableOnEngine
     return container.pages
+
+
+@router.get("/graph/insights", response_model=GraphInsightsOutput)
+def graph_insights(actor: PrincipalDep, request: Request):
+    service = request.app.state.container.graph_insights
+    if service is None:
+        raise NotAvailableOnEngine
+    result = service.analyze(actor.workspace_id, actor.user_id)
+    return GraphInsightsOutput(
+        isolated=result.isolated, bridges=result.bridges, truncated=result.truncated
+    )
 
 
 def _page_output(page):
