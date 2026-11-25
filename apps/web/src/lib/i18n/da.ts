@@ -221,6 +221,7 @@ const da = {
     },
     status: { proposed: 'Foreslået', approved: 'Godkendt' },
   },
+  health: { title: 'Sundhed' },
   review: {
     title: 'Til gennemsyn',
     intro: 'Systemet har foreslået disse forbindelser. Intet tæller som en beslutning, før du godkender det.',

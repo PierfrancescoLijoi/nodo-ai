@@ -222,6 +222,7 @@ const it = {
     },
     status: { proposed: 'Proposta', approved: 'Approvata' },
   },
+  health: { title: 'Integrità' },
   review: {
     title: 'Da rivedere',
     intro: 'Il sistema ha proposto questi collegamenti. Niente conta come decisione finché non lo approvi.',

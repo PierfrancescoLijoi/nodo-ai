@@ -5,6 +5,7 @@ import {
   ChatCircleText,
   ClipboardText,
   GearSix,
+  Heartbeat,
   House,
   Microphone,
   Notebook,
@@ -29,6 +30,7 @@ interface Destination {
     | 'tabs.brain'
     | 'tabs.graph'
     | 'review.title'
+    | 'health.title'
     | 'common.settings';
   icon: Icon;
 }
@@ -42,6 +44,7 @@ const PRIMARY: Destination[] = [
 ];
 
 const SECONDARY: Destination[] = [
+  { href: '/health/', label: 'health.title', icon: Heartbeat },
   { href: '/review/', label: 'review.title', icon: ClipboardText },
   { href: '/settings/', label: 'common.settings', icon: GearSix },
 ];

@@ -233,6 +233,7 @@ const pl = {
     },
     status: { proposed: 'Proponowane', approved: 'Zatwierdzone' },
   },
+  health: { title: 'Stan wiedzy' },
   review: {
     title: 'Do sprawdzenia',
     intro: 'System zaproponował te powiązania. Nic nie jest decyzją, dopóki tego nie zatwierdzisz.',
