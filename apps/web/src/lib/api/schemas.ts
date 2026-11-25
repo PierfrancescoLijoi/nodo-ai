@@ -150,6 +150,13 @@ export const pageList = z.object({
   })),
 });
 
+export const pageRevisions = z.array(z.object({
+  number: z.number(),
+  body_md: z.string(),
+  author_id: z.string(),
+  machine_generated: z.boolean(),
+}));
+
 export const exportJob = z.object({
   job_id: z.string(),
   status: z.enum(['queued', 'running', 'ready', 'failed']),

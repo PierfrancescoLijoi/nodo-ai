@@ -15,6 +15,7 @@ export const keys = {
   reviews: ['reviews'] as const,
   graphInsights: ['graph-insights'] as const,
   wikiPages: ['wiki-pages'] as const,
+  wikiRevisions: (id: string) => ['wiki-revisions', id] as const,
 };
 
 export function useMeetings() {
@@ -58,6 +59,15 @@ export function useGraphInsights() {
 export function useWikiPages() {
   const repository = useRepository();
   return useQuery({ queryKey: keys.wikiPages, queryFn: () => repository.listWikiPages() });
+}
+
+export function useWikiRevisions(id: string | undefined) {
+  const repository = useRepository();
+  return useQuery({
+    queryKey: keys.wikiRevisions(id ?? ''),
+    queryFn: () => repository.getWikiRevisions(id ?? ''),
+    enabled: !!id,
+  });
 }
 
 const POLL_MS = 3000;

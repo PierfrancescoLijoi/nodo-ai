@@ -10,6 +10,7 @@ import type {
   MeetingState,
   MeetingSummary,
   WikiPage,
+  WikiRevision,
   NewMeeting,
   ReviewDecision,
   ReviewItem,
@@ -34,6 +35,8 @@ export interface Repository {
   getGraph(options?: { seedId?: string; depth?: 1 | 2; limit?: number }): Promise<Graph>;
   getGraphInsights(): Promise<GraphInsights>;
   listWikiPages(): Promise<WikiPage[]>;
+  getWikiRevisions(id: string): Promise<WikiRevision[]>;
+  approveWikiPage(id: string): Promise<void>;
   listReviews(): Promise<ReviewItem[]>;
   reviewRelation(id: string, decision: ReviewDecision): Promise<void>;
   startExport(): Promise<ExportJob>;
@@ -212,6 +215,19 @@ export function createRepository(
         status: page.status,
         currentRevision: page.current_revision,
       }));
+    },
+
+    async getWikiRevisions(id) {
+      return parse(wire.pageRevisions, await client.get(`/v1/pages/${encodeURIComponent(id)}/revisions`)).map((revision) => ({
+        number: revision.number,
+        body: revision.body_md,
+        authorId: revision.author_id,
+        machineGenerated: revision.machine_generated,
+      }));
+    },
+
+    async approveWikiPage(id) {
+      await client.post(`/v1/pages/${encodeURIComponent(id)}/approve`, {}, { headers: { 'Idempotency-Key': newKey() } });
     },
 
     async startExport() {

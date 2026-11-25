@@ -124,6 +124,13 @@ export interface WikiPage {
   currentRevision: number | null;
 }
 
+export interface WikiRevision {
+  number: number;
+  body: string;
+  authorId: string;
+  machineGenerated: boolean;
+}
+
 export interface Change {
   id: string;
   newLabel: string;
