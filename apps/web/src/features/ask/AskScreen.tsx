@@ -1,8 +1,8 @@
 'use client';
 
-import { ArrowUpRight, PaperPlaneTilt, Warning } from '@phosphor-icons/react';
+import { ArrowUpRight, Microphone, PaperPlaneTilt, Warning } from '@phosphor-icons/react';
 import Link from 'next/link';
-import { useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 
@@ -13,8 +13,10 @@ import type { Answer, Citation } from '@/lib/domain/types';
 import { formatClock } from '@/lib/i18n/format';
 import { useMeeting, useMeetings } from '@/lib/queries';
 import { usePrefs } from '@/providers/prefs';
-import { useRepository } from '@/providers/data';
+import { useRepository, useVoiceApi } from '@/providers/data';
 import styles from '../features.module.css';
+import { BrowserPcmCapture } from '../capture/pcm';
+import { VoiceSessionClient, type VoiceEvent } from '../capture/voiceClient';
 import { meetingHref } from '../meetings/MeetingRow';
 
 interface Turn {
@@ -94,11 +96,17 @@ function Conversation() {
   const { t } = useTranslation();
   const { locale } = usePrefs();
   const repository = useRepository();
+  const voice = useVoiceApi();
   const searchParams = useSearchParams();
   const meetings = useMeetings();
   const [text, setText] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [dictating, setDictating] = useState(false);
+  const [dictationError, setDictationError] = useState(false);
   const nextId = useRef(0);
+  const dictationHeld = useRef(false);
+  const dictationClient = useRef<VoiceSessionClient | undefined>(undefined);
+  const dictationCapture = useRef<BrowserPcmCapture | undefined>(undefined);
   const nodeLabel = searchParams.get('node');
   const meetingIds = (searchParams.get('meetings') ?? '').split(',').filter(Boolean);
 
@@ -125,6 +133,64 @@ function Conversation() {
     run(id, question);
   };
 
+  const finishDictation = useCallback(() => {
+    dictationHeld.current = false;
+    if (!dictationClient.current && !dictationCapture.current) return;
+    void dictationCapture.current?.stop();
+    dictationClient.current?.end();
+    dictationClient.current = undefined;
+    dictationCapture.current = undefined;
+    setDictating(false);
+  }, []);
+
+  const startDictation = async () => {
+    if (dictating) return;
+    setDictationError(false);
+    try {
+      const session = await voice.openDictation(locale);
+      const capture = new BrowserPcmCapture();
+      const client = new VoiceSessionClient(
+        session,
+        (event: VoiceEvent) => {
+          if (event.type === 'transcript.final' && typeof event.text === 'string') {
+            setText((current) => [current, event.text].filter(Boolean).join(' ').trim());
+            finishDictation();
+          }
+        },
+        {
+          refreshTicket: voice.refreshTicket,
+          onError: () => setDictationError(true),
+        },
+      );
+      dictationClient.current = client;
+      dictationCapture.current = capture;
+      await capture.start(({ offsetMs, pcm }) => client.sendPcm(offsetMs, pcm), () => undefined);
+      if (!dictationHeld.current) {
+        await capture.stop();
+        dictationClient.current = undefined;
+        dictationCapture.current = undefined;
+        return;
+      }
+      client.startPushToTalk();
+      client.connect();
+      setDictating(true);
+    } catch {
+      finishDictation();
+      setDictationError(true);
+    }
+  };
+
+  useEffect(() => {
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') finishDictation();
+    };
+    window.addEventListener('keydown', cancel);
+    return () => {
+      window.removeEventListener('keydown', cancel);
+      finishDictation();
+    };
+  }, [finishDictation]);
+
   return (
     <>
       {nodeLabel && meetingIds.length ? (
@@ -141,8 +207,39 @@ function Conversation() {
           onChange={setText}
           autoComplete="off"
         />
-        <Button type="submit" icon={PaperPlaneTilt} disabled={!text.trim()} aria-label={t('ask.send')} />
+        <div className={styles.row}>
+          <Button
+            variant={dictating ? 'danger' : 'secondary'}
+            icon={Microphone}
+            aria-label={t('ask.dictate')}
+            aria-pressed={dictating}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              dictationHeld.current = true;
+              void startDictation();
+            }}
+            onPointerUp={finishDictation}
+            onPointerCancel={finishDictation}
+            onKeyDown={(event) => {
+              if (!event.repeat && (event.key === ' ' || event.key === 'Enter')) {
+                dictationHeld.current = true;
+                void startDictation();
+              }
+            }}
+            onKeyUp={(event) => {
+              if (event.key === ' ' || event.key === 'Enter') finishDictation();
+            }}
+          >
+            {dictating ? t('ask.dictating') : t('ask.dictate')}
+          </Button>
+          <Button type="submit" icon={PaperPlaneTilt} disabled={!text.trim()} aria-label={t('ask.send')} />
+        </div>
       </form>
+      {dictationError ? (
+        <Surface tone="warning">
+          <p role="alert">{t('ask.dictationUnavailable')}</p>
+        </Surface>
+      ) : null}
       <div className={styles.stack} aria-live="polite">
         {turns.map((turn) => (
           <AnswerCard key={turn.id} turn={turn} titles={titles} onRetry={() => run(turn.id, turn.question)} />

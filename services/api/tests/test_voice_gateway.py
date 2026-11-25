@@ -124,6 +124,20 @@ def test_a_spoken_question_is_answered_from_the_meetings_with_citations_and_audi
     assert answer["citations"][0]["segment_id"] in {c["segment_id"] for c in written["citations"]}
 
 
+def test_dictation_returns_a_final_transcript_without_answering(voice_client, auth_headers):
+    session = open_session(voice_client, auth_headers, mode="dictation", locale="en")
+
+    with voice_client.websocket_connect(session["stream_path"]) as ws:
+        assert hello(ws, session["ticket"])["mode"] == "dictation"
+        ws.send_text('{"type":"ptt.start","offset_ms":0}')
+        speak(ws, 0, 1500)
+        ws.send_text('{"type":"ptt.end"}')
+        events = collect(ws, "transcript.final")
+        final = next(event for event in events if event["type"] == "transcript.final")
+
+    assert final["text"] == QUESTION
+
+
 def test_a_ticket_works_once(voice_client, auth_headers):
     session = open_session(voice_client, auth_headers, mode="assistant", locale="en")
 

@@ -290,7 +290,7 @@ class LiveSession:
     async def on_audio(self, frame: AudioFrame) -> None:
         if self.state is not SessionState.ACTIVE:
             return
-        if self.record.mode == "assistant" and not self._listening:
+        if self.record.mode in {"assistant", "dictation"} and not self._listening:
             return
         if frame.end_ms <= self._next_offset:
             self.duplicate_ms += frame.end_ms - frame.offset_ms
@@ -406,7 +406,7 @@ class LiveSession:
     # ------------------------------------------------------------------ push to talk
 
     async def ptt_start(self, offset_ms: int) -> None:
-        if self.record.mode != "assistant":
+        if self.record.mode not in {"assistant", "dictation"}:
             raise ProtocolError("ptt.wrong_mode")
         await self.barge_in()
         await self._stop_recognizer()
@@ -422,6 +422,8 @@ class LiveSession:
         question = " ".join(self._question).strip()
         if not question:
             self.emit("error", code="ptt.empty", retryable=False)
+            return
+        if self.record.mode == "dictation":
             return
         assistant = self._deps.assistant
         if assistant is None:

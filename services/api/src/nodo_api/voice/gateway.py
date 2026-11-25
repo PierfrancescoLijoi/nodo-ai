@@ -53,7 +53,7 @@ MAX_PENDING_AUDIO = 64  # chunks of 40 ms or more waiting for a slow listener
 
 
 class SessionCreate(FrozenModel):
-    mode: Literal["meeting", "assistant"]
+    mode: Literal["meeting", "assistant", "dictation"]
     locale: Locale
     meeting_id: Annotated[str | None, Field(max_length=64)] = None
 
@@ -93,7 +93,7 @@ async def open_session(payload: SessionCreate, actor: PrincipalDep, request: Req
         if meeting.state is not MeetingState.UPLOADING:
             raise ConflictError
     elif payload.meeting_id is not None:
-        raise ValidationFailed("The assistant does not record into a meeting")
+        raise ValidationFailed("An assistant or dictation session does not record into a meeting")
     record = SessionRecord(
         new_session_id(),
         actor.workspace_id,

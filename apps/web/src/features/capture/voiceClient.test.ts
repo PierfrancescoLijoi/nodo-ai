@@ -75,6 +75,28 @@ describe('VoiceSessionClient', () => {
     expect(controls(socket)).toContainEqual({ type: 'ack', sequence: 1 });
   });
 
+  it('sends a queued push-to-talk start before buffered microphone frames', () => {
+    const socket = new FakeSocket();
+    const client = new VoiceSessionClient(SESSION, vi.fn(), {
+      createSocket: () => socket,
+      refreshTicket: vi.fn(),
+    });
+
+    client.startPushToTalk(0);
+    client.sendPcm(0, new Int16Array(640));
+    client.connect();
+    socket.open();
+    socket.json({ type: 'session.ready', audio_resume_offset_ms: 0 });
+
+    expect(controls(socket)).toContainEqual({ type: 'ptt.start', offset_ms: 0 });
+    const start = socket.sent.findIndex(
+      (item) => typeof item === 'string' && JSON.parse(item).type === 'ptt.start',
+    );
+    const audio = socket.sent.findIndex((item) => item instanceof ArrayBuffer);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(audio).toBeGreaterThan(start);
+  });
+
   it('gets a fresh ticket and replays only audio after the server durable offset', async () => {
     const first = new FakeSocket();
     const second = new FakeSocket();

@@ -69,6 +69,7 @@ export class VoiceSessionClient {
   private reconnectTimer?: number;
   private heartbeatTimer?: number;
   private disconnectedAt?: number;
+  private pendingPttStart?: number;
   private ticket: string;
 
   private readonly createSocket: (url: string) => SocketLike;
@@ -116,6 +117,15 @@ export class VoiceSessionClient {
     const frame = { offsetMs, endMs: offsetMs + durationMs, data: encodeFrame(offsetMs, pcm) };
     this.frames.push(frame);
     if (this.ready && this.socket?.readyState === OPEN) this.socket.send(frame.data);
+  }
+
+  startPushToTalk(offsetMs = 0) {
+    this.pendingPttStart = offsetMs;
+    if (this.ready) this.flushPushToTalkStart();
+  }
+
+  endPushToTalk() {
+    this.sendControl({ type: 'ptt.end' });
   }
 
   end() {
@@ -194,6 +204,7 @@ export class VoiceSessionClient {
     this.ready = true;
     this.disconnectedAt = undefined;
     this.deps.onStatus?.('connected');
+    this.flushPushToTalkStart();
     for (const frame of this.frames) this.socket?.send(frame.data);
     if (this.heartbeatTimer !== undefined) this.stopHeartbeat(this.heartbeatTimer);
     this.heartbeatTimer = this.startHeartbeat(
@@ -246,6 +257,13 @@ export class VoiceSessionClient {
 
   private sendControl(message: object) {
     if (this.socket?.readyState === OPEN) this.socket.send(JSON.stringify(message));
+  }
+
+  private flushPushToTalkStart() {
+    if (this.pendingPttStart === undefined) return;
+    const offsetMs = this.pendingPttStart;
+    this.pendingPttStart = undefined;
+    this.sendControl({ type: 'ptt.start', offset_ms: offsetMs });
   }
 
   private clearTimers() {
