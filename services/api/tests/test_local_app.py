@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from nodo_api.adapters.memory import MemorySpeech
+from nodo_api.adapters.local.model_catalog import CATALOG
 from nodo_api.adapters.memory.extractor import KeywordExtractor
 from nodo_api.config import Settings
 from nodo_api.errors import ModelUnavailable
@@ -162,6 +163,24 @@ def test_local_models_expose_catalog_metadata_without_starting_a_download(client
     assert llama["installable"] is True and len(llama["sha256"]) == 64
     qwen = next(item for item in body["models"] if item["id"] == "qwen3-4b-q5")
     assert qwen["installable"] is False and qwen["installed"] is False
+
+
+def test_model_removal_requires_approval_and_stays_inside_the_model_root(tmp_path) -> None:
+    models = tmp_path / "models"
+    entry = CATALOG[0]
+    owned = entry.owned_paths(models)[0]
+    owned.mkdir(parents=True)
+    (owned / "model.bin").write_bytes(b"model")
+    outside = tmp_path / "keep.txt"
+    outside.write_text("keep")
+    with TestClient(create_app(_settings(tmp_path / "data", local_models_dir=models))) as local:
+        denied = local.post(f"/v1/local/models/{entry.id}/remove", headers=HEADERS, json={})
+        assert denied.status_code == 422 and owned.exists()
+        removed = local.post(
+            f"/v1/local/models/{entry.id}/remove", headers=HEADERS, json={"approved": True}
+        )
+    assert removed.status_code == 200 and removed.json()["installed"] is False
+    assert not owned.exists() and outside.read_text() == "keep"
 
 
 @pytest.mark.parametrize(
