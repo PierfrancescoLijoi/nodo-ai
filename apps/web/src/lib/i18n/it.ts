@@ -1,6 +1,19 @@
 const it = {
   app: { name: 'NODO' },
-  models: { title: 'Modelli' },
+  models: {
+    title: 'Modelli',
+    intro: 'Requisiti, licenze e stato di installazione verificato dei modelli locali.',
+    localOnly: 'La gestione dei modelli è disponibile solo sul motore locale.',
+    hardware: 'Profilo hardware: {{tier}}',
+    installed: 'Installato',
+    available: 'Disponibile',
+    licence: 'Visualizza licenza',
+    unverified: 'Nessun checksum immutabile: l’installazione nell’app è disabilitata.',
+    remove: 'Rimuovi modello',
+    removeTitle: 'Rimuovere il modello locale?',
+    removeBody:
+      'Questa operazione rimuove definitivamente i file del modello selezionato da questo computer.',
+  },
   tabs: { home: 'Home', meetings: 'Meeting', ask: 'Chiedi', brain: 'Cervello', graph: 'Grafo' },
   common: {
     back: 'Indietro',

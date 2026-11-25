@@ -1,6 +1,18 @@
 const pl = {
   app: { name: 'NODO' },
-  models: { title: 'Modele' },
+  models: {
+    title: 'Modele',
+    intro: 'Wymagania, licencje i zweryfikowany stan instalacji modeli lokalnych.',
+    localOnly: 'Zarządzanie modelami jest dostępne tylko w silniku lokalnym.',
+    hardware: 'Profil sprzętowy: {{tier}}',
+    installed: 'Zainstalowano',
+    available: 'Dostępny',
+    licence: 'Zobacz licencję',
+    unverified: 'Brak niezmiennej sumy kontrolnej: instalacja w aplikacji jest wyłączona.',
+    remove: 'Usuń model',
+    removeTitle: 'Usunąć model lokalny?',
+    removeBody: 'To trwale usunie wybrane pliki modelu z tego komputera.',
+  },
   tabs: { home: 'Start', meetings: 'Spotkania', ask: 'Pytaj', brain: 'Mózg', graph: 'Graf' },
   common: {
     back: 'Wstecz',

@@ -1,6 +1,18 @@
 const da = {
   app: { name: 'NODO' },
-  models: { title: 'Modeller' },
+  models: {
+    title: 'Modeller',
+    intro: 'Krav, licenser og verificeret installationsstatus for lokale modeller.',
+    localOnly: 'Modelstyring er kun tilgængelig på den lokale motor.',
+    hardware: 'Hardwareprofil: {{tier}}',
+    installed: 'Installeret',
+    available: 'Tilgængelig',
+    licence: 'Se licens',
+    unverified: 'Ingen uforanderlig kontrolsum: installation i appen er deaktiveret.',
+    remove: 'Fjern model',
+    removeTitle: 'Fjern lokal model?',
+    removeBody: 'Dette fjerner permanent de valgte modelfiler fra denne computer.',
+  },
   tabs: { home: 'Hjem', meetings: 'Møder', ask: 'Spørg', brain: 'Hjerne', graph: 'Graf' },
   common: {
     back: 'Tilbage',

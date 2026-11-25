@@ -2,7 +2,19 @@
 // (plural forms excepted, see src/i18n/__tests__/locales.test.ts).
 const en = {
   app: { name: 'NODO' },
-  models: { title: 'Models' },
+  models: {
+    title: 'Models',
+    intro: 'Local model requirements, licences and verified installation status.',
+    localOnly: 'Model management is available only on the local engine.',
+    hardware: 'Hardware profile: {{tier}}',
+    installed: 'Installed',
+    available: 'Available',
+    licence: 'View licence',
+    unverified: 'No immutable checksum: in-app installation is disabled.',
+    remove: 'Remove model',
+    removeTitle: 'Remove local model?',
+    removeBody: 'This permanently removes the selected model files from this computer.',
+  },
   tabs: { home: 'Home', meetings: 'Meetings', ask: 'Ask', brain: 'Brain', graph: 'Graph' },
   common: {
     back: 'Back',
