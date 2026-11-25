@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import partial
 from typing import Annotated, Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import (
     APIRouter,
@@ -57,6 +58,7 @@ from nodo_api.api.v1.schemas import (
     MeetingOutput,
     PageCitationOutput,
     PageClaimOutput,
+    PageCreateInput,
     PageEditInput,
     PageFindingOutput,
     PageHealthOutput,
@@ -94,7 +96,14 @@ from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
 from nodo_api.domain.hierarchy import MAX_DEPTH
-from nodo_api.domain.pages import PageCitation, PageClaim, claim_text_hash
+from nodo_api.domain.pages import (
+    Page,
+    PageCitation,
+    PageClaim,
+    PageKind,
+    PageStatus,
+    claim_text_hash,
+)
 from nodo_api.domain.retrieval import (
     CitationFormat,
     QueryScope,
@@ -284,6 +293,47 @@ def list_pages(
 ):
     pages = _pages(request.app.state.container).list_owned(actor.workspace_id, actor.user_id)
     return PageList(items=tuple(_page_output(page) for page in pages[:limit]))
+
+
+@router.post("/pages", response_model=PageOutput, status_code=status.HTTP_201_CREATED)
+def create_page(
+    payload: PageCreateInput,
+    actor: PrincipalDep,
+    request: Request,
+    idempotency_key: PageCommandKey,
+):
+    container = request.app.state.container
+    service = container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    identity = f"{actor.workspace_id}:{actor.user_id}:{idempotency_key}"
+    page_id = f"page-{uuid5(NAMESPACE_URL, identity).hex}"
+    pages = _pages(container)
+    try:
+        return _page_output(pages.get_owned(actor.workspace_id, actor.user_id, page_id))
+    except NotFoundError:
+        pass
+    sources, fragments = _source_stores(container)
+    evidence = []
+    for source_id in dict.fromkeys(payload.source_ids):
+        sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+        evidence.extend(fragments.latest(actor.workspace_id, source_id))
+    page = Page(
+        page_id,
+        actor.workspace_id,
+        actor.user_id,
+        PageKind(payload.kind),
+        payload.subject_id,
+        PageStatus.PROPOSED,
+        datetime.now(UTC),
+    )
+    service.compile(
+        page,
+        tuple(evidence),
+        model_version="extractive-page-compiler-v1",
+        prompt_version="page-create-v1",
+    )
+    return _page_output(page)
 
 
 @router.get("/pages/health", response_model=PageHealthOutput)

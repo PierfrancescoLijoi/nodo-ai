@@ -502,6 +502,12 @@ class PageEditInput(FrozenModel):
     claims: tuple[PageClaimInput, ...] = ()
 
 
+class PageCreateInput(FrozenModel):
+    kind: Literal["concept", "source_summary", "saved_answer"]
+    subject_id: str = Field(min_length=1, max_length=128)
+    source_ids: tuple[str, ...] = Field(min_length=1, max_length=20)
+
+
 class PageRefreshInput(FrozenModel):
     source_ids: tuple[str, ...] = Field(min_length=1, max_length=20)
 
