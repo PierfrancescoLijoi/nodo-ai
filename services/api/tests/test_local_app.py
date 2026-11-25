@@ -153,6 +153,17 @@ def test_the_upload_link_is_single_use_and_everything_else_needs_the_token(clien
     assert client.get("/v1/local/status", headers=HEADERS).json()["backend"] == "local"
 
 
+def test_local_models_expose_catalog_metadata_without_starting_a_download(client) -> None:
+    response = client.get("/v1/local/models", headers=HEADERS)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hardware_tier"] == "cpu"
+    llama = next(item for item in body["models"] if item["id"] == "llama-cpp")
+    assert llama["installable"] is True and len(llama["sha256"]) == 64
+    qwen = next(item for item in body["models"] if item["id"] == "qwen3-4b-q5")
+    assert qwen["installable"] is False and qwen["installed"] is False
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

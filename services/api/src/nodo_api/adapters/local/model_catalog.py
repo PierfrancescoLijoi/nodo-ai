@@ -81,3 +81,9 @@ def recommend(gpu_bytes: int | None) -> HardwareTier:
 def recommended_entries(gpu_bytes: int | None) -> tuple[ModelCatalogEntry, ...]:
     tier = recommend(gpu_bytes)
     return tuple(entry for entry in CATALOG if tier in entry.hardware)
+
+
+def installed(entry: ModelCatalogEntry, root: Path) -> bool:
+    """An entry owns only explicit paths; an empty path list is never treated as installed."""
+    paths = entry.owned_paths(root)
+    return bool(paths) and all(path.exists() for path in paths)
