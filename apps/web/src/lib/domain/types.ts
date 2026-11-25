@@ -116,6 +116,14 @@ export interface GraphInsights {
   truncated: boolean;
 }
 
+export interface WikiPage {
+  id: string;
+  kind: 'concept' | 'source_summary' | 'saved_answer';
+  subjectId: string;
+  status: 'proposed' | 'approved' | 'rejected' | 'stale';
+  currentRevision: number | null;
+}
+
 export interface Change {
   id: string;
   newLabel: string;

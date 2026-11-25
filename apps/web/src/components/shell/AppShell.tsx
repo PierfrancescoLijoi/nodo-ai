@@ -31,6 +31,7 @@ interface Destination {
     | 'tabs.graph'
     | 'review.title'
     | 'health.title'
+    | 'wiki.title'
     | 'common.settings';
   icon: Icon;
 }
@@ -44,6 +45,7 @@ const PRIMARY: Destination[] = [
 ];
 
 const SECONDARY: Destination[] = [
+  { href: '/wiki/', label: 'wiki.title', icon: Notebook },
   { href: '/health/', label: 'health.title', icon: Heartbeat },
   { href: '/review/', label: 'review.title', icon: ClipboardText },
   { href: '/settings/', label: 'common.settings', icon: GearSix },

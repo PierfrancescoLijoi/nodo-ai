@@ -14,6 +14,7 @@ export const keys = {
   graph: (seedId?: string) => ['graph', seedId ?? null] as const,
   reviews: ['reviews'] as const,
   graphInsights: ['graph-insights'] as const,
+  wikiPages: ['wiki-pages'] as const,
 };
 
 export function useMeetings() {
@@ -52,6 +53,11 @@ export function useReviews() {
 export function useGraphInsights() {
   const repository = useRepository();
   return useQuery({ queryKey: keys.graphInsights, queryFn: () => repository.getGraphInsights() });
+}
+
+export function useWikiPages() {
+  const repository = useRepository();
+  return useQuery({ queryKey: keys.wikiPages, queryFn: () => repository.listWikiPages() });
 }
 
 const POLL_MS = 3000;

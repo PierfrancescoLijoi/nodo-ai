@@ -223,6 +223,7 @@ const en = {
     status: { proposed: 'Proposed', approved: 'Approved' },
   },
   health: { title: 'Health' },
+  wiki: { title: 'Wiki' },
   review: {
     title: 'To review',
     intro: 'The system proposed these links. Nothing counts as a decision until you approve it.',

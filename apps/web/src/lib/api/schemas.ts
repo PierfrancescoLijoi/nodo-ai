@@ -140,6 +140,16 @@ export const graphInsights = z.object({
   truncated: z.boolean(),
 });
 
+export const pageList = z.object({
+  items: z.array(z.object({
+    id: z.string(),
+    kind: z.enum(['concept', 'source_summary', 'saved_answer']),
+    subject_id: z.string(),
+    status: z.enum(['proposed', 'approved', 'rejected', 'stale']),
+    current_revision: z.number().nullable(),
+  })),
+});
+
 export const exportJob = z.object({
   job_id: z.string(),
   status: z.enum(['queued', 'running', 'ready', 'failed']),

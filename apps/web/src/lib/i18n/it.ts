@@ -223,6 +223,7 @@ const it = {
     status: { proposed: 'Proposta', approved: 'Approvata' },
   },
   health: { title: 'Integrità' },
+  wiki: { title: 'Wiki' },
   review: {
     title: 'Da rivedere',
     intro: 'Il sistema ha proposto questi collegamenti. Niente conta come decisione finché non lo approvi.',

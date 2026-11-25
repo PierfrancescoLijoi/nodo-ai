@@ -9,6 +9,7 @@ import type {
   Meeting,
   MeetingState,
   MeetingSummary,
+  WikiPage,
   NewMeeting,
   ReviewDecision,
   ReviewItem,
@@ -32,6 +33,7 @@ export interface Repository {
   ask(question: string, locale: Locale): Promise<Answer>;
   getGraph(options?: { seedId?: string; depth?: 1 | 2; limit?: number }): Promise<Graph>;
   getGraphInsights(): Promise<GraphInsights>;
+  listWikiPages(): Promise<WikiPage[]>;
   listReviews(): Promise<ReviewItem[]>;
   reviewRelation(id: string, decision: ReviewDecision): Promise<void>;
   startExport(): Promise<ExportJob>;
@@ -200,6 +202,16 @@ export function createRepository(
         contradictingDecisions: raw.contradicting_decisions,
         truncated: raw.truncated,
       };
+    },
+
+    async listWikiPages() {
+      return parse(wire.pageList, await client.get('/v1/pages')).items.map((page) => ({
+        id: page.id,
+        kind: page.kind,
+        subjectId: page.subject_id,
+        status: page.status,
+        currentRevision: page.current_revision,
+      }));
     },
 
     async startExport() {
