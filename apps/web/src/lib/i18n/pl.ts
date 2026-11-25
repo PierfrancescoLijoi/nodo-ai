@@ -176,6 +176,7 @@ const pl = {
     mentionedIn: 'Wspomniane w',
     noSources: 'Dla tego pojęcia nie ma jeszcze spotkania źródłowego.',
     openReview: 'Sprawdź proponowane połączenia',
+    askNode: 'Zapytaj o ten węzeł',
     statusUnknown: 'Niesprawdzone',
     connectionCount: 'Połączenia: {{count}}',
     loadingTitle: 'Tworzenie mózgu',

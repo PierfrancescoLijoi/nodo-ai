@@ -165,6 +165,7 @@ const da = {
     mentionedIn: 'Nævnt i',
     noSources: 'Der findes endnu intet kildemøde til dette begreb.',
     openReview: 'Gennemgå foreslåede forbindelser',
+    askNode: 'Spørg om denne node',
     statusUnknown: 'Ikke gennemgået',
     connectionCount: 'Forbindelser: {{count}}',
     loadingTitle: 'Danner din hjerne',

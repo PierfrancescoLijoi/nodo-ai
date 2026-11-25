@@ -167,6 +167,7 @@ const en = {
     mentionedIn: 'Mentioned in',
     noSources: 'No source meeting is available for this concept yet.',
     openReview: 'Review proposed connections',
+    askNode: 'Ask about this node',
     statusUnknown: 'Unreviewed',
     connectionCount: '{{count}} connections',
     loadingTitle: 'Forming your brain',

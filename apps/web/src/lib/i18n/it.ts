@@ -166,6 +166,7 @@ const it = {
     mentionedIn: 'Menzionato in',
     noSources: 'Non è ancora disponibile un meeting fonte per questo concetto.',
     openReview: 'Rivedi i collegamenti proposti',
+    askNode: 'Chiedi informazioni su questo nodo',
     statusUnknown: 'Non rivisto',
     connectionCount: 'Collegamenti: {{count}}',
     loadingTitle: 'Formazione del tuo cervello',
