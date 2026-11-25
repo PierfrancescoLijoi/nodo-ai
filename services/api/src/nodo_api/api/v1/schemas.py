@@ -541,6 +541,9 @@ class PageHealthOutput(FrozenModel):
 class GraphInsightsOutput(FrozenModel):
     isolated: tuple[str, ...]
     bridges: tuple[str, ...]
+    orphan_concepts: tuple[str, ...]
+    duplicate_concepts: tuple[str, ...]
+    contradicting_decisions: tuple[str, ...]
     truncated: bool
 
 

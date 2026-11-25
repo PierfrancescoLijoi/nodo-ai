@@ -26,4 +26,7 @@ def test_graph_insights_find_isolated_and_bridge_nodes():
 
     assert result.isolated == ("alone",)
     assert result.bridges == ("a",)
+    assert result.orphan_concepts == ("alone",)
+    assert result.duplicate_concepts == ()
+    assert result.contradicting_decisions == ()
     assert not result.truncated

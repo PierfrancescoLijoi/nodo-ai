@@ -688,11 +688,32 @@
             "title": "Bridges",
             "type": "array"
           },
+          "contradicting_decisions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Contradicting Decisions",
+            "type": "array"
+          },
+          "duplicate_concepts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Duplicate Concepts",
+            "type": "array"
+          },
           "isolated": {
             "items": {
               "type": "string"
             },
             "title": "Isolated",
+            "type": "array"
+          },
+          "orphan_concepts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Orphan Concepts",
             "type": "array"
           },
           "truncated": {
@@ -703,6 +724,9 @@
         "required": [
           "isolated",
           "bridges",
+          "orphan_concepts",
+          "duplicate_concepts",
+          "contradicting_decisions",
           "truncated"
         ],
         "title": "GraphInsightsOutput",

@@ -226,7 +226,12 @@ def graph_insights(actor: PrincipalDep, request: Request):
         raise NotAvailableOnEngine
     result = service.analyze(actor.workspace_id, actor.user_id)
     return GraphInsightsOutput(
-        isolated=result.isolated, bridges=result.bridges, truncated=result.truncated
+        isolated=result.isolated,
+        bridges=result.bridges,
+        orphan_concepts=result.orphan_concepts,
+        duplicate_concepts=result.duplicate_concepts,
+        contradicting_decisions=result.contradicting_decisions,
+        truncated=result.truncated,
     )
 
 
