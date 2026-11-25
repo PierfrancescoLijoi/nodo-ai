@@ -21,6 +21,7 @@ class QueryScopeMode(StrEnum):
     ALL = "all"
     COLLECTION = "collection"
     SOURCES = "sources"
+    MEETINGS = "meetings"
     SOURCES_ONLY = "sources_only"
 
 
@@ -29,20 +30,29 @@ class QueryScope:
     mode: QueryScopeMode = QueryScopeMode.LEGACY
     collection_id: str | None = None
     source_ids: tuple[str, ...] = ()
+    meeting_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.mode is QueryScopeMode.COLLECTION:
-            if not self.collection_id or self.source_ids:
+            if not self.collection_id or self.source_ids or self.meeting_ids:
                 raise ValueError("A collection scope needs only collection_id")
         elif self.mode is QueryScopeMode.SOURCES:
-            if self.collection_id or not self.source_ids:
+            if self.collection_id or not self.source_ids or self.meeting_ids:
                 raise ValueError("A sources scope needs only source_ids")
-        elif self.collection_id or self.source_ids:
+        elif self.mode is QueryScopeMode.MEETINGS:
+            if self.collection_id or self.source_ids or not self.meeting_ids:
+                raise ValueError("A meetings scope needs only meeting_ids")
+        elif self.collection_id or self.source_ids or self.meeting_ids:
             raise ValueError("This scope mode takes no ids")
         if len(self.source_ids) > MAX_QUERY_SOURCES:
             raise ValueError(f"At most {MAX_QUERY_SOURCES} sources may be selected")
         if len(set(self.source_ids)) != len(self.source_ids):
             raise ValueError("Selected source ids must be unique")
+        if (
+            len(self.meeting_ids) > MAX_QUERY_SOURCES
+            or len(set(self.meeting_ids)) != len(self.meeting_ids)
+        ):
+            raise ValueError("Selected meeting ids must be unique and within the source limit")
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +73,7 @@ def resolve_query_scope(
     citation_format: CitationFormat,
     sources: Any,
     collections: Any,
+    meetings: Any = None,
 ) -> ResolvedQueryScope:
     """Resolve only authorized Source ids before retrieval. Foreign ids stay indistinguishable
     from absent ids because the owner-scoped repositories raise the same NotFoundError."""
@@ -78,6 +89,13 @@ def resolve_query_scope(
         ids = tuple(
             sources.get_owned(workspace_id, owner_id, source_id).id
             for source_id in scope.source_ids
+        )
+    elif scope.mode is QueryScopeMode.MEETINGS:
+        if meetings is None:
+            raise NotAvailableOnEngine
+        ids = tuple(
+            meetings.get_owned(workspace_id, owner_id, meeting_id).id
+            for meeting_id in scope.meeting_ids
         )
     elif scope.mode is QueryScopeMode.COLLECTION:
         if collections is None:

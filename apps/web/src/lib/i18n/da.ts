@@ -128,6 +128,8 @@ const da = {
     send: 'Send spørgsmål',
     thinking: 'Jeg gennemsøger dine møder',
     sources: 'Kilder',
+    nodeContext: 'Nodekontekst',
+    nodeContextBody: 'Svar er begrænset til dokumentation knyttet til {{node}}.',
     unanswerableTitle: 'Ikke nok belæg',
     unanswerableBody: 'Jeg kan ikke finde tilstrækkeligt belæg i dine møder til at svare pålideligt.',
     footnote: 'Svarene i denne version kommer kun fra tre eksempelmøder.',

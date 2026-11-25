@@ -1025,10 +1025,11 @@ def _resolved_query_scope(
     return resolve_query_scope(
         actor.workspace_id,
         actor.user_id,
-        QueryScope(value.mode, value.collection_id, value.source_ids),
+        QueryScope(value.mode, value.collection_id, value.source_ids, value.meeting_ids),
         citation_format,
         container.sources,
         container.collections,
+        container.meetings,
     )
 
 

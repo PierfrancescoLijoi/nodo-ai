@@ -128,6 +128,8 @@ const it = {
     send: 'Invia la domanda',
     thinking: 'Sto cercando nei tuoi meeting',
     sources: 'Fonti',
+    nodeContext: 'Contesto del nodo',
+    nodeContextBody: 'Le risposte sono limitate alle prove collegate a {{node}}.',
     unanswerableTitle: 'Prove insufficienti',
     unanswerableBody: 'Non trovo prove sufficienti nei tuoi meeting per rispondere in modo affidabile.',
     footnote: 'In questa versione le risposte vengono solo da tre meeting di esempio.',

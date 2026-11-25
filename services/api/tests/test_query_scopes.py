@@ -80,6 +80,28 @@ def test_selected_sources_are_authorized_before_the_request_reaches_query(
     assert capture.request.citation_format is CitationFormat.SOURCE
 
 
+def test_selected_meetings_are_authorized_before_the_request_reaches_query(
+    app, client, auth_headers
+) -> None:
+    capture = CaptureQuery()
+    app.state.container.query_service = capture
+
+    response = client.post(
+        "/v1/query",
+        headers=auth_headers,
+        json={
+            "question": "What changed?",
+            "ui_locale": "en",
+            "citation_format": "source",
+            "scope": {"mode": "meetings", "meeting_ids": ["seed-m2"]},
+        },
+    )
+
+    assert response.status_code == 200
+    assert capture.request.scope.mode is QueryScopeMode.MEETINGS
+    assert capture.request.scope.source_ids == frozenset({"seed-m2"})
+
+
 def test_collection_scope_resolves_only_owned_live_members(app, client, auth_headers) -> None:
     source = app.state.container.sources.add(WS, document("doc-member"))
     collection = app.state.container.collections.create(WS, OWNER, name="Plans", parent_id=None)

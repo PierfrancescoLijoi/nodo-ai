@@ -31,7 +31,7 @@ export interface Repository {
   getMeeting(id: string): Promise<Meeting | null>;
   nameSpeaker(meetingId: string, speakerId: string, name: string | null): Promise<Meeting>;
   listChanges(): Promise<Change[]>;
-  ask(question: string, locale: Locale): Promise<Answer>;
+  ask(question: string, locale: Locale, meetingIds?: string[]): Promise<Answer>;
   getGraph(options?: { seedId?: string; depth?: 1 | 2; limit?: number }): Promise<Graph>;
   getGraphInsights(): Promise<GraphInsights>;
   listWikiPages(): Promise<WikiPage[]>;
@@ -162,10 +162,17 @@ export function createRepository(
       return mapMeeting(parse(wire.meetingDetail, meeting), await transcript(meetingId));
     },
 
-    async ask(question, locale) {
+    async ask(question, locale, meetingIds) {
       const raw = await client.post(
         '/v1/query',
-        { question, ui_locale: locale },
+        meetingIds?.length
+          ? {
+              question,
+              ui_locale: locale,
+              citation_format: 'source',
+              scope: { mode: 'meetings', meeting_ids: meetingIds },
+            }
+          : { question, ui_locale: locale },
         { timeoutMs: QUERY_TIMEOUT_MS },
       );
       return mapAnswer(parse(wire.answer, raw));

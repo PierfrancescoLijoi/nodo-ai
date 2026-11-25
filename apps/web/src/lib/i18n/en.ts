@@ -130,6 +130,8 @@ const en = {
     send: 'Send question',
     thinking: 'Looking through your meetings',
     sources: 'Sources',
+    nodeContext: 'Node context',
+    nodeContextBody: 'Answers are limited to evidence connected to {{node}}.',
     unanswerableTitle: 'Not enough evidence',
     unanswerableBody: 'I cannot find enough evidence in your meetings to answer this reliably.',
     footnote: 'Answers in this build come from three sample meetings only.',

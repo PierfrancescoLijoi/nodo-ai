@@ -272,16 +272,23 @@ class QueryScopeInput(FrozenModel):
     mode: QueryScopeMode = QueryScopeMode.LEGACY
     collection_id: str | None = Field(default=None, min_length=1, max_length=64)
     source_ids: tuple[str, ...] = Field(default=(), max_length=MAX_QUERY_SOURCES)
+    meeting_ids: tuple[str, ...] = Field(default=(), max_length=MAX_QUERY_SOURCES)
 
     @model_validator(mode="after")
     def valid_shape(self):
         if self.mode is QueryScopeMode.COLLECTION:
-            valid = self.collection_id is not None and not self.source_ids
+            valid = self.collection_id is not None and not self.source_ids and not self.meeting_ids
         elif self.mode is QueryScopeMode.SOURCES:
-            valid = self.collection_id is None and bool(self.source_ids)
+            valid = self.collection_id is None and bool(self.source_ids) and not self.meeting_ids
+        elif self.mode is QueryScopeMode.MEETINGS:
+            valid = self.collection_id is None and not self.source_ids and bool(self.meeting_ids)
         else:
-            valid = self.collection_id is None and not self.source_ids
-        if not valid or len(set(self.source_ids)) != len(self.source_ids):
+            valid = self.collection_id is None and not self.source_ids and not self.meeting_ids
+        if (
+            not valid
+            or len(set(self.source_ids)) != len(self.source_ids)
+            or len(set(self.meeting_ids)) != len(self.meeting_ids)
+        ):
             raise ValueError("Invalid query scope")
         return self
 

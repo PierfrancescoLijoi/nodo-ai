@@ -327,7 +327,11 @@ export function BrainExplorer({ graph, expanding = false, onExpand }: BrainExplo
           <Button variant="secondary" onClick={() => focus(selected.id)} disabled={expanding}>
             {expanding ? t('brain.expanding') : t('brain.focusNode')}
           </Button>
-          <Link href={`/ask/?scope=node&node=${encodeURIComponent(selected.id)}`}>
+          <Link
+            href={`/ask/?node=${encodeURIComponent(selected.label)}&meetings=${encodeURIComponent(
+              [...new Set([selected.meetingId, ...relations.flatMap((edge) => edge.meetingIds ?? [])].filter(Boolean))].join(','),
+            )}`}
+          >
             {t('brain.askNode')}
           </Link>
           <div className={styles.detailSection}>

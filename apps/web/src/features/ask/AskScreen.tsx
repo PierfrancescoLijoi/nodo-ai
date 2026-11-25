@@ -3,6 +3,7 @@
 import { ArrowUpRight, PaperPlaneTilt, Warning } from '@phosphor-icons/react';
 import Link from 'next/link';
 import { useRef, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 
 import { PageHeader } from '@/components/shell/PageHeader';
@@ -93,10 +94,13 @@ function Conversation() {
   const { t } = useTranslation();
   const { locale } = usePrefs();
   const repository = useRepository();
+  const searchParams = useSearchParams();
   const meetings = useMeetings();
   const [text, setText] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const nextId = useRef(0);
+  const nodeLabel = searchParams.get('node');
+  const meetingIds = (searchParams.get('meetings') ?? '').split(',').filter(Boolean);
 
   const titles = new Map((meetings.data ?? []).map((meeting) => [meeting.id, meeting.title]));
 
@@ -105,7 +109,7 @@ function Conversation() {
 
   const run = (id: number, question: string) => {
     update(id, { state: 'pending', answer: undefined });
-    repository.ask(question, locale).then(
+    repository.ask(question, locale, meetingIds).then(
       (answer) => update(id, { state: 'done', answer }),
       () => update(id, { state: 'failed' }),
     );
@@ -123,6 +127,12 @@ function Conversation() {
 
   return (
     <>
+      {nodeLabel && meetingIds.length ? (
+        <Surface tone="accent" as="section">
+          <p className={styles.label}>{t('ask.nodeContext')}</p>
+          <p>{t('ask.nodeContextBody', { node: nodeLabel })}</p>
+        </Surface>
+      ) : null}
       <form className={styles.askForm} onSubmit={submit}>
         <TextField
           label={t('ask.inputLabel')}

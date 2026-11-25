@@ -138,6 +138,8 @@ const pl = {
     send: 'Wyślij pytanie',
     thinking: 'Przeszukuję Twoje spotkania',
     sources: 'Źródła',
+    nodeContext: 'Kontekst węzła',
+    nodeContextBody: 'Odpowiedzi są ograniczone do dowodów powiązanych z {{node}}.',
     unanswerableTitle: 'Za mało dowodów',
     unanswerableBody: 'Nie znajduję w Twoich spotkaniach wystarczających dowodów, by odpowiedzieć rzetelnie.',
     footnote: 'Odpowiedzi w tej wersji pochodzą wyłącznie z trzech przykładowych spotkań.',
