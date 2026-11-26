@@ -66,6 +66,11 @@ const en = {
     error: 'Sign-in failed. Please try again.',
   },
   home: {
+    firstRun: {
+      title: 'Choose your models',
+      body: '{{count}} model part is missing, so some features cannot work yet. Pick a model set that fits this computer; nothing is downloaded until you confirm.',
+      cta: 'Open models',
+    },
     title: 'Your meeting memory',
     record: {
       title: 'Record a meeting',

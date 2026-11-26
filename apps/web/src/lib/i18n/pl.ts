@@ -64,6 +64,11 @@ const pl = {
     error: 'Logowanie nie powiodło się. Spróbuj ponownie.',
   },
   home: {
+    firstRun: {
+      title: 'Wybierz modele',
+      body: 'Brakuje elementów modeli ({{count}}), więc część funkcji jeszcze nie działa. Wybierz zestaw pasujący do tego komputera; nic nie zostanie pobrane bez Twojego potwierdzenia.',
+      cta: 'Otwórz modele',
+    },
     title: 'Pamięć Twoich spotkań',
     record: {
       title: 'Nagraj spotkanie',
