@@ -29,6 +29,49 @@ START_TIMEOUT_SECONDS = 180
 IDLE_UNLOAD_SECONDS = 600
 
 
+EMBEDDING_PIN = "embedding-model.txt"
+_E5_BASE, _E5_LARGE = "multilingual-e5-base", "multilingual-e5-large"
+
+
+def choose_embedding(models_root: Path, data_root: Path | None) -> str:
+    """E5 large for a fresh data folder when installed, otherwise what the data was indexed with.
+
+    Vectors of different sizes cannot be compared, so the model is pinned in the data folder as soon
+    as there is anything indexed: installing the large model later never breaks an existing archive.
+    """
+    root = data_root if data_root is not None else data_dir()
+    pin = root / EMBEDDING_PIN
+    installed = lambda name: (models_root / "embeddings" / name / "model.int8.onnx").exists()  # noqa: E731
+    if pin.is_file():
+        name = pin.read_text(encoding="utf-8").strip()
+        return name  # a removed model reads as "not installed", never as a different vector size
+    database = root / "nodo.db"
+    indexed = False
+    if database.is_file():
+        import sqlite3
+
+        with contextlib.closing(
+            sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True)
+        ) as db:
+            try:
+                indexed = any(
+                    db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+                    for table in ("search_segments", "search_fragments", "entity_vectors")
+                )
+            except sqlite3.Error:
+                indexed = False
+    if indexed:
+        with contextlib.suppress(OSError):
+            pin.write_text(_E5_BASE, encoding="utf-8")
+        return _E5_BASE
+    if installed(_E5_LARGE):
+        with contextlib.suppress(OSError):
+            root.mkdir(parents=True, exist_ok=True)
+            pin.write_text(_E5_LARGE, encoding="utf-8")
+        return _E5_LARGE
+    return _E5_BASE
+
+
 def data_dir() -> Path:
     base = (
         os.environ.get("LOCALAPPDATA")
@@ -82,7 +125,10 @@ class LocalModelPaths:
 
     @classmethod
     def discover(
-        cls, models_dir: Path | None = None, embedding_model: str = "multilingual-e5-base"
+        cls,
+        models_dir: Path | None = None,
+        embedding_model: str = "auto",
+        data_root: Path | None = None,
     ) -> LocalModelPaths:
         root = models_dir or data_dir() / "models"
         server = root / "llama.cpp" / "llama-server.exe"
@@ -93,6 +139,8 @@ class LocalModelPaths:
             installed = shutil.which("llama-server")
             server = Path(installed) if installed else server
         diarization = root / "diarization"
+        if embedding_model == "auto":
+            embedding_model = choose_embedding(root, data_root)
         embeddings = root / "embeddings" / embedding_model
         reranker = find_snapshot(
             "models--Horizon-Labs--multilingual-reranker-small",

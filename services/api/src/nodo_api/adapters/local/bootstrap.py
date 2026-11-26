@@ -239,7 +239,9 @@ def local_adapters(settings: Settings):
 
     root = Path(settings.local_data_dir) if settings.local_data_dir else data_dir()
     root.mkdir(parents=True, exist_ok=True)
-    models = LocalModelPaths.discover(settings.local_models_dir, settings.local_embedding_model)
+    models = LocalModelPaths.discover(
+        settings.local_models_dir, settings.local_embedding_model, root
+    )
     db = LocalDatabase(root / "nodo.db")
     arbiter = GpuArbiter()
     blobs = LocalBlobStore(
@@ -297,7 +299,7 @@ def local_adapters(settings: Settings):
         SqliteAnswerStore(db),
         entity_indexer,
         "local",
-        f"{models.llm_gguf.stem if models.llm_gguf else 'none'}|{settings.local_embedding_model}",
+        f"{models.llm_gguf.stem if models.llm_gguf else 'none'}|{models.embedding_dir.name if models.embedding_dir else 'none'}",
         LOCAL_ANSWER_SIMILARITY,
     )
     meetings = SqliteMeetingRepository(db)

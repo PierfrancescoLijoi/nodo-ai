@@ -344,3 +344,23 @@ The ceiling is not the embedder. The suite asks for several segments per answer 
 reference) and for refusals on near-miss text (cross-project joins), which ranking alone cannot
 express. What would move the gates is a reasoning step over the retrieved evidence, a language
 model larger than Qwen3 4B, or a larger and re-annotated golden set; none is claimed here.
+
+### 7.5 E5 large becomes the default for new data folders
+
+End to end, real Qwen3 4B, shipped settings (reranker off), 150 wording variants, one run each:
+
+| Question language | Embedding | Citation precision | Citation recall | Answerability | Forbidden hits |
+|---|---|---:|---:|---:|---:|
+| EN | E5 base | 38.8% | 36.5% | 61.3% | 4 |
+| EN | **E5 large** | **46.1%** | **45.5%** | 58.0% | 3 |
+| PL | E5 base | 25.3% | 25.6% | 60.7% | 3 |
+| PL | **E5 large** | **40.3%** | **38.5%** | 61.3% | 3 |
+
+Precision and recall rise by 7-15 points; answerability moves by -3 to +1 point (single runs, so
+within noise). Latency is unchanged (p50 about 1 s). Gates still FAIL.
+
+`NODO_LOCAL_EMBEDDING_MODEL=auto` (default) therefore uses E5 large when it is installed, but only
+for a data folder with nothing indexed yet. The choice is pinned in `embedding-model.txt` in the
+data folder: vectors of different sizes cannot be compared, so an existing archive stays on E5 base
+until it is re-indexed on purpose (set the variable explicitly to switch). E5 large is exported
+with `tools/local-setup/export_embedding_onnx.py intfloat/multilingual-e5-large` (about 0.55 GB).
