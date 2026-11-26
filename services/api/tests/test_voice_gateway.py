@@ -138,6 +138,20 @@ def test_dictation_returns_a_final_transcript_without_answering(voice_client, au
     assert final["text"] == QUESTION
 
 
+def test_synthesis_speaks_visible_text_without_running_a_query(voice_client, auth_headers):
+    session = open_session(voice_client, auth_headers, mode="synthesis", locale="en")
+
+    with voice_client.websocket_connect(session["stream_path"]) as ws:
+        assert hello(ws, session["ticket"])["mode"] == "synthesis"
+        ws.send_text('{"type":"speak","text":"Read this answer."}')
+        events = collect(ws, "assistant.done")
+
+    assert any(isinstance(event, tuple) for event in events), (
+        "no synthesis audio reached the client"
+    )
+    assert any(event.get("type") == "assistant.text" for event in events if isinstance(event, dict))
+
+
 def test_a_ticket_works_once(voice_client, auth_headers):
     session = open_session(voice_client, auth_headers, mode="assistant", locale="en")
 

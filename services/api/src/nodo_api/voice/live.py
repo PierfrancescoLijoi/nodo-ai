@@ -451,6 +451,29 @@ class LiveSession:
             self._ephemeral("error", code="persist_failed", retryable=True)
             self._background(self.suspend("store_unavailable"))
 
+    async def speak(self, text: str) -> None:
+        if self.record.mode != "synthesis":
+            raise ProtocolError("speak.wrong_mode")
+        assistant = self._deps.assistant
+        if assistant is None:
+            self.emit("error", code="assistant.unavailable", retryable=False)
+            return
+        await self.barge_in()
+        self._turn += 1
+        self._turn_task = asyncio.create_task(self._run_speech(assistant, text, self._turn))
+
+    async def _run_speech(self, assistant: Assistant, text: str, turn: int) -> None:
+        try:
+            await assistant.speak(
+                self.record.locale, text, turn, self.emit_reliable, self._send_audio
+            )
+        except asyncio.CancelledError:
+            await self.emit_reliable("assistant.cancelled", turn=turn)
+            raise
+        except Exception:
+            logger.exception("voice_synthesis_failed session=%s", self.record.session_id)
+            self._ephemeral("error", code="synthesis_failed", retryable=True)
+
     async def _send_audio(self, turn: int, index: int, pcm: bytes) -> None:
         data = encode_audio_out(turn, index, pcm)
         while self._conn is not None and not self._conn.send_bytes(data):

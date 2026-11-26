@@ -147,6 +147,8 @@ const it = {
     dictate: 'Tieni premuto per dettare',
     dictating: 'Rilascia per terminare',
     dictationUnavailable: 'La dettatura locale non è disponibile. Installa il modello vocale e riprova.',
+    speak: 'Leggi la risposta',
+    stopSpeaking: 'Interrompi lettura',
     thinking: 'Sto cercando nei tuoi meeting',
     sources: 'Fonti',
     nodeContext: 'Contesto del nodo',

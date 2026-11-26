@@ -38,6 +38,7 @@ from nodo_api.voice.protocol import (
     ProtocolError,
     PttEnd,
     PttStart,
+    Speak,
     parse_audio_frame,
     parse_client_message,
     server_event,
@@ -53,7 +54,7 @@ MAX_PENDING_AUDIO = 64  # chunks of 40 ms or more waiting for a slow listener
 
 
 class SessionCreate(FrozenModel):
-    mode: Literal["meeting", "assistant", "dictation"]
+    mode: Literal["meeting", "assistant", "dictation", "synthesis"]
     locale: Locale
     meeting_id: Annotated[str | None, Field(max_length=64)] = None
 
@@ -93,7 +94,9 @@ async def open_session(payload: SessionCreate, actor: PrincipalDep, request: Req
         if meeting.state is not MeetingState.UPLOADING:
             raise ConflictError
     elif payload.meeting_id is not None:
-        raise ValidationFailed("An assistant or dictation session does not record into a meeting")
+        raise ValidationFailed(
+            "An assistant, dictation, or synthesis session does not record into a meeting"
+        )
     record = SessionRecord(
         new_session_id(),
         actor.workspace_id,
@@ -296,6 +299,8 @@ async def _pump(ws: WebSocket, live: LiveSession, runtime: VoiceRuntime) -> None
                 await live.ptt_end()
             case BargeIn():
                 await live.barge_in()
+            case Speak():
+                await live.speak(control.text)
             case End():
                 await live.end()
                 return

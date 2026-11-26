@@ -97,6 +97,21 @@ describe('VoiceSessionClient', () => {
     expect(audio).toBeGreaterThan(start);
   });
 
+  it('queues text for synthesis until the authenticated socket is ready', () => {
+    const socket = new FakeSocket();
+    const client = new VoiceSessionClient(SESSION, vi.fn(), {
+      createSocket: () => socket,
+      refreshTicket: vi.fn(),
+    });
+
+    client.speak('Visible answer');
+    client.connect();
+    socket.open();
+    socket.json({ type: 'session.ready', audio_resume_offset_ms: 0 });
+
+    expect(controls(socket)).toContainEqual({ type: 'speak', text: 'Visible answer' });
+  });
+
   it('gets a fresh ticket and replays only audio after the server durable offset', async () => {
     const first = new FakeSocket();
     const second = new FakeSocket();

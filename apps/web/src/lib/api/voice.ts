@@ -17,6 +17,7 @@ const ticketOutput = z.object({ ticket: z.string().min(20) });
 export interface VoiceApi {
   openMeeting(meetingId: string, locale: Locale): Promise<VoiceSession>;
   openDictation(locale: Locale): Promise<VoiceSession>;
+  openSynthesis(locale: Locale): Promise<VoiceSession>;
   refreshTicket(sessionId: string): Promise<string>;
 }
 
@@ -33,7 +34,7 @@ function streamUrl(baseUrl: string, path: string): string {
 }
 
 export function createVoiceApi(client: ApiClient, baseUrl: string): VoiceApi {
-  const open = async (mode: 'meeting' | 'dictation', locale: Locale, meetingId?: string) => {
+  const open = async (mode: 'meeting' | 'dictation' | 'synthesis', locale: Locale, meetingId?: string) => {
     const result = parse(
       sessionOutput,
       await client.post('/v1/voice/sessions', {
@@ -57,6 +58,9 @@ export function createVoiceApi(client: ApiClient, baseUrl: string): VoiceApi {
     },
     async openDictation(locale) {
       return open('dictation', locale);
+    },
+    async openSynthesis(locale) {
+      return open('synthesis', locale);
     },
 
     async refreshTicket(sessionId) {

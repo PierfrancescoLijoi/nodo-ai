@@ -156,6 +156,8 @@ const pl = {
     dictate: 'Przytrzymaj, aby dyktować',
     dictating: 'Zwolnij, aby zakończyć',
     dictationUnavailable: 'Lokalne dyktowanie jest niedostępne. Zainstaluj model mowy i spróbuj ponownie.',
+    speak: 'Odczytaj odpowiedź',
+    stopSpeaking: 'Zatrzymaj odczyt',
     thinking: 'Przeszukuję Twoje spotkania',
     sources: 'Źródła',
     nodeContext: 'Kontekst węzła',

@@ -48,6 +48,7 @@ interface Dependencies {
   now?: () => number;
   onStatus?: (status: 'connecting' | 'connected' | 'reconnecting' | 'closed') => void;
   onError?: (error: Error) => void;
+  onAudio?: (data: ArrayBuffer) => void;
 }
 
 function encodeFrame(offsetMs: number, pcm: Int16Array): ArrayBuffer {
@@ -70,6 +71,7 @@ export class VoiceSessionClient {
   private heartbeatTimer?: number;
   private disconnectedAt?: number;
   private pendingPttStart?: number;
+  private pendingSpeak?: string;
   private ticket: string;
 
   private readonly createSocket: (url: string) => SocketLike;
@@ -128,6 +130,16 @@ export class VoiceSessionClient {
     this.sendControl({ type: 'ptt.end' });
   }
 
+  speak(text: string) {
+    this.pendingSpeak = text;
+    if (this.ready) this.flushSpeak();
+  }
+
+  stopSpeaking() {
+    this.pendingSpeak = undefined;
+    this.sendControl({ type: 'barge_in' });
+  }
+
   end() {
     if (this.stopped) return;
     this.stopped = true;
@@ -157,7 +169,12 @@ export class VoiceSessionClient {
   }
 
   private receive(socket: SocketLike, message: VoiceSocketEvent) {
-    if (socket !== this.socket || typeof message.data !== 'string') return;
+    if (socket !== this.socket) return;
+    if (message.data instanceof ArrayBuffer) {
+      this.deps.onAudio?.(message.data);
+      return;
+    }
+    if (typeof message.data !== 'string') return;
     try {
       const event = JSON.parse(message.data) as VoiceEvent;
       if (typeof event.type !== 'string') throw new Error('Invalid voice event');
@@ -205,6 +222,7 @@ export class VoiceSessionClient {
     this.disconnectedAt = undefined;
     this.deps.onStatus?.('connected');
     this.flushPushToTalkStart();
+    this.flushSpeak();
     for (const frame of this.frames) this.socket?.send(frame.data);
     if (this.heartbeatTimer !== undefined) this.stopHeartbeat(this.heartbeatTimer);
     this.heartbeatTimer = this.startHeartbeat(
@@ -264,6 +282,13 @@ export class VoiceSessionClient {
     const offsetMs = this.pendingPttStart;
     this.pendingPttStart = undefined;
     this.sendControl({ type: 'ptt.start', offset_ms: offsetMs });
+  }
+
+  private flushSpeak() {
+    if (!this.pendingSpeak) return;
+    const text = this.pendingSpeak;
+    this.pendingSpeak = undefined;
+    this.sendControl({ type: 'speak', text });
   }
 
   private clearTimers() {

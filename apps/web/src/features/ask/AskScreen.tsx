@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpRight, Microphone, PaperPlaneTilt, Warning } from '@phosphor-icons/react';
+import { ArrowUpRight, Microphone, PaperPlaneTilt, SpeakerHigh, Stop, Warning } from '@phosphor-icons/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -17,6 +17,7 @@ import { useRepository, useVoiceApi } from '@/providers/data';
 import styles from '../features.module.css';
 import { BrowserPcmCapture } from '../capture/pcm';
 import { VoiceSessionClient, type VoiceEvent } from '../capture/voiceClient';
+import { PcmPlayback } from './pcmPlayback';
 import { meetingHref } from '../meetings/MeetingRow';
 
 interface Turn {
@@ -49,10 +50,14 @@ function AnswerCard({
   turn,
   titles,
   onRetry,
+  onSpeak,
+  speaking,
 }: {
   turn: Turn;
   titles: Map<string, string>;
   onRetry: () => void;
+  onSpeak: () => void;
+  speaking: boolean;
 }) {
   const { t } = useTranslation();
   const { answer } = turn;
@@ -77,6 +82,9 @@ function AnswerCard({
           ) : null}
           {answer.degraded ? <Tag label={t('web.degraded')} tone="warning" /> : null}
           <p>{unanswerable ? t('ask.unanswerableBody') : answer.text}</p>
+          <Button variant="secondary" icon={speaking ? Stop : SpeakerHigh} onClick={onSpeak}>
+            {speaking ? t('ask.stopSpeaking') : t('ask.speak')}
+          </Button>
           {answer.citations.length > 0 ? (
             <div className={styles.stack}>
               <p className={styles.label}>{t('ask.sources')}</p>
@@ -107,6 +115,9 @@ function Conversation() {
   const dictationHeld = useRef(false);
   const dictationClient = useRef<VoiceSessionClient | undefined>(undefined);
   const dictationCapture = useRef<BrowserPcmCapture | undefined>(undefined);
+  const speechClient = useRef<VoiceSessionClient | undefined>(undefined);
+  const playback = useRef(new PcmPlayback());
+  const [speakingId, setSpeakingId] = useState<number>();
   const nodeLabel = searchParams.get('node');
   const meetingIds = (searchParams.get('meetings') ?? '').split(',').filter(Boolean);
 
@@ -183,6 +194,38 @@ function Conversation() {
     }
   };
 
+  const stopSpeaking = useCallback(() => {
+    speechClient.current?.stopSpeaking();
+    speechClient.current?.end();
+    speechClient.current = undefined;
+    playback.current.close();
+    setSpeakingId(undefined);
+  }, []);
+
+  const speakAnswer = async (id: number, value: string) => {
+    if (speakingId === id) {
+      stopSpeaking();
+      return;
+    }
+    stopSpeaking();
+    try {
+      const session = await voice.openSynthesis(locale);
+      const client = new VoiceSessionClient(session, (event) => {
+        if (event.type === 'assistant.done' || event.type === 'assistant.cancelled') stopSpeaking();
+      }, {
+        refreshTicket: voice.refreshTicket,
+        onAudio: (frame) => playback.current.play(frame),
+        onError: stopSpeaking,
+      });
+      speechClient.current = client;
+      client.speak(value);
+      client.connect();
+      setSpeakingId(id);
+    } catch {
+      stopSpeaking();
+    }
+  };
+
   useEffect(() => {
     const cancel = (event: KeyboardEvent) => {
       if (event.key === 'Escape') finishDictation();
@@ -191,8 +234,9 @@ function Conversation() {
     return () => {
       window.removeEventListener('keydown', cancel);
       finishDictation();
+      stopSpeaking();
     };
-  }, [finishDictation]);
+  }, [finishDictation, stopSpeaking]);
 
   return (
     <>
@@ -245,7 +289,14 @@ function Conversation() {
       ) : null}
       <div className={styles.stack} aria-live="polite">
         {turns.map((turn) => (
-          <AnswerCard key={turn.id} turn={turn} titles={titles} onRetry={() => run(turn.id, turn.question)} />
+          <AnswerCard
+            key={turn.id}
+            turn={turn}
+            titles={titles}
+            onRetry={() => run(turn.id, turn.question)}
+            onSpeak={() => void speakAnswer(turn.id, turn.answer?.text ?? '')}
+            speaking={speakingId === turn.id}
+          />
         ))}
       </div>
     </>

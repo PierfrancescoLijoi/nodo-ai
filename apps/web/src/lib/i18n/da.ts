@@ -146,6 +146,8 @@ const da = {
     dictate: 'Hold nede for at diktere',
     dictating: 'Slip for at afslutte',
     dictationUnavailable: 'Lokal diktering er ikke tilgængelig. Installér talemodellen, og prøv igen.',
+    speak: 'Læs svaret op',
+    stopSpeaking: 'Stop oplæsning',
     thinking: 'Jeg gennemsøger dine møder',
     sources: 'Kilder',
     nodeContext: 'Nodekontekst',

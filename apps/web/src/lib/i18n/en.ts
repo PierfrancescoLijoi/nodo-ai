@@ -148,6 +148,8 @@ const en = {
     dictate: 'Hold to dictate',
     dictating: 'Release to finish',
     dictationUnavailable: 'Local dictation is unavailable. Install the speech model and try again.',
+    speak: 'Speak answer',
+    stopSpeaking: 'Stop speaking',
     thinking: 'Looking through your meetings',
     sources: 'Sources',
     nodeContext: 'Node context',
