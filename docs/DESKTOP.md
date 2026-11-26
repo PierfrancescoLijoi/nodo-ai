@@ -3,9 +3,9 @@
 The app runs in its own window on Windows. It works in one of two ways, chosen on first start and changeable later:
 
 - **On this computer.** Speech, search, graph and answers are produced by models on your machine. Nothing leaves it. Needs a GPU for comfortable speed (an NVIDIA card with 6 GB is enough; the CPU works but is slow).
-- **Azure.** The app talks to your deployed NODO API (see [AZURE-ARCHITECTURE.md](AZURE-ARCHITECTURE.md)). Needs the deployment and an Entra sign in.
+- **Azure.** The app talks to a NODO API you deployed (see [AZURE-ARCHITECTURE.md](AZURE-ARCHITECTURE.md)). Needs the deployment and an Entra sign in. This mode has not been tried against a live subscription.
 
-You can start local and connect Azure later: **Settings, Copy to Azure** sends your meetings to the cloud (see [ADR-015](adr/015-sync-local-to-azure.md)).
+You can start local and connect Azure later: **Settings, Copy to Azure** sends your meetings one way to the cloud (see [ADR-015](adr/015-sync-local-to-azure.md)). Documents, hierarchy, Pages and review state are not copied yet.
 
 ## Install and start (developer setup)
 

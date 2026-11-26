@@ -1,18 +1,18 @@
 <div align="center">
 
-# NODO AI
+<img src="docs/images/nodo-logo.svg" alt="NODO AI" width="420">
 
-**A private, evidence-grounded memory for meetings.**
+**A private, local-first memory for your meetings and documents.**
 
-NODO records or imports meetings, produces speaker-aware transcripts, extracts decisions and
-actions, builds a temporal knowledge graph, and answers questions with the exact sentences used as
-evidence.
+NODO records or imports meetings and documents, produces speaker-aware transcripts, extracts
+decisions and actions, builds a temporal knowledge graph, and answers questions with the exact
+sentences it used as evidence. On your computer, nothing leaves the machine.
 
 <p>
   <img src="https://img.shields.io/badge/privacy-first-0A6F64?style=flat" alt="Privacy first">
   <img src="https://img.shields.io/badge/answers-source_cited-0A6F64?style=flat" alt="Source-cited answers">
   <img src="https://img.shields.io/badge/voice-real--time-0078D4?style=flat" alt="Real-time voice">
-  <img src="https://img.shields.io/badge/runtime-local_%7C_Azure-52606F?style=flat" alt="Local or Azure">
+  <img src="https://img.shields.io/badge/runtime-local--first-52606F?style=flat" alt="Local-first runtime">
   <img src="https://img.shields.io/badge/languages-EN_%7C_PL_%7C_IT_%7C_DA-52606F?style=flat" alt="English, Polish, Italian and Danish">
 </p>
 
@@ -24,9 +24,10 @@ evidence.
   <img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT license">
 </p>
 
-[Product](#product-capabilities) · [Architecture](#architecture) · [Azure](#azure-architecture) ·
+[Product](#product-capabilities) · [Architecture](#architecture) · [Local engine](#local-architecture) ·
 [Real-time voice](#real-time-voice) · [Interface](#web-interface) · [Run locally](#quick-start) ·
-[Tests](#quality-and-verification) · [Documentation](#documentation-map)
+[Quality](#quality-and-verification) · [Status](#current-status) · [Azure](#azure-architecture) ·
+[Documentation](#documentation-map)
 
 </div>
 
@@ -37,16 +38,18 @@ evidence.
 
 ## Product capabilities
 
-| Capability        | What NODO does                                                                                                                                              |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Recording         | Captures a meeting from the browser, streams PCM audio in real time when the voice gateway is available, and falls back to encrypted upload when it is not. |
-| Transcription     | Produces timestamped phrases with speaker labels. Owners may name speakers; NODO does not perform biometric speaker recognition.                            |
-| Understanding     | Extracts summaries, topics, people, decisions, actions, owners, dates and evidence links.                                                                   |
-| Grounded answers  | Combines ACL-filtered lexical, vector and graph retrieval across meetings and imported Sources. An answer is returned only with verifiable Fragment citations. |
-| Human review      | Keeps inferred relationships and decisions as proposals until a person approves or rejects them.                                                            |
-| Temporal graph    | Represents meetings, people, topics, projects, decisions and actions, including replacement and contradiction relationships.                                |
-| Data ownership    | Supports export, retention policies, complete meeting deletion and rebuildable search/graph projections.                                                    |
-| Deployment choice | Runs as a private Windows/local engine or as a multi-service Azure deployment behind Entra authentication.                                                  |
+| Capability       | What NODO does                                                                                                                                                 |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recording        | Captures a meeting from the browser, streams PCM audio in real time when the voice gateway is available, and falls back to an upload when it is not.           |
+| Documents        | Imports PDF, DOCX, PPTX, XLSX, HTML, Markdown, text, audio and video, also from watched folders. Every passage stays citable at its page, slide or timestamp.  |
+| Transcription    | Produces timestamped phrases with speaker labels. Owners may name speakers; NODO does not perform biometric speaker recognition.                               |
+| Understanding    | Extracts summaries, topics, people, decisions, actions, owners, dates and evidence links.                                                                      |
+| Grounded answers | Combines ACL-filtered lexical, vector and graph retrieval across meetings and imported Sources. An answer is returned only with verifiable Fragment citations. |
+| Human review     | Keeps inferred relationships and decisions as proposals until a person approves or rejects them.                                                               |
+| Temporal graph   | Represents meetings, people, topics, projects, decisions and actions, including replacement and contradiction relationships.                                   |
+| Data ownership   | Supports complete export, backup and restore of the data folder, retention policies, complete deletion and rebuildable search/graph projections.               |
+| Integration      | Exposes a loopback-only HTTP API and a read-only MCP server (`POST /mcp`) protected by the same per-launch secret.                                             |
+| Deployment       | Ships as a local Windows engine with a one-click installer. An Azure deployment is defined in Terraform; see [Current status](#current-status) for its limits. |
 
 <p align="center">
   <img src="docs/images/ui/home.png" alt="NODO home page" width="49%">
@@ -284,20 +287,34 @@ Implementation details: [real-time architecture](docs/VOICE-REALTIME-ARCHITECTUR
 
 ## Local architecture
 
-The local engine exposes the same `/v1` API but binds to loopback and replaces Azure adapters:
+The local engine is the primary product. It exposes the same `/v1` API as the cloud design but binds
+to loopback and replaces every Azure adapter:
 
-| Cloud dependency      | Local implementation                                                               |
-| --------------------- | ---------------------------------------------------------------------------------- |
-| PostgreSQL / pgvector | SQLite with vector and full-text support                                           |
-| Blob Storage          | Files under the NODO local data directory                                          |
-| Service Bus           | Durable local job queue                                                            |
-| Azure Speech          | Whisper-based transcription and local speaker separation                           |
-| Azure OpenAI          | llama.cpp-hosted Qwen model                                                        |
-| Azure AI Search       | SQLite lexical/vector retrieval with optional local reranking                      |
-| Entra                 | Per-launch secret passed in the URL fragment and retained only for the browser tab |
+| Cloud dependency      | Local implementation                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| PostgreSQL / pgvector | SQLite with FTS5 full-text search and vector BLOBs                                                        |
+| Blob Storage          | Files under the NODO local data directory                                                                 |
+| Service Bus           | Durable local job queue                                                                                   |
+| Azure Speech          | faster-whisper (medium) transcription and ERes2Net speaker separation                                     |
+| Azure OpenAI          | Qwen3 4B served by llama.cpp; multilingual E5 embeddings (large when the hardware allows, base otherwise) |
+| Azure AI Search       | SQLite lexical and vector retrieval with an optional, off-by-default small reranker                       |
+| Entra                 | Per-launch secret passed in the URL fragment and retained only for the browser tab                        |
 
-The local service rejects non-loopback hosts and protects against DNS rebinding. Model installation,
-hardware guidance and data locations are documented in [docs/DESKTOP.md](docs/DESKTOP.md).
+Things worth knowing:
+
+- **Safe by default.** The service rejects non-loopback hosts and protects against DNS rebinding.
+- **Models are opt-in.** The Models screen lists size, licence, checksum, hardware fit and state.
+  Each download needs your confirmation and is verified against its SHA-256.
+- **The embedding model is pinned per data folder** (`embedding-model.txt`), so vectors created by
+  one model are never compared with another model's.
+- **Voice output is optional.** Local text-to-speech uses the Flock Speech model and speaks English
+  only.
+- **Backup and restore** cover the whole data folder; the export includes everything NODO stores.
+- **One-click installer.** `tools/package` builds `NODO-Setup.exe` (IExpress and PowerShell, no
+  administrator rights). It is verified on the development machine only; see
+  [docs/DESKTOP.md](docs/DESKTOP.md) for what is and is not tested.
+
+Model installation, hardware guidance and data locations are in [docs/DESKTOP.md](docs/DESKTOP.md).
 
 ## Web interface
 
@@ -314,9 +331,13 @@ use.
 | Meetings         | Lists meetings and filters by title, participant or topic with case/accent normalization.                                                                                                 |
 | Meeting detail   | Shows summary, decisions, actions, participants, speaker naming controls and timestamped transcript segments. Citation links scroll to the supporting segment.                            |
 | Ask              | Accepts a question and displays answerability, degraded state, citations and links back to exact transcript evidence.                                                                     |
+| Brain            | A dark, spatial view of the knowledge graph for exploration. The list in Graph remains the accessible primary view.                                                                       |
+| Wiki             | Compiled Concept, Source-summary and saved-answer Pages with per-claim citations, held as proposals until you approve or edit them.                                                       |
+| Health           | Reports orphan Concepts, uncited claims, duplicates, contradictions and Pages made stale by changed or deleted Sources.                                                                   |
+| Models           | Model catalog with sizes, checksums and hardware fit; each install needs confirmation. Also hosts first-run guidance.                                                                     |
 | Graph            | Provides an accessible list as the primary representation and an interactive visual map as a secondary representation.                                                                    |
 | Review           | Presents proposed graph relationships and decisions with evidence, confidence and approve/reject actions.                                                                                 |
-| Settings         | Controls language, theme, export and Azure sync; reports local engine capabilities and supports index verification/repair.                                                                |
+| Settings         | Controls language, theme, export, backup and optional one-way copy of meetings to Azure; reports local engine capabilities and supports index verification/repair.                        |
 | Sign-in callback | Completes OIDC authorization-code + PKCE without exposing tokens in page content or logs.                                                                                                 |
 
 <table>
@@ -399,7 +420,17 @@ docs/                          Architecture, operations, compliance, performance
 - Docker Desktop for optional integration dependencies
 - NVIDIA GPU with approximately 6 GB VRAM recommended for comfortable local-model performance
 
-### Local desktop engine
+### Windows installer
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\package\build_installer.ps1
+```
+
+This builds `dist\NODO-Setup.exe` (about 140 MB), which installs for the current user without
+administrator rights. Models are downloaded afterwards from the Models screen. The executable is
+unsigned, so SmartScreen warns on first run.
+
+### Local desktop engine from source
 
 ```powershell
 # API and local model dependencies
@@ -562,37 +593,54 @@ NODO AI is open source under the [MIT License](LICENSE). Copyright 2026 Pierfran
 
 ## Documentation map
 
-| Topic                                                | Document                                                                   |
-| ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| Solution architecture and quality attributes         | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                               |
-| C4 system, container, deployment and voice views     | [docs/architecture](docs/architecture)                                     |
-| Azure topology and verification status               | [docs/AZURE-ARCHITECTURE.md](docs/AZURE-ARCHITECTURE.md)                   |
-| How to draw the architecture diagrams in draw.io     | [docs/DIAGRAMS.md](docs/DIAGRAMS.md)                                       |
-| Verifying the Terraform before it meets a real account | [docs/IAC-CONFIDENCE.md](docs/IAC-CONFIDENCE.md)                         |
-| Real-time voice design and measured gateway behavior | [docs/VOICE-REALTIME-ARCHITECTURE.md](docs/VOICE-REALTIME-ARCHITECTURE.md) |
-| API contract                                         | [docs/API-V1.md](docs/API-V1.md)                                           |
-| Desktop installation and local data                  | [docs/DESKTOP.md](docs/DESKTOP.md)                                         |
-| First Azure deployment                               | [docs/FIRST-DEPLOY.md](docs/FIRST-DEPLOY.md)                               |
-| Operations and incident response                     | [docs/RUNBOOKS.md](docs/RUNBOOKS.md)                                       |
-| Security, GDPR and AI transparency controls          | [docs/COMPLIANCE.md](docs/COMPLIANCE.md)                                   |
-| Capacity assumptions                                 | [docs/CAPACITY-MODEL.md](docs/CAPACITY-MODEL.md)                           |
-| Design system and accessibility                      | [docs/DESIGN.md](docs/DESIGN.md)                                           |
-| Architectural decisions                              | [docs/adr](docs/adr)                                                       |
+| Topic                                                  | Document                                                                   |
+| ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| Solution architecture and quality attributes           | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                               |
+| C4 system, container, deployment and voice views       | [docs/architecture](docs/architecture)                                     |
+| Azure topology and verification status                 | [docs/AZURE-ARCHITECTURE.md](docs/AZURE-ARCHITECTURE.md)                   |
+| How to draw the architecture diagrams in draw.io       | [docs/DIAGRAMS.md](docs/DIAGRAMS.md)                                       |
+| Verifying the Terraform before it meets a real account | [docs/IAC-CONFIDENCE.md](docs/IAC-CONFIDENCE.md)                           |
+| Real-time voice design and measured gateway behavior   | [docs/VOICE-REALTIME-ARCHITECTURE.md](docs/VOICE-REALTIME-ARCHITECTURE.md) |
+| API contract                                           | [docs/API-V1.md](docs/API-V1.md)                                           |
+| Desktop installation and local data                    | [docs/DESKTOP.md](docs/DESKTOP.md)                                         |
+| First Azure deployment                                 | [docs/FIRST-DEPLOY.md](docs/FIRST-DEPLOY.md)                               |
+| Operations and incident response                       | [docs/RUNBOOKS.md](docs/RUNBOOKS.md)                                       |
+| Security, GDPR and AI transparency controls            | [docs/COMPLIANCE.md](docs/COMPLIANCE.md)                                   |
+| Capacity assumptions                                   | [docs/CAPACITY-MODEL.md](docs/CAPACITY-MODEL.md)                           |
+| Design system and accessibility                        | [docs/DESIGN.md](docs/DESIGN.md)                                           |
+| Architectural decisions                                | [docs/adr](docs/adr)                                                       |
 
 ## Current status
 
-- The knowledge-base direction is documented in [PRODUCT.md](docs/product/PRODUCT.md) and the [design specification](docs/superpowers/specs/2026-11-12-knowledge-base-design.md).
-- Local meeting capture, ingestion, grounded query, graph, review, export and deletion are
-  implemented and exercised end to end.
-- Knowledge base Phase 2 (documents) is closed on the local engine: import of documents, audio and
-  watched folders through `/v1/sources`, with measured speed and extraction quality in
-  [PERFORMANCE.md](docs/PERFORMANCE.md); there is no Library screen yet.
-- The browser real-time client and backend voice gateway are implemented, including durable ACK,
-  cross-replica replay, bounded reconnect buffering and fallback upload.
-- Azure infrastructure, policies and application images are represented in Terraform and automated
-  tests.
-- A live Azure subscription certification, provider latency run, production load/soak test and
-  disaster-recovery rehearsal are still required before claiming production readiness.
-Phase 3 adds local concept hierarchies, nested source collections and document outline APIs.
-Hierarchy links are evidence-backed proposals with cycle and six-level depth guards; Azure parity
-remains planned for Phase 10.
+What is built and exercised on the **local engine**:
+
+- Meeting capture (real-time or upload), ingestion, speaker-aware transcripts, grounded answers,
+  graph, review inbox, export and deletion.
+- Knowledge base: document and audio import through `/v1/sources` and watched folders, source
+  collections, concept hierarchies, wiki Pages with human edits, health checks and an Obsidian
+  export.
+- Real-time voice with durable acknowledgement, replay and fallback upload.
+- Models catalog, first-run guidance, backup and restore, complete export, loopback HTTP API and a
+  read-only MCP server.
+- Windows installer with an offline bundle.
+
+What is **not** met or not done, stated plainly:
+
+- **Retrieval quality gates fail.** Answerability, citation precision and citation recall are below
+  the 95% / 95% / 90% targets. Multilingual E5 large improved citation precision and recall by
+  roughly 7 to 15 points on English and Polish; BGE-M3 and a BGE reranker gave no further gain.
+  Closing the rest needs a stronger language model, an explicit reasoning step or a larger
+  re-annotated golden set. Numbers are in
+  [LOCAL-PERFORMANCE-SCORECARD.md](docs/LOCAL-PERFORMANCE-SCORECARD.md).
+- **Speaker attribution** is about 78 to 80% accurate against a 90% gate, and entity recall under
+  noise or overlapping speech is weak.
+- **Azure is design and infrastructure, not a certified product.** Terraform, policies and
+  tests exist, and meetings can be copied one way to Azure. Documents, hierarchy, Pages and review
+  state do not sync yet, and nothing has been run against a live subscription.
+- **No Library screen** yet; documents are imported through the API and watched folders.
+- The installer has not been tried on a clean machine, and Whisper needs the CUDA 12 runtime, which
+  is not bundled.
+
+The knowledge-base direction is in [PRODUCT.md](docs/product/PRODUCT.md) and the
+[design specification](docs/superpowers/specs/2026-11-12-knowledge-base-design.md); requirement
+status is in [REQUIREMENTS.md](docs/product/REQUIREMENTS.md).

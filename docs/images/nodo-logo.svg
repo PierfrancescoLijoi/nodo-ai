@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200" width="600" height="200" role="img" aria-labelledby="t d">
+  <title id="t">NODO AI</title>
+  <desc id="d">Four connected nodes forming the letter N, next to the NODO wordmark.</desc>
+  <style>
+    :root { --ink: #0b1526; --muted: #52606f; --accent: #0a6f64; }
+    @media (prefers-color-scheme: dark) {
+      :root { --ink: #e8f1fb; --muted: #9fb0c3; --accent: #4fd1c0; }
+    }
+    .ink { stroke: var(--ink); }
+    .dot { fill: var(--accent); }
+    .tag { fill: var(--muted); font: 500 17px 'Segoe UI', system-ui, -apple-system, Helvetica, Arial, sans-serif; letter-spacing: 0.4px; }
+  </style>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#12233f"/>
+      <stop offset="1" stop-color="#080f1d"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#4fd1c0"/>
+      <stop offset="1" stop-color="#7be3d6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4fd1c0" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#4fd1c0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- mark -->
+  <g transform="translate(20 20)">
+    <rect width="160" height="160" rx="38" fill="url(#bg)"/>
+    <circle cx="80" cy="80" r="70" fill="url(#glow)"/>
+    <path d="M50 112V50L110 112V50" fill="none" stroke="url(#edge)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <g fill="#080f1d" stroke="#4fd1c0" stroke-width="6">
+      <circle cx="50" cy="112" r="11"/>
+      <circle cx="50" cy="50" r="11"/>
+      <circle cx="110" cy="112" r="11"/>
+      <circle cx="110" cy="50" r="11"/>
+    </g>
+    <g fill="#4fd1c0">
+      <circle cx="50" cy="112" r="4"/>
+      <circle cx="50" cy="50" r="4"/>
+      <circle cx="110" cy="112" r="4"/>
+      <circle cx="110" cy="50" r="4"/>
+    </g>
+  </g>
+
+  <!-- wordmark, drawn as strokes so it renders the same everywhere -->
+  <g class="ink" fill="none" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M232 128V64L280 128V64"/>
+    <circle cx="332" cy="96" r="32"/>
+    <path d="M392 64V128H406A32 32 0 0 0 406 64Z"/>
+    <circle cx="492" cy="96" r="32"/>
+  </g>
+  <circle class="dot" cx="332" cy="96" r="8"/>
+  <circle class="dot" cx="492" cy="96" r="8"/>
+
+  <text class="tag" x="232" y="168">Private, evidence-grounded memory for meetings</text>
+</svg>
