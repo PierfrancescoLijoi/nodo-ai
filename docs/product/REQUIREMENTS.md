@@ -308,3 +308,10 @@ Quality gates in `docs/LOCAL-PERFORMANCE-SCORECARD.md` that still FAIL (speaker 
 vs 90%; answerability 68-82% vs 95%; citation recall 42-53% vs 90%) depend on the local models
 (ERes2Net, Qwen3 4B) and on retrieval tuning; they are not claimed as met. Voice and model-install
 timings are NOT_MEASURED.
+
+## Status after Phase 9 (partial)
+
+| Requirement | Status | Limit |
+|---|---|---|
+| FR-26 first-run model guidance | Implemented | Home shows a notice that links to the Models screen while any local model part is missing. |
+| FR-26 one-click installer | **Not built** | Needs an embedded Python/CUDA bundle and an installer toolchain (PyInstaller, Inno Setup/MSIX) that cannot be verified on a clean Windows machine from this repository's CI. Today's path is the developer setup in `docs/DESKTOP.md` plus `NODO.cmd`. |

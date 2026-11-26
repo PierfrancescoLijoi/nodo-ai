@@ -64,6 +64,11 @@ const da = {
     error: 'Login mislykkedes. Prøv igen.',
   },
   home: {
+    firstRun: {
+      title: 'Vælg dine modeller',
+      body: 'Der mangler {{count}} modeldel, så nogle funktioner kan endnu ikke virke. Vælg et sæt, der passer til denne computer; intet hentes, før du bekræfter.',
+      cta: 'Åbn modeller',
+    },
     title: 'Din mødehukommelse',
     record: {
       title: 'Optag et møde',

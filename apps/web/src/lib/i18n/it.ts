@@ -65,6 +65,11 @@ const it = {
     error: 'Accesso non riuscito. Riprova.',
   },
   home: {
+    firstRun: {
+      title: 'Scegli i tuoi modelli',
+      body: 'Manca {{count}} componente di modello, quindi alcune funzioni non possono ancora funzionare. Scegli un set adatto a questo computer: nulla viene scaricato senza la tua conferma.',
+      cta: 'Apri i modelli',
+    },
     title: 'La memoria dei tuoi meeting',
     record: {
       title: 'Registra un meeting',
