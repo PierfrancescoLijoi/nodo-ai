@@ -279,6 +279,16 @@
   border-radius: 12px;
   background: #080f1d;
   color: #e5edf6;
+  /* The brain view is always dark, so shared components inside it need dark tokens. */
+  --surface: #121921;
+  --surface-raised: #19222d;
+  --border: #26323f;
+  --text: #e9eef3;
+  --text-muted: #9aa8b7;
+  --accent: #4fd1c0;
+  --accent-text: #04211d;
+  --accent-soft: #12332f;
+  color-scheme: dark;
 }
 
 .brainToolbar {
