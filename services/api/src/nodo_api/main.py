@@ -250,6 +250,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.fragment_index,
         a.fragments,
         a.section_summary_service,
+        settings.answer_evidence_limit,
     )
     source_service = (
         SourceService(

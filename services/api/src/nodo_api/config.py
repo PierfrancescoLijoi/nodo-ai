@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     local_warm_up: bool = False  # load the search model at start instead of at the first use
     local_search_margin: float = Field(default=0.035, ge=0.0, le=0.5)
     # Experimental until the four-language golden set passes without precision/ACL regressions.
+    # Folder name under models/embeddings: multilingual-e5-base (CPU default) or -large (stronger
+    # cross-language ranking, about four times the size).
+    local_embedding_model: str = Field(
+        default="multilingual-e5-base", pattern=r"^multilingual-e5-(small|base|large)$"
+    )
+    answer_evidence_limit: int = Field(default=20, ge=1, le=50)
     local_reranker_enabled: bool = False
     local_rerank_candidates: int = Field(default=20, ge=2, le=50)
     local_import_max_bytes: int = Field(default=200 * 1024 * 1024, ge=1)

@@ -314,4 +314,4 @@ timings are NOT_MEASURED.
 | Requirement | Status | Limit |
 |---|---|---|
 | FR-26 first-run model guidance | Implemented | Home shows a notice that links to the Models screen while any local model part is missing. |
-| FR-26 one-click installer | **Not built** | Needs an embedded Python/CUDA bundle and an installer toolchain (PyInstaller, Inno Setup/MSIX) that cannot be verified on a clean Windows machine from this repository's CI. Today's path is the developer setup in `docs/DESKTOP.md` plus `NODO.cmd`. |
+| FR-26 one-click installer | Implemented, partly verified | `tools/package/build_installer.ps1` builds `NODO-Setup.exe`; install, launch and uninstall verified in a scratch profile on the development machine. Not verified on a clean Windows machine; unsigned; models, llama.cpp, ffmpeg and CUDA libraries are not bundled. See `docs/DESKTOP.md`. |
