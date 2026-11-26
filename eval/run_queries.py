@@ -264,6 +264,7 @@ def main() -> int:
             settings.graph_node_limit,
             adapters.entity_indexer,
             adapters.answers,
+            max_evidence=settings.answer_evidence_limit,
         )
         started = time.perf_counter()
         warmup = run_pass(

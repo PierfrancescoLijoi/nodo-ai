@@ -283,3 +283,43 @@ missing soak/fault evidence. Latency optimization must not take priority over th
 The next publishable milestone is not a faster synthetic benchmark. It is a run containing at least
 30 consented real recordings per language, corrected references, retained raw predictions and
 confidence intervals, followed by the same locked evaluation after every model or retrieval change.
+
+### 7.3 Multilingual retrieval study, 26 November 2026
+
+Setup: the 60-case golden set in four question languages over the 30-segment fixture (English,
+Italian, Polish and Danish transcripts, so most queries are cross-language). Every authorized
+segment of the caller's workspace is scored, to separate ranking quality from candidate cut-offs.
+Tools: `eval/retrieval_features.py`, `eval/ranking_study.py`, `eval/selection_study.py`,
+`eval/pivot_probe.py`. Mean reciprocal rank of the first annotated segment:
+
+| Signal | EN | IT | PL | DA |
+|---|---:|---:|---:|---:|
+| BM25 only | 0.535 | 0.648 | 0.425 | 0.517 |
+| E5 base cosine (shipped) | 0.788 | 0.849 | 0.597 | 0.650 |
+| **E5 large cosine** | **0.851** | 0.856 | **0.729** | **0.724** |
+| E5 base + small reranker | 0.807 | 0.857 | 0.676 | 0.759 |
+| E5 large + small reranker | 0.822 | 0.861 | 0.722 | 0.761 |
+
+Findings, all measured here and none yet a release claim:
+
+- **The shipped candidate cut-off loses evidence.** The median-plus-margin floor in
+  `SqliteRetriever` removed annotated segments before ranking (recall@5 with the floor: EN 0.80,
+  IT 0.85, PL 0.57, DA 0.75).
+- **E5 large helps the languages that fail most** (PL +0.13 MRR, DA +0.07) and is now selectable
+  with `NODO_LOCAL_EMBEDDING_MODEL=multilingual-e5-large` (export with
+  `export_embedding_onnx.py intfloat/multilingual-e5-large`). The default stays `base`.
+- **The small reranker adds little once E5 large is used** and cannot read Danish reliably.
+- **English pivot translation helps Polish and Danish** (E5 large, translated question against
+  translated passages: PL 0.557 to 0.672-0.697, DA 0.579 to 0.697-0.762) at the price of one local
+  model call per non-English passage at ingestion and per question. Not implemented.
+- **Selection rules on retrieval signals alone top out near 0.5 F1** for citations and 0.75 for the
+  "any evidence?" decision, so the 95% / 90% / 95% gates cannot be reached by retrieval tuning with
+  these models.
+- **End to end, English, 150 variants, E5 base:** removing the floor and sending only the top six
+  segments to the model gave precision 34.6%, recall 41.0%, answerability 48.7%, against 38.8%,
+  36.5% and 61.3% for the shipped path. Not adopted: the floor was acting as the only relevance gate
+  and Qwen3 4B answers "supported" when handed irrelevant text.
+
+Status: the quality gates remain **FAIL**. Closing them needs a stronger multilingual embedder and
+cross-encoder (for example BGE-M3 with a multilingual cross-encoder) and a relevance gate calibrated
+on more than 60 cases; those models are not installed and need an explicit download approval.

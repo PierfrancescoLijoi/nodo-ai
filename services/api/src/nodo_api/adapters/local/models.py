@@ -81,7 +81,9 @@ class LocalModelPaths:
     ffmpeg: str | None = None
 
     @classmethod
-    def discover(cls, models_dir: Path | None = None) -> LocalModelPaths:
+    def discover(
+        cls, models_dir: Path | None = None, embedding_model: str = "multilingual-e5-base"
+    ) -> LocalModelPaths:
         root = models_dir or data_dir() / "models"
         server = root / "llama.cpp" / "llama-server.exe"
         server = server if server.exists() else root / "llama.cpp" / "llama-server"
@@ -91,7 +93,7 @@ class LocalModelPaths:
             installed = shutil.which("llama-server")
             server = Path(installed) if installed else server
         diarization = root / "diarization"
-        embeddings = root / "embeddings" / "multilingual-e5-base"
+        embeddings = root / "embeddings" / embedding_model
         reranker = find_snapshot(
             "models--Horizon-Labs--multilingual-reranker-small",
             "onnx/model_quantized.onnx",

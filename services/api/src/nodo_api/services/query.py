@@ -111,7 +111,9 @@ def _citation_for_fragment(fragment: Fragment) -> Citation:
 
 
 def _fuse_evidence(
-    meetings: tuple[TranscriptSegment, ...], fragments: tuple[FragmentHit, ...]
+    meetings: tuple[TranscriptSegment, ...],
+    fragments: tuple[FragmentHit, ...],
+    limit: int = MAX_EVIDENCE,
 ) -> tuple[Fragment, ...]:
     """Reciprocal-rank fusion, with a deterministic source/ordinal tie-breaker."""
     ranked: dict[tuple[str, str], tuple[Fragment, float]] = {}
@@ -128,7 +130,7 @@ def _fuse_evidence(
         ranked.values(),
         key=lambda item: (-item[1], item[0].source_id, item[0].ordinal, item[0].id),
     )
-    return tuple(fragment for fragment, _ in ordered[:MAX_EVIDENCE])
+    return tuple(fragment for fragment, _ in ordered[:limit])
 
 
 def _available(future: Any) -> tuple[Any, ...]:
@@ -259,7 +261,9 @@ class QueryService:
         fragment_index: FragmentIndex | None = None,
         fragments: FragmentRepository | None = None,
         section_summaries: SectionSummaryService | None = None,
+        max_evidence: int = MAX_EVIDENCE,
     ) -> None:
+        self._max_evidence = max_evidence
         self._answers = answers
         self._meetings = meetings
         self._retriever = retriever
@@ -477,7 +481,7 @@ class QueryService:
         scope = request.scope
         if scope.mode.value == "legacy":
             segments = self._retriever.search(
-                workspace_id, user_id, request.question, filters, MAX_EVIDENCE
+                workspace_id, user_id, request.question, filters, self._max_evidence
             )
             return tuple(
                 Fragment.from_segment(segment, ordinal) for ordinal, segment in enumerate(segments)
@@ -491,7 +495,7 @@ class QueryService:
                 user_id,
                 request.question,
                 filters,
-                MAX_EVIDENCE,
+                self._max_evidence,
                 source_ids=source_ids,
             )
             fragments = (
@@ -500,7 +504,7 @@ class QueryService:
                     workspace_id,
                     user_id,
                     request.question,
-                    MAX_EVIDENCE,
+                    self._max_evidence,
                     source_ids=source_ids,
                 )
                 if self._fragment_index is not None
@@ -508,7 +512,7 @@ class QueryService:
             )
             meeting_hits = _available(meetings)
             fragment_hits = _available(fragments) if fragments is not None else ()
-        return _fuse_evidence(meeting_hits, fragment_hits)
+        return _fuse_evidence(meeting_hits, fragment_hits, self._max_evidence)
 
     def _expand_context(
         self, workspace_id: str, evidence: tuple[Fragment, ...], locale: Locale
