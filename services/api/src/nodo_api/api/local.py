@@ -15,6 +15,7 @@ from pydantic import Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
+from nodo_api.adapters.local.backup import BackupError, backup, export_everything
 from nodo_api.adapters.local.blob import UploadRejected
 from nodo_api.adapters.local.model_catalog import CATALOG, HardwareTier, installed, remove
 from nodo_api.adapters.local.model_install import install
@@ -334,3 +335,36 @@ def mount_web(app, directory: Path) -> None:
     """Serve the exported web app from the engine. Mount last: API routes match first."""
     files = SinglePageFiles(directory=directory, html=True, policy=load_policy(directory))
     app.mount("/", files, name="web")
+
+
+def _data_root(request: Request) -> Path:
+    settings = request.app.state.container.settings
+    return Path(settings.local_data_dir) if settings.local_data_dir else data_dir()
+
+
+class BackupOutput(FrozenModel):
+    path: str
+
+
+@router.post("/backup", response_model=BackupOutput, status_code=status.HTTP_201_CREATED)
+def make_backup(_: PrincipalDep, request: Request) -> BackupOutput:
+    """A consistent backup zip under `<data>/backups`. Restoring is done offline (see backup.py)."""
+    from datetime import UTC, datetime
+
+    root = _data_root(request)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    try:
+        return BackupOutput(path=str(backup(root, root / "backups" / f"nodo-{stamp}.zip")))
+    except BackupError as error:
+        raise ValidationFailed(str(error)) from error
+
+
+@router.get("/export/complete")
+def complete_export(_: PrincipalDep, request: Request) -> Response:
+    """Every row of every table as JSON (Sources, Pages with revisions, Concepts, Evidence)."""
+    body = json.dumps(export_everything(_data_root(request) / "nodo.db"), ensure_ascii=False)
+    return Response(
+        body,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="nodo-complete-export.json"'},
+    )

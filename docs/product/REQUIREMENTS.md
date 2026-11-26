@@ -288,3 +288,23 @@ The ADR column lists decisions that directly constrain the requirement. A dash m
 
 PostgreSQL/Azure parity, sync/export of collections and collection-aware query remain scheduled
 for later phases.
+
+## Status after Phase 7 and Phase 8
+
+Status on 26 November 2026, local engine only. "Measured" means a recorded run; nothing here is
+extrapolated.
+
+| Requirement | Status | Evidence / limit |
+|---|---|---|
+| FR-20 live meeting + Ask while recording | Implemented | Answers use finalized transcript evidence only. |
+| FR-21 push-to-talk dictation | Implemented | Local buffered recognizer, 120 s cap, release emits one final transcript. |
+| FR-22 spoken answers | Implemented, English only | Flock Speech "Junco" voice (Apache-2.0); other locales refuse rather than mispronounce. Latency not yet measured. |
+| FR-24 model catalog | Implemented | Install needs `approved: true` and a SHA-256; entries without one are not installable. |
+| FR-25 tier defaults | Implemented | Conservative offline hardware probe (`cpu`, `gpu_6gb`, `gpu_large`). |
+| FR-27 loopback API and MCP | Implemented | `POST /mcp`, read-only tools, same per-launch secret and Host check; no write tool exists. |
+| FR-28 backup, restore, complete export | Implemented | `POST /v1/local/backup`, offline `python -m nodo_api.adapters.local.backup restore`, `GET /v1/local/export/complete`. Restore verifies every hash and keeps old data aside. |
+
+Quality gates in `docs/LOCAL-PERFORMANCE-SCORECARD.md` that still FAIL (speaker attribution 78-80%
+vs 90%; answerability 68-82% vs 95%; citation recall 42-53% vs 90%) depend on the local models
+(ERes2Net, Qwen3 4B) and on retrieval tuning; they are not claimed as met. Voice and model-install
+timings are NOT_MEASURED.

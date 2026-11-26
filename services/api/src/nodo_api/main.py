@@ -147,7 +147,7 @@ def create_app(
     app.include_router(router)
     # The capability route also serves the in-memory development engine. Other local-only routes
     # need a LocalRuntime and remain mounted below only for backend=local.
-    from nodo_api.api import local
+    from nodo_api.api import local, mcp
 
     app.include_router(local.source_upload_router)
     _configure_voice(app, effective_settings, voice_factory)
@@ -199,6 +199,7 @@ def create_app(
         _only_loopback_hosts(app, effective_settings)
 
         app.include_router(local.router)
+        app.include_router(mcp.router)
         web = effective_settings.local_web_dir
         if web is not None and web.is_dir():
             local.mount_web(app, web)  # last: it matches everything the API did not
