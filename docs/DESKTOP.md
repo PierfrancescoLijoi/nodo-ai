@@ -82,3 +82,26 @@ The check also makes sure every entity of the graph can be found by meaning (a q
 | Questions are slow while a recording is processed | speech and the language model take turns on the GPU; wait for the recording to finish |
 | First question after a pause takes about 20 seconds | the language model unloads after ten idle minutes and reloads |
 | No microphone prompt | open Settings of the window's browser profile; the permission is stored in `window/` |
+
+## One-click installer (Windows)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\package\build_installer.ps1
+```
+
+builds `dist\NODO-Setup.exe` (about 140 MB). It carries the Python runtime, the engine and its
+packages (the dependency closure read from package metadata, without PyTorch) and the web
+interface, and uses only what Windows ships (IExpress and PowerShell). Running it installs for the
+current user into `%LOCALAPPDATA%\Programs\NODO`, adds a Start menu entry and needs no administrator
+rights, Python, pip or compiler. `Uninstall-NODO.cmd` in that folder removes the program and leaves
+`%LOCALAPPDATA%\NODO` (meetings, models) alone.
+
+Models, llama.cpp and ffmpeg are not inside the installer: on first run the Home screen sends the
+owner to the Models screen, where each download needs a confirmation and is checked against its
+SHA-256.
+
+Verified on the development machine only: the bundle starts from an environment with no Python on
+the PATH, serves the web interface, `/v1/local/status` and `/mcp`, and installs, runs and uninstalls
+in a scratch user profile. Not verified: a clean Windows machine or virtual machine, code signing
+(the executable is unsigned, so SmartScreen warns), and the GPU runtime libraries (CUDA 12) that
+Whisper needs, which are not bundled.
