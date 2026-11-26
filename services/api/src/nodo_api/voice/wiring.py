@@ -92,6 +92,10 @@ def build_voice(
     if recognizer_factory is None:
         if voice.recognizer == "local":
             recognizer_factory = _local_recognizer(settings, container)
+            if voice.synthesizer == "flock":
+                from nodo_api.voice.flock_speech import FlockSpeechSynthesizer
+
+                synthesizer = FlockSpeechSynthesizer()
         else:
             recognizer_factory, azure_synth = _azure_parts(settings, voice)
             synthesizer = synthesizer or azure_synth

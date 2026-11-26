@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from nodo_api.domain.models import Answerability, Locale, MeetingState
+from nodo_api.domain.retrieval import MAX_QUERY_SOURCES, CitationFormat, QueryScopeMode
 from nodo_api.domain.sources import ImportState, SourceKind, collection_name
 
 
@@ -267,10 +268,37 @@ class QueryFiltersInput(FrozenModel):
     project: str | None = Field(default=None, max_length=64)
 
 
+class QueryScopeInput(FrozenModel):
+    mode: QueryScopeMode = QueryScopeMode.LEGACY
+    collection_id: str | None = Field(default=None, min_length=1, max_length=64)
+    source_ids: tuple[str, ...] = Field(default=(), max_length=MAX_QUERY_SOURCES)
+    meeting_ids: tuple[str, ...] = Field(default=(), max_length=MAX_QUERY_SOURCES)
+
+    @model_validator(mode="after")
+    def valid_shape(self):
+        if self.mode is QueryScopeMode.COLLECTION:
+            valid = self.collection_id is not None and not self.source_ids and not self.meeting_ids
+        elif self.mode is QueryScopeMode.SOURCES:
+            valid = self.collection_id is None and bool(self.source_ids) and not self.meeting_ids
+        elif self.mode is QueryScopeMode.MEETINGS:
+            valid = self.collection_id is None and not self.source_ids and bool(self.meeting_ids)
+        else:
+            valid = self.collection_id is None and not self.source_ids and not self.meeting_ids
+        if (
+            not valid
+            or len(set(self.source_ids)) != len(self.source_ids)
+            or len(set(self.meeting_ids)) != len(self.meeting_ids)
+        ):
+            raise ValueError("Invalid query scope")
+        return self
+
+
 class QueryInput(FrozenModel):
     question: str = Field(min_length=1, max_length=2000)
     ui_locale: Locale
     filters: QueryFiltersInput | None = None
+    scope: QueryScopeInput = QueryScopeInput()
+    citation_format: CitationFormat = CitationFormat.LEGACY
 
 
 class VoiceQueryInput(FrozenModel):
@@ -287,6 +315,10 @@ class CitationOutput(FrozenModel):
     end_ms: int
     quote: str
     speaker_id: str = ""
+    source_id: str | None = None
+    fragment_id: str | None = None
+    source_version: int | None = None
+    locator: dict[str, Any] | None = None
 
 
 class QueryOutput(FrozenModel):
@@ -438,6 +470,94 @@ class CollectionOutput(FrozenModel):
 
 class CollectionList(FrozenModel):
     items: tuple[CollectionOutput, ...]
+
+
+class PageOutput(FrozenModel):
+    id: str
+    kind: str
+    subject_id: str
+    status: str
+    current_revision: int | None
+    created_at: datetime
+
+
+class PageRevisionOutput(FrozenModel):
+    number: int
+    body_md: str
+    author_id: str
+    created_at: datetime
+    machine_generated: bool
+    claims: tuple[PageClaimOutput, ...]
+
+
+class PageCitationInput(FrozenModel):
+    source_id: str = Field(min_length=1, max_length=64)
+    fragment_id: str = Field(min_length=1, max_length=128)
+    source_version: int = Field(ge=1)
+    locator: dict[str, Any]
+    quote: str = Field(min_length=1, max_length=10_000)
+
+
+class PageClaimInput(FrozenModel):
+    span_start: int = Field(ge=0)
+    span_end: int = Field(ge=0)
+    citations: tuple[PageCitationInput, ...] = ()
+
+
+class PageEditInput(FrozenModel):
+    body_md: str = Field(min_length=1, max_length=200_000)
+    claims: tuple[PageClaimInput, ...] = ()
+
+
+class PageCreateInput(FrozenModel):
+    kind: Literal["concept", "source_summary", "saved_answer"]
+    subject_id: str = Field(min_length=1, max_length=128)
+    source_ids: tuple[str, ...] = Field(min_length=1, max_length=20)
+
+
+class PageRefreshInput(FrozenModel):
+    source_ids: tuple[str, ...] = Field(min_length=1, max_length=20)
+
+
+class PageCitationOutput(FrozenModel):
+    source_id: str
+    fragment_id: str
+    source_version: int
+    locator: dict[str, Any]
+    quote: str
+
+
+class PageClaimOutput(FrozenModel):
+    ordinal: int
+    span_start: int
+    span_end: int
+    text: str
+    machine_generated: bool
+    citations: tuple[PageCitationOutput, ...]
+
+
+class PageList(FrozenModel):
+    items: tuple[PageOutput, ...]
+
+
+class PageFindingOutput(FrozenModel):
+    kind: str
+    page_id: str
+    revision: int | None
+    claim_ordinal: int | None
+
+
+class PageHealthOutput(FrozenModel):
+    items: tuple[PageFindingOutput, ...]
+
+
+class GraphInsightsOutput(FrozenModel):
+    isolated: tuple[str, ...]
+    bridges: tuple[str, ...]
+    orphan_concepts: tuple[str, ...]
+    duplicate_concepts: tuple[str, ...]
+    contradicting_decisions: tuple[str, ...]
+    truncated: bool
 
 
 class CollectionCreate(FrozenModel):

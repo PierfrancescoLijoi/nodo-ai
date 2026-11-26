@@ -22,6 +22,7 @@ from nodo_api.domain.models import (
     TranscriptSegment,
 )
 from nodo_api.domain.retention import AudioDue, audio_expires_at
+from nodo_api.domain.sources import Fragment
 from nodo_api.errors import NotFoundError
 from nodo_api.worker import IMPORT_AGING_SECONDS, IMPORT_SOURCE
 
@@ -347,6 +348,8 @@ class MockRetriever:
         query: str,
         filters: dict[str, Any] | None,
         limit: int,
+        *,
+        source_ids: frozenset[str] | None = None,
     ) -> tuple[TranscriptSegment, ...]:
         terms = {term for term in re.findall(r"\w+", query.lower()) if len(term) > 3}
         project = (filters or {}).get("project")
@@ -355,6 +358,7 @@ class MockRetriever:
             if (
                 stored_workspace != workspace_id
                 or self._owners.get((workspace_id, meeting_id)) != owner_id
+                or (source_ids is not None and meeting_id not in source_ids)
             ):
                 continue
             if project and segment.project != project:
@@ -522,23 +526,39 @@ class MockLlm:
         workspace_id: str,
         question: str,
         locale: Locale,
-        evidence: tuple[TranscriptSegment, ...],
+        evidence: tuple[Fragment, ...],
         graph: Subgraph,
+        summaries=(),
     ):
         from nodo_api.services.query import GeneratedAnswer
 
         if not evidence:
             return GeneratedAnswer("", Answerability.UNANSWERABLE, (), ())
-        citations = tuple(
-            Citation(
-                item.meeting_id, item.id, item.start_ms, item.end_ms, item.text, item.speaker_id
-            )
-            for item in evidence[:3]
-        )
+        citations = tuple(_citation(item) for item in evidence[:3])
         entities = tuple(dict.fromkeys(n.label for n in graph.nodes if n.type not in ORIGIN_TYPES))
         return GeneratedAnswer(
             self.localized_answer(locale), Answerability.SUPPORTED, citations, entities
         )
+
+
+def _citation(item: Fragment) -> Citation:
+    """Keep meeting answers wire-compatible while giving every other source a full locator."""
+    if item.locator.time_ms is not None:
+        return Citation(
+            item.source_id,
+            item.id,
+            item.locator.time_ms[0],
+            item.locator.time_ms[1],
+            item.text,
+            item.speaker_id or "",
+        )
+    return Citation(
+        quote=item.text,
+        source_id=item.source_id,
+        fragment_id=item.id,
+        source_version=item.version,
+        locator=item.locator,
+    )
 
 
 def seed_memory_adapters(

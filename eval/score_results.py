@@ -19,6 +19,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+try:  # script execution and package tests use different import roots
+    from golden import expanded_cases
+except ModuleNotFoundError:  # pragma: no cover - exercised by package import
+    from eval.golden import expanded_cases
+
 
 def _p95(values: list[float]) -> float | None:
     if not values:
@@ -133,7 +138,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    report = score_predictions(_jsonl(Path(sys.argv[1])), _jsonl(Path(sys.argv[2])))
+    report = score_predictions(expanded_cases(_jsonl(Path(sys.argv[1]))), _jsonl(Path(sys.argv[2])))
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
     if len(sys.argv) == 4:
         Path(sys.argv[3]).write_text(rendered, encoding="utf-8")

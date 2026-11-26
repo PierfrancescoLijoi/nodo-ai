@@ -55,6 +55,9 @@ class Adapters:
     hierarchy_store: Any = None  # concept parent links (ADR-030); local and memory, None on Azure
     collections: Any = None  # nested collections of sources (FR-8); local and memory, None on Azure
     parent_suggester: Any = None  # reviewable concept parent suggestions; local and memory only
+    section_summaries: Any = None  # version-pinned section context; local and memory only
+    section_summary_service: Any = None  # lazy/best-effort generator for that derived context
+    pages: Any = None  # cited Wiki pages; local and memory only until Phase 10
 
 
 @dataclass(slots=True)
@@ -102,7 +105,9 @@ def memory_adapters(settings: Settings) -> Adapters:
         MemoryJobQueue,
         MemoryMaintenanceStore,
         MemoryMeetingRepository,
+        MemoryPageRepository,
         MemoryRetentionStore,
+        MemorySectionSummaryRepository,
         MemorySourceBlobStore,
         MemorySourceRepository,
         MemorySpeech,
@@ -116,6 +121,10 @@ def memory_adapters(settings: Settings) -> Adapters:
     from nodo_api.adapters.memory.extractor import KeywordExtractor
     from nodo_api.adapters.memory.fragment_extractor import KeywordFragmentExtractor
     from nodo_api.services.folder_watch import FolderWatcher
+    from nodo_api.services.section_summaries import (
+        FirstFragmentSectionSummarizer,
+        SectionSummaryService,
+    )
     from nodo_api.services.source_import import SourceImportService
 
     meetings = MemoryMeetingRepository()
@@ -128,6 +137,11 @@ def memory_adapters(settings: Settings) -> Adapters:
     queue = MemoryJobQueue()
     audit = MemoryAuditLog()
     fragments = MemoryFragmentRepository(sources, transcripts)
+    section_summaries = MemorySectionSummaryRepository(sources, fragments)
+    pages = MemoryPageRepository()
+    section_summary_service = SectionSummaryService(
+        section_summaries, FirstFragmentSectionSummarizer()
+    )
     imports = MemoryImportJobRepository(sources)
     fragment_index = MemoryFragmentIndex(sources)
     fragment_extractor = ChunkedFragmentExtractor(
@@ -153,6 +167,8 @@ def memory_adapters(settings: Settings) -> Adapters:
         control=queue,
         speech=MemorySpeech(),
         speech_locales=settings.speech_candidate_locales,
+        section_summaries=section_summary_service,
+        pages=pages,
     )
     return Adapters(
         meetings,
@@ -179,6 +195,9 @@ def memory_adapters(settings: Settings) -> Adapters:
         hierarchy_store=graph,
         collections=MemoryCollectionRepository(sources),
         parent_suggester=KeywordParentSuggester(),
+        section_summaries=section_summaries,
+        section_summary_service=section_summary_service,
+        pages=pages,
         # No poll thread here: nothing scans unless a caller runs scan_once.
         folder_watcher=FolderWatcher(
             MemoryWatchFolderRepository(), source_import, source_blobs, source_blobs.root

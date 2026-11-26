@@ -101,6 +101,11 @@ class BargeIn(_Message):
     type: Literal["barge_in"]
 
 
+class Speak(_Message):
+    type: Literal["speak"]
+    text: str = Field(min_length=1, max_length=12_000)
+
+
 class Ping(_Message):
     type: Literal["ping"]
 
@@ -110,12 +115,14 @@ class End(_Message):
 
 
 ClientMessage = Annotated[
-    Hello | Ack | PttStart | PttEnd | BargeIn | Ping | End, Field(discriminator="type")
+    Hello | Ack | PttStart | PttEnd | BargeIn | Speak | Ping | End, Field(discriminator="type")
 ]
 _CLIENT = TypeAdapter(ClientMessage)
 
 
-def parse_client_message(text: str) -> Hello | Ack | PttStart | PttEnd | BargeIn | Ping | End:
+def parse_client_message(
+    text: str,
+) -> Hello | Ack | PttStart | PttEnd | BargeIn | Speak | Ping | End:
     if len(text) > MAX_TEXT_MESSAGE:
         raise ProtocolError("message.too_large")
     try:

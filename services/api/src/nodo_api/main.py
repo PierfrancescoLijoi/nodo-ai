@@ -28,9 +28,12 @@ from nodo_api.middleware import EdgeProtection
 from nodo_api.resilience import Bulkhead, DependencyUnavailable, is_transient
 from nodo_api.services import (
     EvidenceValidator,
+    GraphInsightService,
     GraphService,
     HierarchyService,
     MeetingService,
+    PageHealthService,
+    PageService,
     QueryService,
     SourceImportService,
     SourceService,
@@ -86,6 +89,10 @@ class AppContainer:
     folder_watcher: Any = None
     hierarchy: HierarchyService | None = None  # None on Azure: routes answer 501
     collections: Any = None  # None on Azure: routes answer 501
+    pages: Any = None  # None on Azure: Wiki APIs answer 501
+    page_service: PageService | None = None
+    page_health: PageHealthService | None = None
+    graph_insights: GraphInsightService | None = None
 
 
 @asynccontextmanager
@@ -234,10 +241,14 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.retriever,
         a.graph,
         a.llm,
-        EvidenceValidator(a.transcripts),
+        EvidenceValidator(a.transcripts, a.fragments),
         settings.graph_node_limit,
         a.entity_indexer,
         a.answers,
+        a.sources,
+        a.fragment_index,
+        a.fragments,
+        a.section_summary_service,
     )
     source_service = (
         SourceService(
@@ -253,6 +264,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
             jobs=a.jobs,
             watch=a.folder_watcher.repository if a.folder_watcher is not None else None,
             collections=a.collections,
+            pages=a.pages,
         )
         if all(
             port is not None
@@ -268,6 +280,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         else None
     )
     graph_service = GraphService(a.graph, a.audit, a.answers)
+    graph_insights = GraphInsightService(a.graph) if a.hierarchy_store is not None else None
     hierarchy = (
         HierarchyService(
             a.hierarchy_store, graph_service, a.fragments, a.sources, a.parent_suggester
@@ -275,6 +288,12 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         if a.hierarchy_store is not None and a.fragments is not None and a.sources is not None
         else None
     )
+    page_service = (
+        PageService(a.pages, EvidenceValidator(a.transcripts, a.fragments))
+        if a.pages is not None
+        else None
+    )
+    page_health = PageHealthService(a.pages, a.fragments) if a.pages is not None else None
     return AppContainer(
         settings,
         AuthManager(settings, key_provider),
@@ -313,6 +332,10 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.folder_watcher,
         hierarchy,
         collections=a.collections,
+        pages=a.pages,
+        page_service=page_service,
+        page_health=page_health,
+        graph_insights=graph_insights,
     )
 
 

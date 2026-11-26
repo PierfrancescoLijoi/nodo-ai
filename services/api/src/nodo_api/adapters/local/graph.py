@@ -147,6 +147,25 @@ def _meeting_mentioned(alias: str) -> str:
     )
 
 
+def _source_backed(alias: str, count: int) -> str:
+    return (
+        f" AND {alias}.kind <> 'CHILD_OF' AND EXISTS (SELECT 1 FROM relation_evidence ev"
+        f" WHERE ev.workspace_id = {alias}.workspace_id AND ev.owner_id = {alias}.owner_id"
+        f" AND ev.relation_id = {alias}.id AND ev.source_id IN ({_marks(count)}))"
+    )
+
+
+def _source_mentioned(alias: str, count: int) -> str:
+    return (
+        "EXISTS (SELECT 1 FROM relations mr JOIN relation_evidence ev"
+        " ON ev.workspace_id = mr.workspace_id AND ev.owner_id = mr.owner_id"
+        " AND ev.relation_id = mr.id"
+        f" WHERE mr.workspace_id = {alias}.workspace_id AND mr.owner_id = {alias}.owner_id"
+        f" AND mr.source_id = {alias}.id AND mr.kind = 'MENTIONED_IN'"
+        f" AND mr.status <> 'rejected' AND ev.source_id IN ({_marks(count)}))"
+    )
+
+
 class SqliteGraphStore:
     def __init__(self, db: LocalDatabase) -> None:
         self._db = db
@@ -678,7 +697,10 @@ class SqliteGraphStore:
         types: frozenset[EntityType] | None = None,
         *,
         meetings_only: bool = False,
+        source_ids: frozenset[str] | None = None,
     ) -> tuple[Entity, ...]:
+        if source_ids == frozenset():
+            return ()
         patterns = [_like(t) for t in (normalize_label(x) for x in terms) if len(t) >= 3]
         if not patterns:
             return ()
@@ -689,12 +711,22 @@ class SqliteGraphStore:
         type_filter = f" AND type IN ({_marks(len(kinds))})" if kinds else ""
         if meetings_only:
             type_filter += f" AND {_meeting_mentioned('e')}"
+        elif source_ids is not None:
+            type_filter += f" AND {_source_mentioned('e', len(source_ids))}"
         with self._db.transaction(write=False) as conn:
             rows = conn.execute(
                 f"SELECT {_ENTITY_COLUMNS}, ({score}) AS score FROM entities e"
                 f" WHERE workspace_id = ? AND owner_id = ? AND type NOT IN ('meeting', 'source'){type_filter}"
                 f" AND ({match}) ORDER BY score DESC, updated_at DESC, id LIMIT ?",
-                (*patterns, workspace_id, owner_id, *(kinds or ()), *patterns, limit),
+                (
+                    *patterns,
+                    workspace_id,
+                    owner_id,
+                    *(kinds or ()),
+                    *(sorted(source_ids) if source_ids is not None and not meetings_only else ()),
+                    *patterns,
+                    limit,
+                ),
             ).fetchall()
         return tuple(_entity(r) for r in rows)
 
@@ -710,6 +742,25 @@ class SqliteGraphStore:
                 (workspace_id, owner_id, limit),
             ).fetchall()
         return tuple(_entity(r) for r in rows)
+
+    def analysis_graph(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                f"SELECT {_RELATION_COLUMNS} FROM relations WHERE workspace_id = ? AND owner_id = ?"
+                " AND status <> 'rejected' ORDER BY id LIMIT ?",
+                (workspace_id, owner_id, limit + 1),
+            ).fetchall()
+            chosen = rows[:limit]
+            ids = list(
+                dict.fromkeys(i for row in chosen for i in (row["source_id"], row["target_id"]))
+            )
+            entities = self._entities(conn, workspace_id, owner_id, ids)
+            evidence = self._evidence(conn, workspace_id, owner_id, [row["id"] for row in chosen])
+        return Subgraph(
+            tuple(entities[i] for i in ids if i in entities),
+            tuple(_relation(row, tuple(evidence.get(row["id"], ()))) for row in chosen),
+            len(rows) > limit,
+        )
 
     def recent_decisions(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Entity, ...]:
         with self._db.transaction(write=False) as conn:
@@ -732,11 +783,16 @@ class SqliteGraphStore:
         include_proposed: bool,
         as_of: datetime | None,
         meetings_only: bool = False,
+        source_ids: frozenset[str] | None = None,
     ) -> Subgraph:
+        if source_ids == frozenset():
+            return Subgraph()
         statuses = ["approved", *(["proposed"] if include_proposed else [])]
         moment = to_text(as_of or datetime.now(UTC))
         with self._db.transaction(write=False) as conn:
-            seeds = self._existing_seeds(conn, workspace_id, owner_id, seed_ids, meetings_only)
+            seeds = self._existing_seeds(
+                conn, workspace_id, owner_id, seed_ids, meetings_only, source_ids
+            )
             order = seeds[:node_limit]
             truncated = len(order) < len(seeds)
             seen, frontier, edges = set(order), list(order), {}
@@ -752,6 +808,7 @@ class SqliteGraphStore:
                     moment,
                     fanout + 1,
                     meetings_only,
+                    source_ids,
                 )
                 frontier, level_truncated = self._expand(
                     rows, fanout, seen, order, edges, node_limit
@@ -760,14 +817,21 @@ class SqliteGraphStore:
             kept = [r for r in edges.values() if r["source_id"] in seen and r["target_id"] in seen]
             entities = self._entities(conn, workspace_id, owner_id, order)
             evidence = self._evidence(
-                conn, workspace_id, owner_id, [r["id"] for r in kept], meetings_only
+                conn,
+                workspace_id,
+                owner_id,
+                [r["id"] for r in kept],
+                meetings_only,
+                source_ids,
             )
         nodes = tuple(entities[i] for i in order if i in entities)
         relations = tuple(_relation(r, tuple(evidence.get(r["id"], ()))) for r in kept)
         return Subgraph(nodes, relations, truncated)
 
     @staticmethod
-    def _level(conn, workspace_id, owner_id, frontier, statuses, moment, limit, meetings_only):
+    def _level(
+        conn, workspace_id, owner_id, frontier, statuses, moment, limit, meetings_only, source_ids
+    ):
         scope = (workspace_id, owner_id) if meetings_only else ()
         rows = []
         for node in frontier:
@@ -776,10 +840,31 @@ class SqliteGraphStore:
                     columns=_RELATION_COLUMNS,
                     end=end,
                     statuses=_marks(len(statuses)),
-                    meetings=_meeting_backed("relations") if meetings_only else "",
+                    meetings=(
+                        _meeting_backed("relations")
+                        if meetings_only
+                        else _source_backed("relations", len(source_ids))
+                        if source_ids is not None
+                        else ""
+                    ),
                 )
                 found = conn.execute(
-                    sql, (workspace_id, owner_id, node, *statuses, moment, moment, *scope, limit)
+                    sql,
+                    (
+                        workspace_id,
+                        owner_id,
+                        node,
+                        *statuses,
+                        moment,
+                        moment,
+                        *scope,
+                        *(
+                            sorted(source_ids)
+                            if source_ids is not None and not meetings_only
+                            else ()
+                        ),
+                        limit,
+                    ),
                 ).fetchall()
                 rows += [{**dict(r), "node": node} for r in found]
         return rows
@@ -813,15 +898,27 @@ class SqliteGraphStore:
         owner_id: str,
         seed_ids: Sequence[str],
         meetings_only: bool,
+        source_ids: frozenset[str] | None,
     ) -> list[str]:
         wanted = list(dict.fromkeys(seed_ids))
-        shown = f" AND (type = 'meeting' OR {_meeting_mentioned('e')})" if meetings_only else ""
+        shown = (
+            f" AND (type = 'meeting' OR {_meeting_mentioned('e')})"
+            if meetings_only
+            else f" AND {_source_mentioned('e', len(source_ids))}"
+            if source_ids is not None
+            else ""
+        )
         found: set[str] = set()
         for part in _slices(wanted):
             rows = conn.execute(
                 f"SELECT id FROM entities e WHERE workspace_id = ? AND owner_id = ?"
                 f" AND id IN ({_marks(len(part))}){shown}",
-                (workspace_id, owner_id, *part),
+                (
+                    workspace_id,
+                    owner_id,
+                    *part,
+                    *(sorted(source_ids) if source_ids is not None and not meetings_only else ()),
+                ),
             ).fetchall()
             found |= {r["id"] for r in rows}
         return [s for s in wanted if s in found]
@@ -847,16 +944,29 @@ class SqliteGraphStore:
         owner_id: str,
         relation_ids: list[str],
         meetings_only: bool = False,
+        source_ids: frozenset[str] | None = None,
     ) -> dict[str, list[Evidence]]:
         scope = (workspace_id, owner_id) if meetings_only else ()
-        meetings = f" AND source_id IN {_MEETING_IDS}" if meetings_only else ""
+        meetings = (
+            f" AND source_id IN {_MEETING_IDS}"
+            if meetings_only
+            else f" AND source_id IN ({_marks(len(source_ids))})"
+            if source_ids is not None
+            else ""
+        )
         grouped: dict[str, list[Evidence]] = {}
         for part in _slices(relation_ids):
             rows = conn.execute(
                 "SELECT relation_id, source_id, fragment_id FROM relation_evidence"
                 f" WHERE workspace_id = ? AND owner_id = ? AND relation_id IN ({_marks(len(part))})"
                 f"{meetings} ORDER BY source_id, fragment_id",
-                (workspace_id, owner_id, *part, *scope),
+                (
+                    workspace_id,
+                    owner_id,
+                    *part,
+                    *scope,
+                    *(sorted(source_ids) if source_ids is not None and not meetings_only else ()),
+                ),
             ).fetchall()
             for row in rows:
                 grouped.setdefault(row["relation_id"], []).append(

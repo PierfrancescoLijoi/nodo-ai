@@ -28,6 +28,7 @@ from nodo_api.adapters.local.llm import (
 )
 from nodo_api.adapters.local.maintenance import LocalIndexService, SqliteMaintenanceStore
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer, LocalModelPaths, data_dir
+from nodo_api.adapters.local.pages import SqlitePageRepository
 from nodo_api.adapters.local.queue import LocalWorkerLoop, SqliteJobQueue
 from nodo_api.adapters.local.repos import (
     SqliteAuditLog,
@@ -38,7 +39,11 @@ from nodo_api.adapters.local.reranker import OnnxReranker
 from nodo_api.adapters.local.retention import SqliteRetentionStore
 from nodo_api.adapters.local.search import SqliteRetriever
 from nodo_api.adapters.local.source_blobs import LocalSourceBlobStore
-from nodo_api.adapters.local.sources import SqliteFragmentRepository, SqliteSourceRepository
+from nodo_api.adapters.local.sources import (
+    SqliteFragmentRepository,
+    SqliteSectionSummaryRepository,
+    SqliteSourceRepository,
+)
 from nodo_api.adapters.local.speech import LocalSpeechToText
 from nodo_api.adapters.local.sync import LocalSyncService
 from nodo_api.adapters.local.watch_folders import SqliteWatchFolderRepository
@@ -54,6 +59,10 @@ from nodo_api.services.fragment_extraction import ChunkedFragmentExtractor, extr
 from nodo_api.services.index_maintenance import IndexMaintenanceService
 from nodo_api.services.ingestion import IngestionService
 from nodo_api.services.retention import RetentionService
+from nodo_api.services.section_summaries import (
+    FirstFragmentSectionSummarizer,
+    SectionSummaryService,
+)
 from nodo_api.services.source_import import SourceImportService
 from nodo_api.worker import Worker
 
@@ -310,6 +319,11 @@ def local_adapters(settings: Settings):
     )
     sources = SqliteSourceRepository(db)
     fragments = SqliteFragmentRepository(db)
+    section_summaries = SqliteSectionSummaryRepository(db)
+    pages = SqlitePageRepository(db)
+    section_summary_service = SectionSummaryService(
+        section_summaries, FirstFragmentSectionSummarizer()
+    )
     imports = SqliteImportJobRepository(db)
     fragment_index = SqliteFragmentIndex(db, embedder, min_margin=settings.local_search_margin)
     source_blobs = LocalSourceBlobStore(
@@ -338,6 +352,8 @@ def local_adapters(settings: Settings):
         token_fits=embedder.within_ceiling,
         speech=speech,
         speech_locales=settings.speech_candidate_locales,
+        section_summaries=section_summary_service,
+        pages=pages,
     )
     watcher = FolderWatcher(SqliteWatchFolderRepository(db), source_import, source_blobs, root)
     source = SyncSource(
@@ -410,4 +426,7 @@ def local_adapters(settings: Settings):
         hierarchy_store=graph,
         collections=SqliteCollectionRepository(db),
         parent_suggester=parent_suggester,
+        section_summaries=section_summaries,
+        section_summary_service=section_summary_service,
+        pages=pages,
     )

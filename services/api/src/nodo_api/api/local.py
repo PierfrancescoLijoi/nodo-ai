@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Literal
+from urllib.request import urlopen
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import Field
@@ -15,6 +16,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
 from nodo_api.adapters.local.blob import UploadRejected
+from nodo_api.adapters.local.model_catalog import CATALOG, HardwareTier, installed, remove
+from nodo_api.adapters.local.model_install import install
+from nodo_api.adapters.local.models import data_dir
 from nodo_api.api.v1.routes import PrincipalDep
 from nodo_api.api.v1.schemas import FrozenModel
 from nodo_api.domain.source_files import UploadRejected as SourceUploadRejected
@@ -75,6 +79,34 @@ class LocalStatus(FrozenModel):
     missing: tuple[str, ...]
     pending_jobs: int
     gpu: bool
+
+
+class LocalModelOutput(FrozenModel):
+    id: str
+    task: str
+    name: str
+    publisher: str
+    version: str
+    size_mb: int
+    licence: str
+    licence_url: str
+    hardware: tuple[str, ...]
+    sha256: str | None
+    installable: bool
+    installed: bool
+
+
+class LocalModelsOutput(FrozenModel):
+    hardware_tier: str
+    models: tuple[LocalModelOutput, ...]
+
+
+class LocalModelRemove(FrozenModel):
+    approved: bool = False
+
+
+class LocalModelInstall(FrozenModel):
+    approved: bool = False
 
 
 @router.put("/uploads/{token}", status_code=status.HTTP_204_NO_CONTENT)
@@ -155,6 +187,93 @@ def local_status(_: PrincipalDep, request: Request) -> LocalStatus:
         missing=tuple(runtime.models.missing()),
         pending_jobs=runtime.queue.pending(),
         gpu=gpu,
+    )
+
+
+@router.get("/models", response_model=LocalModelsOutput)
+def local_models(_: PrincipalDep, request: Request) -> LocalModelsOutput:
+    """Catalog metadata only. Installation is deliberately a separate, confirmed operation."""
+    settings = request.app.state.container.settings
+    root = settings.local_models_dir or data_dir() / "models"
+    # VRAM must not be guessed from the presence of CUDA; until a probe is added, CPU is safest.
+    tier = HardwareTier.CPU
+    return LocalModelsOutput(
+        hardware_tier=tier.value,
+        models=tuple(
+            LocalModelOutput(
+                id=entry.id,
+                task=entry.task,
+                name=entry.name,
+                publisher=entry.publisher,
+                version=entry.version,
+                size_mb=entry.size_mb,
+                licence=entry.licence,
+                licence_url=entry.licence_url,
+                hardware=tuple(item.value for item in entry.hardware),
+                sha256=entry.sha256,
+                installable=entry.installable,
+                installed=installed(entry, root),
+            )
+            for entry in CATALOG
+        ),
+    )
+
+
+@router.post("/models/{model_id}/remove", response_model=LocalModelOutput)
+def remove_local_model(
+    model_id: str, body: LocalModelRemove, _: PrincipalDep, request: Request
+) -> LocalModelOutput:
+    if not body.approved:
+        raise ValidationFailed("Model removal requires explicit approval")
+    entry = next((item for item in CATALOG if item.id == model_id), None)
+    if entry is None or not entry.installable:
+        raise NotAvailableOnEngine
+    root = request.app.state.container.settings.local_models_dir or data_dir() / "models"
+    remove(entry, root)
+    return LocalModelOutput(
+        id=entry.id,
+        task=entry.task,
+        name=entry.name,
+        publisher=entry.publisher,
+        version=entry.version,
+        size_mb=entry.size_mb,
+        licence=entry.licence,
+        licence_url=entry.licence_url,
+        hardware=tuple(item.value for item in entry.hardware),
+        sha256=entry.sha256,
+        installable=entry.installable,
+        installed=False,
+    )
+
+
+@router.post("/models/{model_id}/install", response_model=LocalModelOutput)
+def install_local_model(
+    model_id: str, body: LocalModelInstall, _: PrincipalDep, request: Request
+) -> LocalModelOutput:
+    """Install a catalog-pinned artifact only after an explicit client confirmation."""
+    if not body.approved:
+        raise ValidationFailed("Model installation requires explicit approval")
+    entry = next((item for item in CATALOG if item.id == model_id), None)
+    if entry is None or not entry.installable:
+        raise NotAvailableOnEngine
+    root = request.app.state.container.settings.local_models_dir or data_dir() / "models"
+    try:
+        install(entry, root, urlopen)
+    except (FileExistsError, ValueError) as error:
+        raise ValidationFailed(str(error)) from error
+    return LocalModelOutput(
+        id=entry.id,
+        task=entry.task,
+        name=entry.name,
+        publisher=entry.publisher,
+        version=entry.version,
+        size_mb=entry.size_mb,
+        licence=entry.licence,
+        licence_url=entry.licence_url,
+        hardware=tuple(item.value for item in entry.hardware),
+        sha256=entry.sha256,
+        installable=entry.installable,
+        installed=True,
     )
 
 

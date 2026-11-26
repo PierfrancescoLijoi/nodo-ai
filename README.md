@@ -42,7 +42,7 @@ evidence.
 | Recording         | Captures a meeting from the browser, streams PCM audio in real time when the voice gateway is available, and falls back to encrypted upload when it is not. |
 | Transcription     | Produces timestamped phrases with speaker labels. Owners may name speakers; NODO does not perform biometric speaker recognition.                            |
 | Understanding     | Extracts summaries, topics, people, decisions, actions, owners, dates and evidence links.                                                                   |
-| Grounded answers  | Combines lexical, vector and graph retrieval. An answer is returned only when its claims are supported by transcript citations.                             |
+| Grounded answers  | Combines ACL-filtered lexical, vector and graph retrieval across meetings and imported Sources. An answer is returned only with verifiable Fragment citations. |
 | Human review      | Keeps inferred relationships and decisions as proposals until a person approves or rejects them.                                                            |
 | Temporal graph    | Represents meetings, people, topics, projects, decisions and actions, including replacement and contradiction relationships.                                |
 | Data ownership    | Supports export, retention policies, complete meeting deletion and rebuildable search/graph projections.                                                    |

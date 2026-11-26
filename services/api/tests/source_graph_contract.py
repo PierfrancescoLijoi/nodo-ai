@@ -86,6 +86,42 @@ def handbook(ws: str):
 
 
 class SourceGraphContract:
+    def test_source_scope_filters_edges_before_nodes_or_limits(self, store, seed, ws) -> None:
+        doc_node, child, parent, relations = handbook(ws)
+        seed(ws, [doc_node, child, parent], relations)
+
+        graph = store.neighborhood(
+            ws,
+            OWNER,
+            [child.id, parent.id],
+            depth=1,
+            node_limit=10,
+            fanout=10,
+            include_proposed=True,
+            as_of=None,
+            source_ids=frozenset({"doc1"}),
+        )
+
+        assert {node.id for node in graph.nodes} == {child.id, parent.id, doc_node.id}
+        assert graph.edges
+        assert all(
+            evidence.source_id == "doc1" for edge in graph.edges for evidence in edge.evidence
+        )
+        assert (
+            store.neighborhood(
+                ws,
+                OWNER,
+                [child.id],
+                depth=1,
+                node_limit=10,
+                fanout=10,
+                include_proposed=True,
+                as_of=None,
+                source_ids=frozenset(),
+            ).nodes
+            == ()
+        )
+
     def test_source_node_lifecycle_matches_meeting_node(self, store, seed, ws) -> None:
         doc, child, parent, relations = handbook(ws)
         seed(ws, [doc, child, parent], relations)

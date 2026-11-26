@@ -215,6 +215,17 @@ export function BrainExplorer({ graph, expanding = false, onExpand }: BrainExplo
         </div>
       ) : view === 'map' ? (
         <div className={styles.mapShell} data-testid="brain-map-shell" data-immersive="true">
+          <aside className={styles.tree} aria-label={t('graph.viewList')}>
+            <p>{t('brain.filters')}</p>
+            <button type="button" aria-pressed={type === 'all'} onClick={() => setType('all')}>
+              {t('brain.allTypes')}
+            </button>
+            {TYPES.map((value) => (
+              <button key={value} type="button" aria-pressed={type === value} onClick={() => setType(value)}>
+                {t(`graph.types.${value}`)}
+              </button>
+            ))}
+          </aside>
           <BrainCanvas
             layout={layout}
             selectedId={selectedId}
@@ -311,6 +322,17 @@ export function BrainExplorer({ graph, expanding = false, onExpand }: BrainExplo
           <Button variant="secondary" onClick={() => focus(selected.id)} disabled={expanding}>
             {expanding ? t('brain.expanding') : t('brain.focusNode')}
           </Button>
+          <Link
+            href={`/ask/?node=${encodeURIComponent(selected.label)}&meetings=${encodeURIComponent(
+              [
+                ...new Set(
+                  [selected.meetingId, ...relations.flatMap((edge) => edge.meetingIds ?? [])].filter(Boolean),
+                ),
+              ].join(','),
+            )}`}
+          >
+            {t('brain.askNode')}
+          </Link>
           <div className={styles.detailSection}>
             <h3>{t('brain.connections')}</h3>
             {relations.length === 0 ? <p>{t('graph.noRelations')}</p> : null}

@@ -144,11 +144,42 @@
         "title": "ChangesOutput",
         "type": "object"
       },
+      "CitationFormat": {
+        "enum": [
+          "legacy",
+          "source"
+        ],
+        "title": "CitationFormat",
+        "type": "string"
+      },
       "CitationOutput": {
         "properties": {
           "end_ms": {
             "title": "End Ms",
             "type": "integer"
+          },
+          "fragment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fragment Id"
+          },
+          "locator": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locator"
           },
           "meeting_id": {
             "title": "Meeting Id",
@@ -161,6 +192,28 @@
           "segment_id": {
             "title": "Segment Id",
             "type": "string"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version"
           },
           "speaker_id": {
             "default": "",
@@ -624,6 +677,59 @@
           "evidence"
         ],
         "title": "GraphEdgeOutput",
+        "type": "object"
+      },
+      "GraphInsightsOutput": {
+        "properties": {
+          "bridges": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Bridges",
+            "type": "array"
+          },
+          "contradicting_decisions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Contradicting Decisions",
+            "type": "array"
+          },
+          "duplicate_concepts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Duplicate Concepts",
+            "type": "array"
+          },
+          "isolated": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Isolated",
+            "type": "array"
+          },
+          "orphan_concepts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Orphan Concepts",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "isolated",
+          "bridges",
+          "orphan_concepts",
+          "duplicate_concepts",
+          "contradicting_decisions",
+          "truncated"
+        ],
+        "title": "GraphInsightsOutput",
         "type": "object"
       },
       "GraphNodeOutput": {
@@ -1337,6 +1443,388 @@
         "title": "MeetingState",
         "type": "string"
       },
+      "PageCitationInput": {
+        "properties": {
+          "fragment_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Fragment Id",
+            "type": "string"
+          },
+          "locator": {
+            "additionalProperties": true,
+            "title": "Locator",
+            "type": "object"
+          },
+          "quote": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Quote",
+            "type": "string"
+          },
+          "source_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_version": {
+            "minimum": 1.0,
+            "title": "Source Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_id",
+          "fragment_id",
+          "source_version",
+          "locator",
+          "quote"
+        ],
+        "title": "PageCitationInput",
+        "type": "object"
+      },
+      "PageCitationOutput": {
+        "properties": {
+          "fragment_id": {
+            "title": "Fragment Id",
+            "type": "string"
+          },
+          "locator": {
+            "additionalProperties": true,
+            "title": "Locator",
+            "type": "object"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_version": {
+            "title": "Source Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_id",
+          "fragment_id",
+          "source_version",
+          "locator",
+          "quote"
+        ],
+        "title": "PageCitationOutput",
+        "type": "object"
+      },
+      "PageClaimInput": {
+        "properties": {
+          "citations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PageCitationInput"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "span_end": {
+            "minimum": 0.0,
+            "title": "Span End",
+            "type": "integer"
+          },
+          "span_start": {
+            "minimum": 0.0,
+            "title": "Span Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "span_start",
+          "span_end"
+        ],
+        "title": "PageClaimInput",
+        "type": "object"
+      },
+      "PageClaimOutput": {
+        "properties": {
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/PageCitationOutput"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "machine_generated": {
+            "title": "Machine Generated",
+            "type": "boolean"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "span_end": {
+            "title": "Span End",
+            "type": "integer"
+          },
+          "span_start": {
+            "title": "Span Start",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordinal",
+          "span_start",
+          "span_end",
+          "text",
+          "machine_generated",
+          "citations"
+        ],
+        "title": "PageClaimOutput",
+        "type": "object"
+      },
+      "PageCreateInput": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "concept",
+              "source_summary",
+              "saved_answer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Source Ids",
+            "type": "array"
+          },
+          "subject_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Subject Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "subject_id",
+          "source_ids"
+        ],
+        "title": "PageCreateInput",
+        "type": "object"
+      },
+      "PageEditInput": {
+        "properties": {
+          "body_md": {
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Body Md",
+            "type": "string"
+          },
+          "claims": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PageClaimInput"
+            },
+            "title": "Claims",
+            "type": "array"
+          }
+        },
+        "required": [
+          "body_md"
+        ],
+        "title": "PageEditInput",
+        "type": "object"
+      },
+      "PageFindingOutput": {
+        "properties": {
+          "claim_ordinal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Ordinal"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "page_id": {
+            "title": "Page Id",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "required": [
+          "kind",
+          "page_id",
+          "revision",
+          "claim_ordinal"
+        ],
+        "title": "PageFindingOutput",
+        "type": "object"
+      },
+      "PageHealthOutput": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PageFindingOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PageHealthOutput",
+        "type": "object"
+      },
+      "PageList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PageOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PageList",
+        "type": "object"
+      },
+      "PageOutput": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Revision"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "subject_id": {
+            "title": "Subject Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "subject_id",
+          "status",
+          "current_revision",
+          "created_at"
+        ],
+        "title": "PageOutput",
+        "type": "object"
+      },
+      "PageRefreshInput": {
+        "properties": {
+          "source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Source Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_ids"
+        ],
+        "title": "PageRefreshInput",
+        "type": "object"
+      },
+      "PageRevisionOutput": {
+        "properties": {
+          "author_id": {
+            "title": "Author Id",
+            "type": "string"
+          },
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/PageClaimOutput"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "machine_generated": {
+            "title": "Machine Generated",
+            "type": "boolean"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "body_md",
+          "author_id",
+          "created_at",
+          "machine_generated",
+          "claims"
+        ],
+        "title": "PageRevisionOutput",
+        "type": "object"
+      },
       "ParentSuggestionInput": {
         "properties": {
           "locale": {
@@ -1406,6 +1894,10 @@
       },
       "QueryInput": {
         "properties": {
+          "citation_format": {
+            "$ref": "#/components/schemas/CitationFormat",
+            "default": "legacy"
+          },
           "filters": {
             "anyOf": [
               {
@@ -1421,6 +1913,14 @@
             "minLength": 1,
             "title": "Question",
             "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/QueryScopeInput",
+            "default": {
+              "meeting_ids": [],
+              "mode": "legacy",
+              "source_ids": []
+            }
           },
           "ui_locale": {
             "$ref": "#/components/schemas/Locale"
@@ -1485,6 +1985,59 @@
         ],
         "title": "QueryOutput",
         "type": "object"
+      },
+      "QueryScopeInput": {
+        "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "meeting_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Meeting Ids",
+            "type": "array"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/QueryScopeMode",
+            "default": "legacy"
+          },
+          "source_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Source Ids",
+            "type": "array"
+          }
+        },
+        "title": "QueryScopeInput",
+        "type": "object"
+      },
+      "QueryScopeMode": {
+        "enum": [
+          "legacy",
+          "all",
+          "collection",
+          "sources",
+          "meetings",
+          "sources_only"
+        ],
+        "title": "QueryScopeMode",
+        "type": "string"
       },
       "ReviewInput": {
         "properties": {
@@ -2918,6 +3471,24 @@
         "summary": "Graph Changes"
       }
     },
+    "/v1/graph/insights": {
+      "get": {
+        "operationId": "graph_insights_v1_graph_insights_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphInsightsOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Graph Insights"
+      }
+    },
     "/v1/graph/relations/{relation_id}": {
       "patch": {
         "operationId": "review_relation_v1_graph_relations__relation_id__patch",
@@ -3676,6 +4247,420 @@
           }
         },
         "summary": "Upload Session"
+      }
+    },
+    "/v1/pages": {
+      "get": {
+        "operationId": "list_pages_v1_pages_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Pages"
+      },
+      "post": {
+        "operationId": "create_page_v1_pages_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Page"
+      }
+    },
+    "/v1/pages/health": {
+      "get": {
+        "operationId": "page_health_v1_pages_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageHealthOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Page Health"
+      }
+    },
+    "/v1/pages/{page_id}": {
+      "get": {
+        "operationId": "get_page_v1_pages__page_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "title": "Page Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Page"
+      },
+      "patch": {
+        "operationId": "edit_page_v1_pages__page_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "title": "Page Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageEditInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Page"
+      }
+    },
+    "/v1/pages/{page_id}/approve": {
+      "post": {
+        "operationId": "approve_page_v1_pages__page_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "title": "Page Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Page"
+      }
+    },
+    "/v1/pages/{page_id}/refresh": {
+      "post": {
+        "operationId": "refresh_page_v1_pages__page_id__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "title": "Page Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageRefreshInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Page"
+      }
+    },
+    "/v1/pages/{page_id}/reject": {
+      "post": {
+        "operationId": "reject_page_v1_pages__page_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "title": "Page Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Page"
+      }
+    },
+    "/v1/pages/{page_id}/revisions": {
+      "get": {
+        "operationId": "get_page_revisions_v1_pages__page_id__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "title": "Page Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PageRevisionOutput"
+                  },
+                  "title": "Response Get Page Revisions V1 Pages  Page Id  Revisions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Page Revisions"
       }
     },
     "/v1/query": {

@@ -366,7 +366,7 @@ class MemoryGraphStore:
         part = self._parts.get((workspace_id, owner_id))
         if part is None:
             return Subgraph()
-        view = _View(part) if meetings_only else None
+        view = _View(part, True, None) if meetings_only else None
         waiting = [
             (r.seq, shown)
             for r in part.relations.values()
@@ -465,7 +465,7 @@ class MemoryGraphStore:
     ) -> Relation:
         with self._lock:
             reviewed = self._review(workspace_id, owner_id, relation_id_, status, meetings_only)
-            view = _View(self._part(workspace_id, owner_id)) if meetings_only else None
+            view = _View(self._part(workspace_id, owner_id), True, None) if meetings_only else None
             return _show(view, reviewed) or reviewed
 
     def _review(
@@ -480,7 +480,7 @@ class MemoryGraphStore:
         row = part.relations.get(relation_id_)
         if row is None or status is ReviewStatus.PROPOSED:
             raise NotFoundError if row is None else ValueError("A review is approved or rejected")
-        if meetings_only and _show(_View(part), row.relation) is None:
+        if meetings_only and _show(_View(part, True, None), row.relation) is None:
             raise NotFoundError  # hidden from that view: nothing is written
         rel = row.relation
         if (
@@ -512,9 +512,14 @@ class MemoryGraphStore:
         types: frozenset[EntityType] | None = None,
         *,
         meetings_only: bool = False,
+        source_ids: frozenset[str] | None = None,
     ) -> tuple[Entity, ...]:
         part = self._part(workspace_id, owner_id)
-        view = _View(part) if meetings_only else None
+        view = (
+            _View(part, meetings_only, source_ids)
+            if meetings_only or source_ids is not None
+            else None
+        )
         wanted = [t for t in (normalize_label(x) for x in terms) if len(t) >= 3]
         scored = []
         for eid, entity in part.entities.items():
@@ -531,7 +536,7 @@ class MemoryGraphStore:
         self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
     ) -> tuple[Entity, ...]:
         part = self._part(workspace_id, owner_id)
-        view = _View(part) if meetings_only else None
+        view = _View(part, True, None) if meetings_only else None
         ordered = sorted(
             (
                 e
@@ -541,6 +546,19 @@ class MemoryGraphStore:
             key=lambda e: (-part.touched[e.id], e.id),
         )
         return tuple(ordered[:limit])
+
+    def analysis_graph(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        part = self._part(workspace_id, owner_id)
+        edges = tuple(
+            row.relation
+            for row in sorted(part.relations.values(), key=lambda row: row.relation.id)
+            if row.relation.status is not ReviewStatus.REJECTED
+        )[:limit]
+        ids = {entity_id for edge in edges for entity_id in (edge.source_id, edge.target_id)}
+        nodes = tuple(
+            part.entities[entity_id] for entity_id in sorted(ids) if entity_id in part.entities
+        )
+        return Subgraph(nodes, edges, len(edges) == limit and len(part.relations) > limit)
 
     def recent_decisions(self, workspace_id: str, owner_id: str, limit: int) -> tuple[Entity, ...]:
         part = self._part(workspace_id, owner_id)
@@ -560,9 +578,14 @@ class MemoryGraphStore:
         include_proposed: bool,
         as_of: datetime | None,
         meetings_only: bool = False,
+        source_ids: frozenset[str] | None = None,
     ) -> Subgraph:
         part = self._part(workspace_id, owner_id)
-        view = _View(part) if meetings_only else None
+        view = (
+            _View(part, meetings_only, source_ids)
+            if meetings_only or source_ids is not None
+            else None
+        )
         shown = part.entities.keys() if view is None else view.entities
         moment = as_of or datetime.now(UTC)
         allowed = {ReviewStatus.APPROVED} | ({ReviewStatus.PROPOSED} if include_proposed else set())
@@ -670,7 +693,7 @@ class MemoryGraphStore:
         self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
     ) -> tuple[Change, ...]:
         part = self._part(workspace_id, owner_id)
-        view = _View(part) if meetings_only else None
+        view = _View(part, True, None) if meetings_only else None
         rows = [
             (r.seq, rel)
             for r in part.relations.values()
@@ -866,12 +889,22 @@ class MemoryGraphStore:
 
 
 class _View:
-    """The meetings-only view (/v1, frozen clients): the meeting ids, and the entities a meeting
-    mentions plus the meeting nodes. See SqliteGraphStore for the same rule in SQL."""
+    """A source-evidence view, applied before graph traversal spends any bounds."""
 
-    def __init__(self, part: _Partition) -> None:
-        nodes = {i for i, e in part.entities.items() if e.type is EntityType.MEETING}
-        self.meetings = {part.entities[i].meeting_id for i in nodes}
+    def __init__(
+        self, part: _Partition, meetings_only: bool, source_ids: frozenset[str] | None
+    ) -> None:
+        self.sources = (
+            {e.meeting_id for e in part.entities.values() if e.type is EntityType.MEETING}
+            if meetings_only
+            else set(source_ids or ())
+        )
+        nodes = {
+            i
+            for i, e in part.entities.items()
+            if (e.type is EntityType.MEETING and e.meeting_id in self.sources)
+            or (e.type is EntityType.SOURCE and e.source_id in self.sources)
+        }
         self.entities = nodes | {
             r.relation.source_id
             for r in part.relations.values()
@@ -886,7 +919,7 @@ def _show(view: _View | None, rel: Relation) -> Relation | None:
     or it is a hierarchy edge."""
     if view is None:
         return rel
-    evidence = tuple(e for e in rel.evidence if e.source_id in view.meetings)
+    evidence = tuple(e for e in rel.evidence if e.source_id in view.sources)
     if rel.kind is RelationKind.CHILD_OF or not evidence:
         return None
     return replace(rel, evidence=evidence)

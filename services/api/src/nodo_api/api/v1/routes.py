@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import UTC, datetime
 from functools import partial
 from typing import Annotated, Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import (
     APIRouter,
@@ -37,6 +39,7 @@ from nodo_api.api.v1.mapping import (
 from nodo_api.api.v1.schemas import (
     ChangeOutput,
     ChangesOutput,
+    CitationOutput,
     CollectionCreate,
     CollectionList,
     CollectionOutput,
@@ -45,6 +48,7 @@ from nodo_api.api.v1.schemas import (
     ExportInput,
     ExportOutput,
     GraphEdgeOutput,
+    GraphInsightsOutput,
     HierarchyLinkOutput,
     HierarchyProposalList,
     HierarchyReviewInput,
@@ -52,11 +56,22 @@ from nodo_api.api.v1.schemas import (
     MeetingCreate,
     MeetingList,
     MeetingOutput,
+    PageCitationOutput,
+    PageClaimOutput,
+    PageCreateInput,
+    PageEditInput,
+    PageFindingOutput,
+    PageHealthOutput,
+    PageList,
+    PageOutput,
+    PageRefreshInput,
+    PageRevisionOutput,
     ParentSuggestionInput,
     ProcessingConfirmation,
     QueryFiltersInput,
     QueryInput,
     QueryOutput,
+    QueryScopeInput,
     ReviewInput,
     ReviewOutput,
     ReviewRelationInput,
@@ -81,8 +96,22 @@ from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
 from nodo_api.domain.hierarchy import MAX_DEPTH
+from nodo_api.domain.pages import (
+    Page,
+    PageCitation,
+    PageClaim,
+    PageKind,
+    PageStatus,
+    claim_text_hash,
+)
+from nodo_api.domain.retrieval import (
+    CitationFormat,
+    QueryScope,
+    ResolvedQueryScope,
+    resolve_query_scope,
+)
 from nodo_api.domain.source_files import UploadRejected
-from nodo_api.domain.sources import CLEAR, Fragment, SourceKind
+from nodo_api.domain.sources import CLEAR, Fragment, Locator, SourceKind
 from nodo_api.errors import (
     AuthenticationError,
     NotAvailableOnEngine,
@@ -191,6 +220,264 @@ def _source_delete(container):
     if container.source_service is None:
         raise NotAvailableOnEngine
     return container.source_service
+
+
+def _pages(container):
+    if container.pages is None:
+        raise NotAvailableOnEngine
+    return container.pages
+
+
+@router.get("/graph/insights", response_model=GraphInsightsOutput)
+def graph_insights(actor: PrincipalDep, request: Request):
+    service = request.app.state.container.graph_insights
+    if service is None:
+        raise NotAvailableOnEngine
+    result = service.analyze(actor.workspace_id, actor.user_id)
+    return GraphInsightsOutput(
+        isolated=result.isolated,
+        bridges=result.bridges,
+        orphan_concepts=result.orphan_concepts,
+        duplicate_concepts=result.duplicate_concepts,
+        contradicting_decisions=result.contradicting_decisions,
+        truncated=result.truncated,
+    )
+
+
+def _page_output(page):
+    return PageOutput(
+        id=page.id,
+        kind=page.kind.value,
+        subject_id=page.subject_id,
+        status=page.status.value,
+        current_revision=page.current_revision,
+        created_at=page.created_at,
+    )
+
+
+def _page_revision_output(revision):
+    return PageRevisionOutput(
+        number=revision.number,
+        body_md=revision.body_md,
+        author_id=revision.author_id,
+        created_at=revision.created_at,
+        machine_generated=revision.provenance.machine_generated,
+        claims=tuple(
+            PageClaimOutput(
+                ordinal=claim.ordinal,
+                span_start=claim.span[0],
+                span_end=claim.span[1],
+                text=claim.text,
+                machine_generated=claim.machine_generated,
+                citations=tuple(
+                    PageCitationOutput(
+                        source_id=citation.source_id,
+                        fragment_id=citation.fragment_id,
+                        source_version=citation.source_version,
+                        locator=json.loads(citation.locator.to_json()),
+                        quote=citation.quote,
+                    )
+                    for citation in claim.citations
+                ),
+            )
+            for claim in revision.claims
+        ),
+    )
+
+
+@router.get("/pages", response_model=PageList)
+def list_pages(
+    actor: PrincipalDep,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    pages = _pages(request.app.state.container).list_owned(actor.workspace_id, actor.user_id)
+    return PageList(items=tuple(_page_output(page) for page in pages[:limit]))
+
+
+@router.post("/pages", response_model=PageOutput, status_code=status.HTTP_201_CREATED)
+def create_page(
+    payload: PageCreateInput,
+    actor: PrincipalDep,
+    request: Request,
+    idempotency_key: PageCommandKey,
+):
+    container = request.app.state.container
+    service = container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    identity = f"{actor.workspace_id}:{actor.user_id}:{idempotency_key}"
+    page_id = f"page-{uuid5(NAMESPACE_URL, identity).hex}"
+    pages = _pages(container)
+    try:
+        return _page_output(pages.get_owned(actor.workspace_id, actor.user_id, page_id))
+    except NotFoundError:
+        pass
+    sources, fragments = _source_stores(container)
+    evidence = []
+    for source_id in dict.fromkeys(payload.source_ids):
+        sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+        evidence.extend(fragments.latest(actor.workspace_id, source_id))
+    page = Page(
+        page_id,
+        actor.workspace_id,
+        actor.user_id,
+        PageKind(payload.kind),
+        payload.subject_id,
+        PageStatus.PROPOSED,
+        datetime.now(UTC),
+    )
+    service.compile(
+        page,
+        tuple(evidence),
+        model_version="extractive-page-compiler-v1",
+        prompt_version="page-create-v1",
+    )
+    return _page_output(page)
+
+
+@router.get("/pages/health", response_model=PageHealthOutput)
+def page_health(actor: PrincipalDep, request: Request):
+    service = request.app.state.container.page_health
+    if service is None:
+        raise NotAvailableOnEngine
+    findings = service.verify(actor.workspace_id, actor.user_id)
+    return PageHealthOutput(
+        items=tuple(
+            PageFindingOutput(
+                kind=finding.kind.value,
+                page_id=finding.page_id,
+                revision=finding.revision,
+                claim_ordinal=finding.claim_ordinal,
+            )
+            for finding in findings
+        )
+    )
+
+
+@router.get("/pages/{page_id}", response_model=PageOutput)
+def get_page(page_id: str, actor: PrincipalDep, request: Request):
+    page = _pages(request.app.state.container).get_owned(actor.workspace_id, actor.user_id, page_id)
+    return _page_output(page)
+
+
+@router.get("/pages/{page_id}/revisions", response_model=tuple[PageRevisionOutput, ...])
+def get_page_revisions(page_id: str, actor: PrincipalDep, request: Request):
+    revisions = _pages(request.app.state.container).revisions(
+        actor.workspace_id, actor.user_id, page_id
+    )
+    return tuple(_page_revision_output(revision) for revision in revisions)
+
+
+PageCommandKey = Annotated[
+    str,
+    Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+]
+
+
+@router.post("/pages/{page_id}/approve", response_model=PageOutput)
+def approve_page(
+    page_id: str, actor: PrincipalDep, request: Request, _idempotency_key: PageCommandKey
+):
+    service = request.app.state.container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    page = service.approve_proposal(actor.workspace_id, actor.user_id, page_id)
+    return _page_output(page)
+
+
+@router.post("/pages/{page_id}/reject", response_model=PageOutput)
+def reject_page(
+    page_id: str, actor: PrincipalDep, request: Request, _idempotency_key: PageCommandKey
+):
+    service = request.app.state.container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    return _page_output(service.reject_proposal(actor.workspace_id, actor.user_id, page_id))
+
+
+@router.patch("/pages/{page_id}", response_model=PageOutput)
+def edit_page(
+    page_id: str,
+    payload: PageEditInput,
+    actor: PrincipalDep,
+    request: Request,
+    _idempotency_key: PageCommandKey,
+):
+    container = request.app.state.container
+    service = container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    sources, fragments = _source_stores(container)
+    claims, evidence = [], {}
+    for ordinal, item in enumerate(payload.claims):
+        if item.span_end < item.span_start or item.span_end > len(payload.body_md):
+            raise ValidationFailed("A Page claim span is outside the body")
+        text = payload.body_md[item.span_start : item.span_end]
+        if not text.strip():
+            raise ValidationFailed("A Page claim needs body text")
+        citations = []
+        for raw in item.citations:
+            sources.get_owned(actor.workspace_id, actor.user_id, raw.source_id)
+            fragment = fragments.get_fragment(actor.workspace_id, raw.source_id, raw.fragment_id)
+            if fragment is None:
+                raise ValidationFailed("A Page citation fragment is unavailable")
+            locator = Locator.from_json(json.dumps(raw.locator))
+            citations.append(
+                PageCitation(
+                    raw.source_id,
+                    raw.fragment_id,
+                    raw.source_version,
+                    locator,
+                    raw.quote,
+                )
+            )
+            evidence[raw.source_id, raw.fragment_id] = fragment
+        claims.append(
+            PageClaim(
+                ordinal,
+                (item.span_start, item.span_end),
+                text,
+                claim_text_hash(text),
+                tuple(citations),
+            )
+        )
+    page = service.edit(
+        actor.workspace_id,
+        actor.user_id,
+        page_id,
+        payload.body_md,
+        tuple(claims),
+        tuple(evidence.values()),
+    )
+    return _page_output(page)
+
+
+@router.post("/pages/{page_id}/refresh", response_model=PageOutput)
+def refresh_page(
+    page_id: str,
+    payload: PageRefreshInput,
+    actor: PrincipalDep,
+    request: Request,
+    _idempotency_key: PageCommandKey,
+):
+    container = request.app.state.container
+    service = container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    page = _pages(container).get_owned(actor.workspace_id, actor.user_id, page_id)
+    sources, fragments = _source_stores(container)
+    evidence = []
+    for source_id in dict.fromkeys(payload.source_ids):
+        sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+        evidence.extend(fragments.latest(actor.workspace_id, source_id))
+    service.compile(
+        page,
+        tuple(evidence),
+        model_version="extractive-page-compiler-v1",
+        prompt_version="page-refresh-v1",
+    )
+    return _page_output(page)
 
 
 @router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)
@@ -529,17 +816,61 @@ def review_meeting(meeting_id: str, payload: ReviewInput, actor: PrincipalDep, r
 
 @router.post("/query", response_model=QueryOutput)
 def query(payload: QueryInput, actor: PrincipalDep, request: Request):
-    return _ask(request, actor, payload.question, payload.ui_locale, payload.filters)
+    scope = _resolved_query_scope(request, actor, payload.scope, payload.citation_format)
+    return _ask(
+        request,
+        actor,
+        payload.question,
+        payload.ui_locale,
+        payload.filters,
+        scope=scope,
+        citation_format=payload.citation_format,
+    )
 
 
-def _ask(request: Request, actor: Principal, text: str, locale, filters):
+def _ask(
+    request: Request,
+    actor: Principal,
+    text: str,
+    locale,
+    filters,
+    *,
+    scope=None,
+    citation_format: CitationFormat = CitationFormat.LEGACY,
+):
     """Questions are the expensive request (a model call each). A replica answers a limited number
     at once and tells the rest to come back, so a burst of questions can not starve reads."""
     container = request.app.state.container
     with container.query_gate:
-        return container.query_service.query(
-            actor.workspace_id, actor.user_id, _query_request(text, locale, filters)
+        result = container.query_service.query(
+            actor.workspace_id,
+            actor.user_id,
+            _query_request(text, locale, filters, scope, citation_format),
         )
+    return QueryOutput(
+        answer=result.answer,
+        answerability=result.answerability,
+        citations=tuple(
+            CitationOutput(
+                meeting_id=c.meeting_id,
+                segment_id=c.segment_id,
+                start_ms=c.start_ms,
+                end_ms=c.end_ms,
+                quote=c.quote,
+                speaker_id=c.speaker_id,
+                source_id=c.source_id,
+                fragment_id=c.fragment_id,
+                source_version=c.source_version,
+                locator=json.loads(c.locator.to_json()) if c.locator else None,
+            )
+            for c in result.citations
+        ),
+        related_entities=result.related_entities,
+        query_trace_id=result.query_trace_id,
+        model_version=result.model_version,
+        retrieval_version=result.retrieval_version,
+        degraded=result.degraded,
+    )
 
 
 @router.post("/voice-query", response_model=QueryOutput)
@@ -669,9 +1000,39 @@ def delete_meeting(meeting_id: str, actor: PrincipalDep, request: Request) -> Re
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _query_request(question, locale, filters: QueryFiltersInput | None) -> QueryRequest:
+def _query_request(
+    question,
+    locale,
+    filters: QueryFiltersInput | None,
+    scope=None,
+    citation_format: CitationFormat = CitationFormat.LEGACY,
+) -> QueryRequest:
     service_filters = QueryFilters(**filters.model_dump()) if filters else None
-    return QueryRequest(question, locale, service_filters)
+    return QueryRequest(
+        question,
+        locale,
+        service_filters,
+        scope or ResolvedQueryScope.legacy(),
+        citation_format,
+    )
+
+
+def _resolved_query_scope(
+    request: Request,
+    actor: Principal,
+    value: QueryScopeInput,
+    citation_format: CitationFormat,
+):
+    container = request.app.state.container
+    return resolve_query_scope(
+        actor.workspace_id,
+        actor.user_id,
+        QueryScope(value.mode, value.collection_id, value.source_ids, value.meeting_ids),
+        citation_format,
+        container.sources,
+        container.collections,
+        container.meetings,
+    )
 
 
 MAX_SYNC_BYTES = 40 * 1024 * 1024  # a long meeting with many versions is a few MB

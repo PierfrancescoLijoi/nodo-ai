@@ -17,6 +17,7 @@ from nodo_api.domain.sources import (
     DuplicateContentError,
     Fragment,
     Section,
+    SectionSummary,
     Source,
     SourceKind,
     SourceVersion,
@@ -397,3 +398,39 @@ class MemoryFragmentRepository:
         except NotFoundError:
             return ()
         return tuple(Fragment.from_segment(s, i) for i, s in enumerate(segments))
+
+
+class MemorySectionSummaryRepository:
+    def __init__(
+        self, sources: MemorySourceRepository, fragments: MemoryFragmentRepository
+    ) -> None:
+        self._sources = sources
+        self._fragments = fragments
+        self._summaries: dict[tuple[str, str, str, int], SectionSummary] = {}
+
+    def get(
+        self, workspace_id: str, source_id: str, section_id: str, source_version: int
+    ) -> SectionSummary | None:
+        try:
+            source = self._sources.get_for_processing(workspace_id, source_id)
+        except NotFoundError:
+            return None
+        if source.version != source_version:
+            return None
+        return self._summaries.get((workspace_id, source_id, section_id, source_version))
+
+    def put(self, workspace_id: str, summary: SectionSummary) -> None:
+        source = self._sources.get_for_processing(workspace_id, summary.source_id)
+        if source.version != summary.source_version:
+            raise NotFoundError
+        if summary.section_id not in {
+            section.id for section in self._fragments.outline(workspace_id, summary.source_id)
+        }:
+            raise NotFoundError
+        self._summaries[
+            (workspace_id, summary.source_id, summary.section_id, summary.source_version)
+        ] = summary
+
+    def erase_source(self, workspace_id: str, source_id: str) -> None:
+        for key in [key for key in self._summaries if key[:2] == (workspace_id, source_id)]:
+            del self._summaries[key]

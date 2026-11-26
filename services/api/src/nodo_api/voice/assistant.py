@@ -88,6 +88,15 @@ class Assistant:
             index = await self._speak(piece, locale, turn, index, emit, send_audio)
         await emit("assistant.done", turn=turn)
 
+    async def speak(
+        self, locale: str, text: str, turn: int, emit: Emit, send_audio: SendAudio
+    ) -> None:
+        """Speak text the owner already sees; no retrieval or answer generation happens here."""
+        index = 0
+        for piece in speech_chunks(text):
+            index = await self._speak(piece, locale, turn, index, emit, send_audio)
+        await emit("assistant.done", turn=turn)
+
     async def _speak(
         self, text: str, locale: str, turn: int, index: int, emit: Emit, send_audio: SendAudio
     ) -> int:

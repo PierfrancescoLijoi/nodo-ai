@@ -1,8 +1,11 @@
 import { z } from 'zod';
 
 import type { VoiceSession } from '@/features/capture/voiceClient';
+import type { Answer } from '../domain/types';
 import type { Locale } from '../i18n';
 import { ApiError, type ApiClient } from './client';
+import { mapAnswer } from './mappers';
+import { answer } from './schemas';
 
 const sessionOutput = z.object({
   session_id: z.string().min(1),
@@ -16,6 +19,9 @@ const ticketOutput = z.object({ ticket: z.string().min(20) });
 
 export interface VoiceApi {
   openMeeting(meetingId: string, locale: Locale): Promise<VoiceSession>;
+  openDictation(locale: Locale): Promise<VoiceSession>;
+  openSynthesis(locale: Locale): Promise<VoiceSession>;
+  queryLive(sessionId: string, question: string, locale: Locale): Promise<Answer>;
   refreshTicket(sessionId: string): Promise<string>;
 }
 
@@ -32,24 +38,44 @@ function streamUrl(baseUrl: string, path: string): string {
 }
 
 export function createVoiceApi(client: ApiClient, baseUrl: string): VoiceApi {
+  const open = async (mode: 'meeting' | 'dictation' | 'synthesis', locale: Locale, meetingId?: string) => {
+    const result = parse(
+      sessionOutput,
+      await client.post('/v1/voice/sessions', {
+        mode,
+        locale,
+        ...(meetingId ? { meeting_id: meetingId } : {}),
+      }),
+    );
+    return {
+      sessionId: result.session_id,
+      ticket: result.ticket,
+      protocolVersion: result.protocol_version,
+      streamUrl: streamUrl(baseUrl, result.stream_path),
+      heartbeatSeconds: result.heartbeat_seconds,
+      reconnectGraceSeconds: result.reconnect_grace_seconds,
+    };
+  };
   return {
     async openMeeting(meetingId, locale) {
-      const result = parse(
-        sessionOutput,
-        await client.post('/v1/voice/sessions', {
-          mode: 'meeting',
-          locale,
-          meeting_id: meetingId,
-        }),
+      return open('meeting', locale, meetingId);
+    },
+    async openDictation(locale) {
+      return open('dictation', locale);
+    },
+    async openSynthesis(locale) {
+      return open('synthesis', locale);
+    },
+    async queryLive(sessionId, question, locale) {
+      return mapAnswer(
+        parse(
+          answer,
+          await client.post(`/v1/voice/sessions/${encodeURIComponent(sessionId)}/query`, {
+            question,
+            ui_locale: locale,
+          }),
+        ),
       );
-      return {
-        sessionId: result.session_id,
-        ticket: result.ticket,
-        protocolVersion: result.protocol_version,
-        streamUrl: streamUrl(baseUrl, result.stream_path),
-        heartbeatSeconds: result.heartbeat_seconds,
-        reconnectGraceSeconds: result.reconnect_grace_seconds,
-      };
     },
 
     async refreshTicket(sessionId) {

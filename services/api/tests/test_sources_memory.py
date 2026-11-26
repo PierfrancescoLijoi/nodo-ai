@@ -8,14 +8,16 @@ import pytest
 from nodo_api.adapters.memory import (
     MemoryFragmentRepository,
     MemoryMeetingRepository,
+    MemorySectionSummaryRepository,
     MemorySourceRepository,
     MemoryTranscriptRepository,
 )
 from nodo_api.domain.models import Locale, Meeting, MeetingState, RecordingAttestation
+from tests.section_summary_contract import SectionSummaryContract
 from tests.source_contract import T0, FragmentContract, SourceContract
 
 
-class TestMemorySources(SourceContract, FragmentContract):
+class TestMemorySources(SourceContract, FragmentContract, SectionSummaryContract):
     @pytest.fixture
     def meetings(self):
         return MemoryMeetingRepository()
@@ -31,6 +33,10 @@ class TestMemorySources(SourceContract, FragmentContract):
     @pytest.fixture
     def fragments(self, sources, transcripts):
         return MemoryFragmentRepository(sources, transcripts)
+
+    @pytest.fixture
+    def summaries(self, sources, fragments):
+        return MemorySectionSummaryRepository(sources, fragments)
 
     @pytest.fixture
     def ws(self):

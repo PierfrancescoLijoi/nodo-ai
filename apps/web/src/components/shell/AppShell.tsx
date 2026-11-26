@@ -5,8 +5,10 @@ import {
   ChatCircleText,
   ClipboardText,
   GearSix,
+  Heartbeat,
   House,
   Microphone,
+  Cpu,
   Notebook,
   TreeStructure,
   type Icon,
@@ -29,6 +31,9 @@ interface Destination {
     | 'tabs.brain'
     | 'tabs.graph'
     | 'review.title'
+    | 'health.title'
+    | 'wiki.title'
+    | 'models.title'
     | 'common.settings';
   icon: Icon;
 }
@@ -42,6 +47,9 @@ const PRIMARY: Destination[] = [
 ];
 
 const SECONDARY: Destination[] = [
+  { href: '/models/', label: 'models.title', icon: Cpu },
+  { href: '/wiki/', label: 'wiki.title', icon: Notebook },
+  { href: '/health/', label: 'health.title', icon: Heartbeat },
   { href: '/review/', label: 'review.title', icon: ClipboardText },
   { href: '/settings/', label: 'common.settings', icon: GearSix },
 ];

@@ -191,6 +191,25 @@ class Section:
 
 
 @dataclass(frozen=True, slots=True)
+class SectionSummary:
+    """Derived, version-pinned context for a source section."""
+
+    source_id: str
+    section_id: str
+    source_version: int
+    model_version: str
+    prompt_version: str
+    text: str
+    token_count: int
+
+    def __post_init__(self) -> None:
+        if not self.source_id or not self.section_id or not self.text.strip():
+            raise ValueError("A section summary needs a source, section and text")
+        if self.source_version < 1 or self.token_count < 1:
+            raise ValueError("A summary version and token count start at 1")
+
+
+@dataclass(frozen=True, slots=True)
 class Source:
     id: str
     workspace_id: str

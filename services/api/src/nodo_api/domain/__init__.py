@@ -20,6 +20,16 @@ from nodo_api.domain.models import (
     Speaker,
     TranscriptSegment,
 )
+from nodo_api.domain.pages import (
+    Page,
+    PageCitation,
+    PageClaim,
+    PageKind,
+    PageProposal,
+    PageProvenance,
+    PageRevision,
+    PageStatus,
+)
 from nodo_api.domain.sources import (
     MAX_FRAGMENT_CHARS,
     Fragment,
@@ -42,6 +52,14 @@ __all__ = [
     "Locator",
     "Meeting",
     "MeetingState",
+    "Page",
+    "PageCitation",
+    "PageClaim",
+    "PageKind",
+    "PageProposal",
+    "PageProvenance",
+    "PageRevision",
+    "PageStatus",
     "ParseError",
     "ParsedDocument",
     "RecordingAttestation",

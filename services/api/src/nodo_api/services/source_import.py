@@ -67,6 +67,7 @@ from nodo_api.ports import (
     ImportJobRepository,
     JobControl,
     JobQueue,
+    PageRepository,
     SourceBlobStore,
     SourceRepository,
     SpeechToText,
@@ -74,6 +75,7 @@ from nodo_api.ports import (
 from nodo_api.services.answer_cache import AnswerCache, invalidate
 from nodo_api.services.extraction import merge
 from nodo_api.services.ingestion import build_segments
+from nodo_api.services.section_summaries import SectionSummaryService
 
 logger = logging.getLogger("nodo_import")
 
@@ -173,6 +175,8 @@ class SourceImportService:
         token_fits: Callable[[list[str]], list[bool]] | None = None,
         speech: SpeechToText | None = None,
         speech_locales: tuple[str, ...] = (),
+        section_summaries: SectionSummaryService | None = None,
+        pages: PageRepository | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._sources = sources
@@ -195,6 +199,8 @@ class SourceImportService:
         # The meeting speech engine; None: audio and video are refused at create.
         self._speech = speech
         self._speech_locales = speech_locales
+        self._section_summaries = section_summaries
+        self._pages = pages
         # Times this service writes (created_at, tombstones). Job and version rows keep the wall
         # clock of their stores (Task 5 decision): they are progress, not facts a test fakes.
         self._clock = clock
@@ -649,6 +655,8 @@ class SourceImportService:
             self._enter(workspace_id, source_id, "indexing", total=len(fragments))
             try:
                 version = self._fragments.add_version(workspace_id, source_id, sections, fragments)
+                if previous is not None and self._pages is not None:
+                    self._pages.mark_stale_for_source(workspace_id, source_id)
                 self._mark_new_version(workspace_id, source_id)
                 self._fragments.record_version(
                     workspace_id,
@@ -823,6 +831,7 @@ class SourceImportService:
         self._finish(
             workspace_id, source_id, owner, "ready", "extraction_partial" if skipped else None
         )
+        self._summarize_sections(workspace_id, sections, fragments, locale)
         logger.info(
             "import_ready fragments=%s extracted=%s batches=%s skipped=%s",
             len(fragments),
@@ -830,6 +839,22 @@ class SourceImportService:
             len(batches),
             skipped,
         )
+
+    def _summarize_sections(
+        self,
+        workspace_id: str,
+        sections: tuple[Section, ...],
+        fragments: tuple[Fragment, ...],
+        locale: Locale,
+    ) -> None:
+        if self._section_summaries is None:
+            return
+        for section in sections:
+            try:
+                self._section_summaries.get_or_generate(workspace_id, section.id, fragments, locale)
+            except Exception as error:
+                # Derived text must not turn an otherwise successful import into a failure.
+                logger.warning("section_summary_skipped type=%s", type(error).__name__)
 
     # ------------------------------------------------------------------------------ guards
 

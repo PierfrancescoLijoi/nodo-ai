@@ -34,6 +34,7 @@ from nodo_api.domain.models import (
     SpokenPhrase,
     TranscriptSegment,
 )
+from nodo_api.domain.pages import Page, PageProposal, PageRevision
 from nodo_api.domain.retention import AudioDue
 from nodo_api.domain.source_files import UploadSession
 from nodo_api.domain.sources import (
@@ -43,6 +44,7 @@ from nodo_api.domain.sources import (
     ImportJob,
     IndexResult,
     Section,
+    SectionSummary,
     Source,
     SourceKind,
     SourceVersion,
@@ -317,6 +319,68 @@ class FragmentRepository(Protocol):
         ...
 
 
+class SectionSummaryRepository(Protocol):
+    def get(
+        self, workspace_id: str, source_id: str, section_id: str, source_version: int
+    ) -> SectionSummary | None:
+        """Return only a summary for that exact source version."""
+        ...
+
+    def put(self, workspace_id: str, summary: SectionSummary) -> None:
+        """Replace a summary only while the source and section are current."""
+        ...
+
+    def erase_source(self, workspace_id: str, source_id: str) -> None: ...
+
+
+class PageRepository(Protocol):
+    """Authoritative, local Wiki Pages (ADR-031).
+
+    These methods are deliberately separate from source and fragment repositories: an approved
+    revision is user data, whereas a proposal is rebuildable. `redact_source` is part of the
+    synchronous deletion path; an implementation must not defer it to a background worker.
+    """
+
+    def put_proposal(self, page: Page, proposal: PageProposal) -> None:
+        """Store or replace an unapproved proposal. Implementations reject invalid state."""
+        ...
+
+    def get_owned(self, workspace_id: str, owner_id: str, page_id: str) -> Page:
+        """Return metadata only when it belongs to the owner, otherwise raise NotFoundError."""
+        ...
+
+    def list_owned(self, workspace_id: str, owner_id: str) -> tuple[Page, ...]:
+        """Return the owner's Pages newest first; proposals are represented by Page status."""
+        ...
+
+    def proposal(self, workspace_id: str, owner_id: str, page_id: str) -> PageProposal | None:
+        """Read an owner's pending proposal; approved revisions are never returned as a proposal."""
+        ...
+
+    def append_revision(self, workspace_id: str, owner_id: str, revision: PageRevision) -> Page:
+        """Approve a proposal or append a human edit. Revision numbers must be contiguous."""
+        ...
+
+    def reject_proposal(self, workspace_id: str, owner_id: str, page_id: str) -> Page:
+        """Mark the current proposal rejected without deleting its auditable draft."""
+        ...
+
+    def revisions(self, workspace_id: str, owner_id: str, page_id: str) -> tuple[PageRevision, ...]:
+        """Return current and historical revisions newest first."""
+        ...
+
+    def mark_stale_for_source(self, workspace_id: str, source_id: str) -> tuple[str, ...]:
+        """Mark approved Pages whose claims cite a superseded source; return affected ids."""
+        ...
+
+    def redact_source(self, workspace_id: str, source_id: str) -> tuple[str, ...]:
+        """Synchronously redact all dependent revision claims before source fragments are erased.
+
+        A mapping failure must redact the whole revision. Returns Pages affected by the deletion.
+        """
+        ...
+
+
 class ImportJobRepository(Protocol):
     """Progress of the import of one source, read by the person and written by the worker."""
 
@@ -493,9 +557,12 @@ class Retriever(Protocol):
         query: str,
         filters: dict[str, Any] | None,
         limit: int,
+        *,
+        source_ids: frozenset[str] | None = None,
     ) -> tuple[TranscriptSegment, ...]:
         """Only segments of meetings this owner owns. The owner is a field of every indexed
-        document, so the access check costs the same however many meetings there are."""
+        document, so the access check costs the same however many meetings there are. `source_ids`
+        narrows the search to those meeting sources; an empty set returns no evidence."""
         ...
 
     def count(self, workspace_id: str, meeting_id: str) -> int:
@@ -586,16 +653,23 @@ class GraphStore(Protocol):
         types: frozenset[EntityType] | None = None,
         *,
         meetings_only: bool = False,
+        source_ids: frozenset[str] | None = None,
     ) -> tuple[Entity, ...]:
         """`meetings_only` (on every read /v1 uses) is the view frozen clients get: relations a
         meeting evidences (never CHILD_OF) with only their meeting evidence, and entities a meeting
         mentions. It is applied before limits, fanout and seeds, so documents never displace
-        meeting data. A store that holds no source data may ignore it."""
+        meeting data. `source_ids` filters relation evidence inside the store before seeds or
+        limits are applied; an empty set produces no graph. A store that holds no source data may
+        ignore the source filter."""
         ...
 
     def overview(
         self, workspace_id: str, owner_id: str, limit: int, *, meetings_only: bool = False
     ) -> tuple[Entity, ...]: ...
+
+    def analysis_graph(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
+        """A bounded whole-owner graph for deterministic local analysis."""
+        ...
 
     def recent_decisions(
         self, workspace_id: str, owner_id: str, limit: int
@@ -613,6 +687,7 @@ class GraphStore(Protocol):
         include_proposed: bool,
         as_of: datetime | None,
         meetings_only: bool = False,
+        source_ids: frozenset[str] | None = None,
     ) -> Subgraph: ...
 
     def review_relation(
@@ -854,8 +929,9 @@ class LlmClient(Protocol):
         workspace_id: str,
         question: str,
         locale: Locale,
-        evidence: tuple[TranscriptSegment, ...],
+        evidence: tuple[Fragment, ...],
         graph: Subgraph,
+        summaries: tuple[SectionSummary, ...] = (),
     ) -> Any: ...
 
 
