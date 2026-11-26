@@ -1917,6 +1917,7 @@
           "scope": {
             "$ref": "#/components/schemas/QueryScopeInput",
             "default": {
+              "meeting_ids": [],
               "mode": "legacy",
               "source_ids": []
             }
@@ -2000,6 +2001,15 @@
             ],
             "title": "Collection Id"
           },
+          "meeting_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Meeting Ids",
+            "type": "array"
+          },
           "mode": {
             "$ref": "#/components/schemas/QueryScopeMode",
             "default": "legacy"
@@ -2023,6 +2033,7 @@
           "all",
           "collection",
           "sources",
+          "meetings",
           "sources_only"
         ],
         "title": "QueryScopeMode",

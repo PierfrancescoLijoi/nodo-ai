@@ -70,6 +70,10 @@ CATALOG: tuple[ModelCatalogEntry, ...] = (
         "https://huggingface.co/Systran/faster-whisper-medium", (HardwareTier.CPU, HardwareTier.GPU_6GB, HardwareTier.GPU_LARGE),
         (), None, None,
     ),
+    ModelCatalogEntry(
+        "flock-junco", "speech_output", "Flock Speech Junco", "Flock Speech", "0.2.3", 45,
+        "Apache-2.0", "https://github.com/flockspeech/flockspeech", (HardwareTier.CPU,), (), None, None,
+    ),
 )
 
 
