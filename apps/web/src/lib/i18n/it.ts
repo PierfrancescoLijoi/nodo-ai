@@ -264,6 +264,11 @@ const it = {
     more: 'Altre proposte sono in attesa. Decidi queste per vederle.',
   },
   capture: {
+    liveAskLabel: 'Chiedi del parlato già finalizzato',
+    liveAskPlaceholder: 'Fai una domanda su questo meeting live',
+    liveAsk: 'Chiedi al meeting live',
+    liveAsking: 'Controllo il parlato finalizzato',
+    liveProvisional: 'Risposta provvisoria — basata solo sul parlato finalizzato finora.',
     title: 'Nuova registrazione',
     simulation: 'Simulazione. Questa versione non usa il microfono e non salva audio.',
     notice: {

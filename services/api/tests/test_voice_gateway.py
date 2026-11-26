@@ -269,6 +269,31 @@ def test_a_live_meeting_reconnects_and_ends_as_a_normal_meeting_ready_for_the_pi
         assert [s["speaker_id"] for s in transcript["items"]] == ["S1", "S1", "S1"]
 
 
+def test_live_query_uses_only_finalized_session_phrases(settings, attestation):
+    with make_client(settings, ["the deployment date is monday"]) as client:
+        headers = {"Authorization": "Bearer test-dev-token-0123456789"}
+        meeting = client.post(
+            "/v1/meetings",
+            headers={**headers, "Idempotency-Key": "live-meeting-query-0001"},
+            json={"recording_attestation": attestation},
+        ).json()["id"]
+        session = open_session(client, headers, mode="meeting", locale="en", meeting_id=meeting)
+        with client.websocket_connect(session["stream_path"]) as ws:
+            assert hello(ws, session["ticket"])["type"] == "session.ready"
+            speak(ws, 0, 1500)
+            collect_finals(ws, 1)
+            response = client.post(
+                f"/v1/voice/sessions/{session['session_id']}/query",
+                headers=headers,
+                json={"question": "When is the deployment date?", "ui_locale": "en"},
+            )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["retrieval_version"] == "live-final-v1"
+    assert {citation["segment_id"] for citation in body["citations"]} <= {"live-0"}
+
+
 def collect_finals(ws, count: int) -> list[dict[str, Any]]:
     finals: list[dict[str, Any]] = []
     while len(finals) < count:

@@ -262,6 +262,11 @@ const da = {
     more: 'Flere forslag venter. Tag stilling til disse for at se dem.',
   },
   capture: {
+    liveAskLabel: 'Spørg om færdiggjort tale indtil nu',
+    liveAskPlaceholder: 'Spørg om dette live-møde',
+    liveAsk: 'Spørg live-mødet',
+    liveAsking: 'Kontrollerer færdiggjort tale',
+    liveProvisional: 'Foreløbigt svar — kun baseret på færdiggjort tale indtil nu.',
     title: 'Ny optagelse',
     simulation: 'Simulering. Denne version bruger ikke mikrofonen og gemmer ingen lyd.',
     notice: {

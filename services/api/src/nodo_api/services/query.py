@@ -317,6 +317,53 @@ class QueryService:
                 )
         return result
 
+    def query_live(
+        self,
+        workspace_id: str,
+        user_id: str,
+        request: QueryRequest,
+        segments: tuple[TranscriptSegment, ...],
+    ) -> QueryResult:
+        """Answer from final live phrases only, without indexing or caching a provisional meeting.
+
+        The caller has already checked the meeting/session ownership.  Citations are accepted only
+        when they exactly reference one of the supplied in-memory phrases; partial audio never
+        reaches this method.
+        """
+        evidence = tuple(
+            Fragment.from_segment(segment, ordinal) for ordinal, segment in enumerate(segments)
+        )
+        if not evidence:
+            return QueryResult("", Answerability.UNANSWERABLE, (), (), query_trace_id=str(uuid4()))
+        try:
+            generated = self._llm.answer(
+                workspace_id, request.question, request.ui_locale, evidence, Subgraph(), ()
+            )
+            degraded = False
+        except (DependencyUnavailable, Overloaded):
+            generated, degraded = self._sources_only(evidence), True
+        keys = {(fragment.source_id, fragment.id) for fragment in evidence}
+        citations = tuple(
+            citation
+            for citation in generated.citations
+            if (citation.evidence_source_id, citation.evidence_fragment_id) in keys
+        )
+        if not citations:
+            generated = GeneratedAnswer("", Answerability.UNANSWERABLE, (), ())
+        elif len(citations) != len(generated.citations):
+            generated = replace(generated, answerability=Answerability.PARTIAL, citations=citations)
+        else:
+            generated = replace(generated, citations=citations, related_entities=())
+        return QueryResult(
+            generated.answer,
+            generated.answerability,
+            generated.citations,
+            generated.related_entities,
+            query_trace_id=str(uuid4()),
+            degraded=degraded,
+            retrieval_version="live-final-v1",
+        )
+
     def _lookup(
         self, workspace_id: str, user_id: str, request: QueryRequest, filters: dict[str, Any] | None
     ) -> Lookup:

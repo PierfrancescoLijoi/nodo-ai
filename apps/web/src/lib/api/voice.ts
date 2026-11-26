@@ -1,8 +1,11 @@
 import { z } from 'zod';
 
 import type { VoiceSession } from '@/features/capture/voiceClient';
+import type { Answer } from '../domain/types';
 import type { Locale } from '../i18n';
 import { ApiError, type ApiClient } from './client';
+import { mapAnswer } from './mappers';
+import { answer } from './schemas';
 
 const sessionOutput = z.object({
   session_id: z.string().min(1),
@@ -18,6 +21,7 @@ export interface VoiceApi {
   openMeeting(meetingId: string, locale: Locale): Promise<VoiceSession>;
   openDictation(locale: Locale): Promise<VoiceSession>;
   openSynthesis(locale: Locale): Promise<VoiceSession>;
+  queryLive(sessionId: string, question: string, locale: Locale): Promise<Answer>;
   refreshTicket(sessionId: string): Promise<string>;
 }
 
@@ -61,6 +65,17 @@ export function createVoiceApi(client: ApiClient, baseUrl: string): VoiceApi {
     },
     async openSynthesis(locale) {
       return open('synthesis', locale);
+    },
+    async queryLive(sessionId, question, locale) {
+      return mapAnswer(
+        parse(
+          answer,
+          await client.post(`/v1/voice/sessions/${encodeURIComponent(sessionId)}/query`, {
+            question,
+            ui_locale: locale,
+          }),
+        ),
+      );
     },
 
     async refreshTicket(sessionId) {

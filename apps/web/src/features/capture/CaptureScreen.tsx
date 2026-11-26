@@ -2,12 +2,12 @@
 
 import { Check, Microphone, Pause, Play, Stop, Warning } from '@phosphor-icons/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { PageHeader } from '@/components/shell/PageHeader';
-import { Button, Checkbox, Progress, Segmented, Surface } from '@/components/ui/primitives';
-import type { MeetingState, RetentionDays } from '@/lib/domain/types';
+import { Button, Checkbox, Progress, Segmented, Surface, TextField } from '@/components/ui/primitives';
+import type { Answer, MeetingState, RetentionDays } from '@/lib/domain/types';
 import { formatClock } from '@/lib/i18n/format';
 import { useMeetingState } from '@/lib/queries';
 import { useRepository, useVoiceApi } from '@/providers/data';
@@ -157,7 +157,11 @@ export function CaptureScreen() {
   const [liveSeconds, setLiveSeconds] = useState(0);
   const [liveLevel, setLiveLevel] = useState(0);
   const [liveTranscript, setLiveTranscript] = useState<string[]>([]);
+  const [liveQuestion, setLiveQuestion] = useState('');
+  const [liveAnswer, setLiveAnswer] = useState<Answer>();
+  const [liveAsking, setLiveAsking] = useState(false);
   const liveClient = useRef<VoiceSessionClient | undefined>(undefined);
+  const liveSessionId = useRef<string | undefined>(undefined);
   const liveCapture = useRef<BrowserPcmCapture | undefined>(undefined);
   const liveStartedAt = useRef(0);
   const started = useRef(false);
@@ -204,6 +208,7 @@ export function CaptureScreen() {
       createdMeeting = (await repository.createMeeting({ locale, retentionDays })).id;
       setMeetingId(createdMeeting);
       const session = await voice.openMeeting(createdMeeting, locale);
+      liveSessionId.current = session.sessionId;
       const capture = new BrowserPcmCapture();
       const onEvent = (event: VoiceEvent) => {
         if (event.type === 'transcript.final' && typeof event.text === 'string') {
@@ -250,6 +255,18 @@ export function CaptureScreen() {
     liveClient.current?.end();
     liveCapture.current = undefined;
     setUploaded(true);
+  };
+
+  const askLive = (event: FormEvent) => {
+    event.preventDefault();
+    const question = liveQuestion.trim();
+    if (!question || !liveSessionId.current) return;
+    setLiveAsking(true);
+    setLiveAnswer(undefined);
+    void voice.queryLive(liveSessionId.current, question, locale).then(
+      (answer) => setLiveAnswer(answer),
+      () => setLiveAnswer(undefined),
+    ).finally(() => setLiveAsking(false));
   };
 
   useEffect(() => {
@@ -338,6 +355,26 @@ export function CaptureScreen() {
               <h2>{t('capture.steps.transcribe')}</h2>
               {liveTranscript.map((line, index) => (
                 <p key={`${index}-${line}`}>{line}</p>
+              ))}
+            </Surface>
+          ) : null}
+          <form className={styles.stack} onSubmit={askLive}>
+            <TextField
+              label={t('capture.liveAskLabel')}
+              value={liveQuestion}
+              onChange={setLiveQuestion}
+              placeholder={t('capture.liveAskPlaceholder')}
+            />
+            <Button type="submit" disabled={!liveQuestion.trim() || liveAsking}>
+              {liveAsking ? t('capture.liveAsking') : t('capture.liveAsk')}
+            </Button>
+          </form>
+          {liveAnswer ? (
+            <Surface tone="accent" as="section">
+              <p className={styles.label}>{t('capture.liveProvisional')}</p>
+              <p>{liveAnswer.text || t('ask.unanswerableBody')}</p>
+              {liveAnswer.citations.map((citation) => (
+                <p className={styles.small} key={citation.segmentId}>{citation.quote}</p>
               ))}
             </Surface>
           ) : null}
