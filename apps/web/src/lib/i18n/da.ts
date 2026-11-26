@@ -266,7 +266,7 @@ const da = {
     liveAskPlaceholder: 'Spørg om dette live-møde',
     liveAsk: 'Spørg live-mødet',
     liveAsking: 'Kontrollerer færdiggjort tale',
-    liveProvisional: 'Foreløbigt svar — kun baseret på færdiggjort tale indtil nu.',
+    liveProvisional: 'Foreløbigt svar: kun baseret på færdiggjort tale indtil nu.',
     title: 'Ny optagelse',
     simulation: 'Simulering. Denne version bruger ikke mikrofonen og gemmer ingen lyd.',
     notice: {

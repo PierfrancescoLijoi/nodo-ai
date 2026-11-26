@@ -280,7 +280,7 @@ const pl = {
     liveAskPlaceholder: 'Zapytaj o to spotkanie na żywo',
     liveAsk: 'Zapytaj spotkanie na żywo',
     liveAsking: 'Sprawdzanie sfinalizowanej mowy',
-    liveProvisional: 'Odpowiedź tymczasowa — oparta tylko na dotąd sfinalizowanej mowie.',
+    liveProvisional: 'Odpowiedź tymczasowa: oparta tylko na dotąd sfinalizowanej mowie.',
     title: 'Nowe nagranie',
     simulation: 'Symulacja. Ta wersja nie używa mikrofonu i nie zapisuje dźwięku.',
     notice: {

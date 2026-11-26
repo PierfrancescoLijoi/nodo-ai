@@ -267,7 +267,7 @@ const en = {
     liveAskPlaceholder: 'Ask about this live meeting',
     liveAsk: 'Ask live meeting',
     liveAsking: 'Checking finalised speech',
-    liveProvisional: 'Provisional answer — based only on finalised speech so far.',
+    liveProvisional: 'Provisional answer: based only on finalised speech so far.',
     title: 'New recording',
     simulation: 'Simulation. This build does not use the microphone and stores no audio.',
     notice: {
