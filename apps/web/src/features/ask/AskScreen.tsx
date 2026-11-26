@@ -178,7 +178,10 @@ function Conversation() {
       );
       dictationClient.current = client;
       dictationCapture.current = capture;
-      await capture.start(({ offsetMs, pcm }) => client.sendPcm(offsetMs, pcm), () => undefined);
+      await capture.start(
+        ({ offsetMs, pcm }) => client.sendPcm(offsetMs, pcm),
+        () => undefined,
+      );
       if (!dictationHeld.current) {
         await capture.stop();
         dictationClient.current = undefined;
@@ -210,13 +213,17 @@ function Conversation() {
     stopSpeaking();
     try {
       const session = await voice.openSynthesis(locale);
-      const client = new VoiceSessionClient(session, (event) => {
-        if (event.type === 'assistant.done' || event.type === 'assistant.cancelled') stopSpeaking();
-      }, {
-        refreshTicket: voice.refreshTicket,
-        onAudio: (frame) => playback.current.play(frame),
-        onError: stopSpeaking,
-      });
+      const client = new VoiceSessionClient(
+        session,
+        (event) => {
+          if (event.type === 'assistant.done' || event.type === 'assistant.cancelled') stopSpeaking();
+        },
+        {
+          refreshTicket: voice.refreshTicket,
+          onAudio: (frame) => playback.current.play(frame),
+          onError: stopSpeaking,
+        },
+      );
       speechClient.current = client;
       client.speak(value);
       client.connect();

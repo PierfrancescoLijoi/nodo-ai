@@ -751,7 +751,9 @@ class SqliteGraphStore:
                 (workspace_id, owner_id, limit + 1),
             ).fetchall()
             chosen = rows[:limit]
-            ids = list(dict.fromkeys(i for row in chosen for i in (row["source_id"], row["target_id"])))
+            ids = list(
+                dict.fromkeys(i for row in chosen for i in (row["source_id"], row["target_id"]))
+            )
             entities = self._entities(conn, workspace_id, owner_id, ids)
             evidence = self._evidence(conn, workspace_id, owner_id, [row["id"] for row in chosen])
         return Subgraph(

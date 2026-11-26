@@ -231,10 +231,18 @@ def remove_local_model(
     root = request.app.state.container.settings.local_models_dir or data_dir() / "models"
     remove(entry, root)
     return LocalModelOutput(
-        id=entry.id, task=entry.task, name=entry.name, publisher=entry.publisher,
-        version=entry.version, size_mb=entry.size_mb, licence=entry.licence,
-        licence_url=entry.licence_url, hardware=tuple(item.value for item in entry.hardware),
-        sha256=entry.sha256, installable=entry.installable, installed=False,
+        id=entry.id,
+        task=entry.task,
+        name=entry.name,
+        publisher=entry.publisher,
+        version=entry.version,
+        size_mb=entry.size_mb,
+        licence=entry.licence,
+        licence_url=entry.licence_url,
+        hardware=tuple(item.value for item in entry.hardware),
+        sha256=entry.sha256,
+        installable=entry.installable,
+        installed=False,
     )
 
 
@@ -254,10 +262,18 @@ def install_local_model(
     except (FileExistsError, ValueError) as error:
         raise ValidationFailed(str(error)) from error
     return LocalModelOutput(
-        id=entry.id, task=entry.task, name=entry.name, publisher=entry.publisher,
-        version=entry.version, size_mb=entry.size_mb, licence=entry.licence,
-        licence_url=entry.licence_url, hardware=tuple(item.value for item in entry.hardware),
-        sha256=entry.sha256, installable=entry.installable, installed=True,
+        id=entry.id,
+        task=entry.task,
+        name=entry.name,
+        publisher=entry.publisher,
+        version=entry.version,
+        size_mb=entry.size_mb,
+        licence=entry.licence,
+        licence_url=entry.licence_url,
+        hardware=tuple(item.value for item in entry.hardware),
+        sha256=entry.sha256,
+        installable=entry.installable,
+        installed=True,
     )
 
 

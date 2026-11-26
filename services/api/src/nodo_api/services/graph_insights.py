@@ -48,8 +48,7 @@ class GraphInsightService:
             sorted(
                 edge.id
                 for edge in graph.edges
-                if edge.kind is RelationKind.CONTRADICTS
-                and edge.status is ReviewStatus.APPROVED
+                if edge.kind is RelationKind.CONTRADICTS and edge.status is ReviewStatus.APPROVED
             )
         )
         return GraphInsights(

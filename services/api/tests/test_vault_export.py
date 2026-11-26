@@ -48,9 +48,7 @@ def test_vault_export_never_keeps_text_from_an_erased_source():
 def test_vault_writer_keeps_unmanaged_notes_and_removes_only_old_managed_pages(tmp_path):
     now = datetime(2026, 11, 24, tzinfo=UTC)
     store = MemoryPageRepository()
-    page = Page(
-        "p", "ws", "owner", PageKind.SOURCE_SUMMARY, "source", PageStatus.PROPOSED, now
-    )
+    page = Page("p", "ws", "owner", PageKind.SOURCE_SUMMARY, "source", PageStatus.PROPOSED, now)
     citation = PageCitation("source", "fragment", 1, Locator(chars=(0, 4)), "Fact")
     claim = PageClaim(0, (0, 4), "Fact", claim_text_hash("Fact"), (citation,), True)
     store.put_proposal(

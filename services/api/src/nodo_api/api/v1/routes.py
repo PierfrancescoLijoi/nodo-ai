@@ -478,6 +478,8 @@ def refresh_page(
         prompt_version="page-refresh-v1",
     )
     return _page_output(page)
+
+
 @router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)
 def create_source(
     payload: SourceCreate,

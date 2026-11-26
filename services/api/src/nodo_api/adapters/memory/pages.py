@@ -48,7 +48,8 @@ class MemoryPageRepository:
                     for (ws, _), page in self._pages.items()
                     if ws == workspace_id and page.owner_id == owner_id
                 ),
-                key=lambda page: (page.created_at, page.id), reverse=True,
+                key=lambda page: (page.created_at, page.id),
+                reverse=True,
             )
         )
 

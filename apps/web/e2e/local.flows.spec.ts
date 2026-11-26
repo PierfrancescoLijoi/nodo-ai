@@ -84,7 +84,9 @@ test.describe('local engine', () => {
     await nodes.nth(1).focus();
     await page.keyboard.press('Enter');
     await expect(
-      page.getByRole('complementary', { name: 'Node details' }).getByRole('heading', { name: label, level: 3 }),
+      page
+        .getByRole('complementary', { name: 'Node details' })
+        .getByRole('heading', { name: label, level: 3 }),
     ).toBeVisible();
 
     await page.getByRole('link', { name: 'Review proposals' }).click();

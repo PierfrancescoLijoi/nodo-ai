@@ -48,9 +48,8 @@ class QueryScope:
             raise ValueError(f"At most {MAX_QUERY_SOURCES} sources may be selected")
         if len(set(self.source_ids)) != len(self.source_ids):
             raise ValueError("Selected source ids must be unique")
-        if (
-            len(self.meeting_ids) > MAX_QUERY_SOURCES
-            or len(set(self.meeting_ids)) != len(self.meeting_ids)
+        if len(self.meeting_ids) > MAX_QUERY_SOURCES or len(set(self.meeting_ids)) != len(
+            self.meeting_ids
         ):
             raise ValueError("Selected meeting ids must be unique and within the source limit")
 

@@ -104,9 +104,7 @@ class PageService:
     ) -> Page:
         page = self._pages.get_owned(workspace_id, owner_id, page_id)
         validated = tuple(
-            self._validated_claim(workspace_id, claim, evidence)
-            if claim.citations
-            else claim
+            self._validated_claim(workspace_id, claim, evidence) if claim.citations else claim
             for claim in claims
         )
         current = self._pages.revisions(workspace_id, owner_id, page_id)

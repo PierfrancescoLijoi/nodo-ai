@@ -263,10 +263,13 @@ export function CaptureScreen() {
     if (!question || !liveSessionId.current) return;
     setLiveAsking(true);
     setLiveAnswer(undefined);
-    void voice.queryLive(liveSessionId.current, question, locale).then(
-      (answer) => setLiveAnswer(answer),
-      () => setLiveAnswer(undefined),
-    ).finally(() => setLiveAsking(false));
+    void voice
+      .queryLive(liveSessionId.current, question, locale)
+      .then(
+        (answer) => setLiveAnswer(answer),
+        () => setLiveAnswer(undefined),
+      )
+      .finally(() => setLiveAsking(false));
   };
 
   useEffect(() => {
@@ -374,7 +377,9 @@ export function CaptureScreen() {
               <p className={styles.label}>{t('capture.liveProvisional')}</p>
               <p>{liveAnswer.text || t('ask.unanswerableBody')}</p>
               {liveAnswer.citations.map((citation) => (
-                <p className={styles.small} key={citation.segmentId}>{citation.quote}</p>
+                <p className={styles.small} key={citation.segmentId}>
+                  {citation.quote}
+                </p>
               ))}
             </Surface>
           ) : null}

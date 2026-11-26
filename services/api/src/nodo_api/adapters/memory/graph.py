@@ -550,7 +550,8 @@ class MemoryGraphStore:
     def analysis_graph(self, workspace_id: str, owner_id: str, limit: int) -> Subgraph:
         part = self._part(workspace_id, owner_id)
         edges = tuple(
-            row.relation for row in sorted(part.relations.values(), key=lambda row: row.relation.id)
+            row.relation
+            for row in sorted(part.relations.values(), key=lambda row: row.relation.id)
             if row.relation.status is not ReviewStatus.REJECTED
         )[:limit]
         ids = {entity_id for edge in edges for entity_id in (edge.source_id, edge.target_id)}

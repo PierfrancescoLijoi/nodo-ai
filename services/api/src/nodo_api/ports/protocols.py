@@ -353,9 +353,7 @@ class PageRepository(Protocol):
         """Return the owner's Pages newest first; proposals are represented by Page status."""
         ...
 
-    def proposal(
-        self, workspace_id: str, owner_id: str, page_id: str
-    ) -> PageProposal | None:
+    def proposal(self, workspace_id: str, owner_id: str, page_id: str) -> PageProposal | None:
         """Read an owner's pending proposal; approved revisions are never returned as a proposal."""
         ...
 
@@ -367,9 +365,7 @@ class PageRepository(Protocol):
         """Mark the current proposal rejected without deleting its auditable draft."""
         ...
 
-    def revisions(
-        self, workspace_id: str, owner_id: str, page_id: str
-    ) -> tuple[PageRevision, ...]:
+    def revisions(self, workspace_id: str, owner_id: str, page_id: str) -> tuple[PageRevision, ...]:
         """Return current and historical revisions newest first."""
         ...
 

@@ -20,9 +20,7 @@ from nodo_api.adapters.local.model_catalog import (
 CHUNK_SIZE = 1 << 20
 
 
-def install(
-    entry: ModelCatalogEntry, root: Path, opener: Callable[[str], BinaryIO]
-) -> Path:
+def install(entry: ModelCatalogEntry, root: Path, opener: Callable[[str], BinaryIO]) -> Path:
     """Install a pinned artifact without ever replacing an existing model.
 
     The complete artifact is staged below the model root, checksum-verified, inspected, and only

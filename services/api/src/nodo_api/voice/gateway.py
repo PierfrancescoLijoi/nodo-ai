@@ -168,9 +168,14 @@ async def query_live_session(
 
     segments = tuple(
         TranscriptSegment(
-            id=f"live-{item['start_ms']}", meeting_id=record.meeting_id,
-            speaker_id=f"S{item['speaker']}", start_ms=item["start_ms"], end_ms=item["end_ms"],
-            text=item["text"], confidence=item["confidence"], version=1,
+            id=f"live-{item['start_ms']}",
+            meeting_id=record.meeting_id,
+            speaker_id=f"S{item['speaker']}",
+            start_ms=item["start_ms"],
+            end_ms=item["end_ms"],
+            text=item["text"],
+            confidence=item["confidence"],
+            version=1,
             locale=Locale(item["locale"]),
         )
         for item in phrases
@@ -182,13 +187,23 @@ async def query_live_session(
         segments,
     )
     return QueryOutput(
-        answer=result.answer, answerability=result.answerability,
-        citations=tuple(CitationOutput(
-            meeting_id=c.meeting_id, segment_id=c.segment_id, start_ms=c.start_ms, end_ms=c.end_ms,
-            quote=c.quote, speaker_id=c.speaker_id,
-        ) for c in result.citations),
-        related_entities=result.related_entities, query_trace_id=result.query_trace_id,
-        model_version=result.model_version, retrieval_version=result.retrieval_version,
+        answer=result.answer,
+        answerability=result.answerability,
+        citations=tuple(
+            CitationOutput(
+                meeting_id=c.meeting_id,
+                segment_id=c.segment_id,
+                start_ms=c.start_ms,
+                end_ms=c.end_ms,
+                quote=c.quote,
+                speaker_id=c.speaker_id,
+            )
+            for c in result.citations
+        ),
+        related_entities=result.related_entities,
+        query_trace_id=result.query_trace_id,
+        model_version=result.model_version,
+        retrieval_version=result.retrieval_version,
         degraded=result.degraded,
     )
 
