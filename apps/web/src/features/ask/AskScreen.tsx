@@ -159,7 +159,10 @@ function Conversation() {
         },
         {
           refreshTicket: voice.refreshTicket,
-          onError: () => setDictationError(true),
+          onError: () => {
+            setDictationError(true);
+            finishDictation();
+          },
         },
       );
       dictationClient.current = client;
