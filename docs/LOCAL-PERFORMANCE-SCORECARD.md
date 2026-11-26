@@ -323,3 +323,24 @@ Findings, all measured here and none yet a release claim:
 Status: the quality gates remain **FAIL**. Closing them needs a stronger multilingual embedder and
 cross-encoder (for example BGE-M3 with a multilingual cross-encoder) and a relevance gate calibrated
 on more than 60 cases; those models are not installed and need an explicit download approval.
+
+### 7.4 BGE-M3 and BGE-reranker-v2-m3 check, 26 November 2026
+
+Both models were downloaded with the owner's approval (BAAI/bge-m3 2.2 GB, BAAI/bge-reranker-v2-m3
+2.2 GB, Hugging Face cache) and run through the same full-workspace ranking as section 7.3
+(`eval/bge_features.py`, PyTorch, research harness only). MRR of the first annotated segment:
+
+| Signal | EN | IT | PL | DA |
+|---|---:|---:|---:|---:|
+| E5 large cosine | 0.851 | 0.856 | 0.729 | 0.724 |
+| BGE-M3 dense cosine | 0.793 | 0.801 | 0.722 | 0.757 |
+| BGE-reranker-v2-m3 | 0.820 | 0.848 | 0.737 | 0.817 |
+| E5 large + BGE-M3 + BGE reranker (z-score sum) | 0.792 | 0.815 | 0.719 | 0.782 |
+
+Result: **no gain over E5 large**, so nothing was integrated. The best citation selection over all
+signals stays near F1 0.47 and the "is there evidence" decision near 78%, as with the small models.
+The ceiling is not the embedder. The suite asks for several segments per answer across languages
+(decision change over time), for a clarification when the question has no antecedent (incomplete
+reference) and for refusals on near-miss text (cross-project joins), which ranking alone cannot
+express. What would move the gates is a reasoning step over the retrieved evidence, a language
+model larger than Qwen3 4B, or a larger and re-annotated golden set; none is claimed here.
