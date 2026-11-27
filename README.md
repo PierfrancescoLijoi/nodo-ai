@@ -614,6 +614,15 @@ Operational procedures are in [RUNBOOKS.md](docs/RUNBOOKS.md).
 10. **Be honest about operational proof.** Mocked plans and local tests are not described as a live
     production deployment.
 
+## Contributing
+
+Issues, bug reports and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md),
+pick an issue labelled
+[good first issue](https://github.com/PierfrancescoLijoi/nodo-ai/labels/good%20first%20issue) or
+[help wanted](https://github.com/PierfrancescoLijoi/nodo-ai/labels/help%20wanted), or ask in
+[Discussions](https://github.com/PierfrancescoLijoi/nodo-ai/discussions). Security reports go
+through [SECURITY.md](SECURITY.md).
+
 ## License
 
 NODO AI is open source under the [MIT License](LICENSE). Copyright 2026 Pierfrancesco Lijoi.
