@@ -131,6 +131,36 @@ export const changes = z.object({
   ),
 });
 
+export const graphInsights = z.object({
+  isolated: z.array(z.string()),
+  bridges: z.array(z.string()),
+  orphan_concepts: z.array(z.string()),
+  duplicate_concepts: z.array(z.string()),
+  contradicting_decisions: z.array(z.string()),
+  truncated: z.boolean(),
+});
+
+export const pageList = z.object({
+  items: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(['concept', 'source_summary', 'saved_answer']),
+      subject_id: z.string(),
+      status: z.enum(['proposed', 'approved', 'rejected', 'stale']),
+      current_revision: z.number().nullable(),
+    }),
+  ),
+});
+
+export const pageRevisions = z.array(
+  z.object({
+    number: z.number(),
+    body_md: z.string(),
+    author_id: z.string(),
+    machine_generated: z.boolean(),
+  }),
+);
+
 export const exportJob = z.object({
   job_id: z.string(),
   status: z.enum(['queued', 'running', 'ready', 'failed']),
@@ -144,6 +174,26 @@ export const localStatus = z.object({
   missing: z.array(z.string()),
   pending_jobs: z.number(),
   gpu: z.boolean(),
+});
+
+export const localModels = z.object({
+  hardware_tier: z.string(),
+  models: z.array(
+    z.object({
+      id: z.string(),
+      task: z.string(),
+      name: z.string(),
+      publisher: z.string(),
+      version: z.string(),
+      size_mb: z.number(),
+      licence: z.string(),
+      licence_url: z.string().url(),
+      hardware: z.array(z.string()),
+      sha256: z.string().nullable(),
+      installable: z.boolean(),
+      installed: z.boolean(),
+    }),
+  ),
 });
 
 export const syncProgress = z.object({

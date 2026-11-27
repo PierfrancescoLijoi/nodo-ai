@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "NODO AI privacy-first meeting memory API"
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi>=0.159,<0.160",
+  "fastapi>=0.159,<0.166",
   "pydantic>=2.14,<3",
   "pydantic-settings>=2,<3",
   "PyJWT[crypto]>=2,<3",
@@ -49,6 +49,21 @@ local-models = [
   "faster-whisper>=1.1",
   "onnx>=1.16",  # only for tools/local-setup/export_embedding_onnx.py
   "sherpa-onnx>=1.12",
+  # Apache-2.0 local CPU TTS runtime and bundled Junco voice. Its phonemizer remains an explicit
+  # end-user dependency; see the Models catalogue before enabling NODO_VOICE_SYNTHESIZER=flock.
+  "flockspeech>=0.2.3,<0.3",
+]
+# Document import parsers (ADR-032). Imported lazily, only inside the parser subprocess.
+document = [
+  "pdfminer.six>=20260107",
+  "pypdfium2>=5.15.2",
+  "pypdf>=7.0.1",
+  "python-docx>=1.2.0",
+  "python-pptx>=1.0.2",
+  "openpyxl>=3.1.5",
+  "beautifulsoup4>=4.15.0",
+  "markdown-it-py>=4.3.0",
+  "reportlab>=5.1.0",  # tests only: generates the PDF fixtures, never imported by the product
 ]
 dev = [
   "opentelemetry-sdk>=1.27",

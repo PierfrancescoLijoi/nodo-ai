@@ -1,6 +1,6 @@
 # Golden-set evaluation
 
-The fixture set exercises grounded answers across meetings, languages, projects, deletion state, and workspace boundaries. The data is fictional and stable so CI results can be compared over time.
+The fixture set exercises grounded answers across meetings, languages, projects, deletion state, and workspace boundaries. Sixty hand-authored cases are expanded deterministically into 150 versioned wording variants, preserving each case's expected and forbidden evidence. The data is fictional and stable so CI results can be compared over time.
 
 Metrics follow the product blueprint:
 
@@ -16,6 +16,10 @@ python eval/validate_golden_set.py
 ```
 
 `run_queries.py` loads the fixtures into the real stores, asks every case in the chosen language through the query service and writes predictions that `score_results.py` compares with the expected and forbidden lists (`memory` for the wiring, `local` for the models the desktop app uses; a second pass measures the answer cache). Deleted segments and segments from other workspaces must never be returned. Results: `docs/benchmarks/`.
+
+When the E5 local embedding export is unavailable but llama.cpp and a GGUF are installed, use
+`memory-llm`: it retains the owner-filtered in-memory retrieval path while measuring the real local
+model's grounded answer and citations.
 
 The local adapter can experimentally rerank the top 20 ACL-filtered hybrid candidates with the
 small multilingual ONNX cross-encoder. It is disabled by default. Certify it with an A/B run for
@@ -37,3 +41,26 @@ Repeat for `it`, `pl` and `da`, with a fresh process per setting. Record citatio
 answerability and p50/p95/max latency together; the reranker stays enabled only if all four language
 guardrails hold. Its isolated CPU cost is reproducible with
 `python services/api/scripts/bench_reranker.py 20 100`.
+
+## Document import measurement
+
+`eval/documents/files` holds ten fictional documents (companies, people and projects are invented)
+in English, Italian, Polish and Danish, as Markdown, text, HTML, DOCX and text-layer PDF. The DOCX
+and PDF files were generated once with neutral metadata. `expected.jsonl` annotates, per file, the
+people, projects, systems, decisions and actions a reader would extract, with `match` terms
+compared against normalised labels, plus the expected `ASSIGNED_TO`, `PROPOSED_BY` and
+`DEPENDS_ON` relations; entries marked `optional` are accepted but not required.
+`meetings_expected.jsonl` annotates the golden-set meetings the same way, as the meeting baseline.
+
+```powershell
+$env:NODO_TEST_LOCAL_MODELS="1"
+services/api/.venv/Scripts/python eval/measure_import.py gpu
+services/api/.venv/Scripts/python eval/measure_import.py cpu
+```
+
+Run each device in its own invocation: the meeting baseline runs only on the first device of a call.
+
+The script imports every file through `SourceImportService` on a fresh local engine and prints
+seconds per 50 pages (a page is 3 000 parsed characters) for parsing, indexing and extraction,
+peak memory, and entity and relation precision and recall next to the meeting baseline. It needs
+the installed local models and never downloads anything. Results: `docs/PERFORMANCE.md`.

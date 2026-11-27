@@ -195,6 +195,26 @@ describe('createRepository', () => {
     });
   });
 
+  it('sends an evidence-bound meeting scope for a contextual brain question', async () => {
+    const post = vi.fn(async () => ({
+      answer: '',
+      answerability: 'unanswerable',
+      citations: [],
+    }));
+    const client = { ...fakeClient({}), post } as unknown as ApiClient;
+    await createRepository(client, { mode: 'local' }).ask('What changed?', 'en', ['m2', 'm3']);
+    expect(post).toHaveBeenCalledWith(
+      '/v1/query',
+      {
+        question: 'What changed?',
+        ui_locale: 'en',
+        citation_format: 'source',
+        scope: { mode: 'meetings', meeting_ids: ['m2', 'm3'] },
+      },
+      expect.any(Object),
+    );
+  });
+
   it('maps the graph and the review inbox, dropping an edge whose end is missing', async () => {
     const graph = {
       nodes: [

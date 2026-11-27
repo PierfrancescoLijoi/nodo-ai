@@ -30,6 +30,9 @@ ENV VIRTUAL_ENV=/opt/venv \
 # The base image ships its own pip and setuptools; the application does not use them.
 RUN python -m pip uninstall -y pip setuptools wheel
 
+# Debian shipped a fix for CVE-2025-6020 (linux-pam) after the base image was built.
+RUN apt-get update     && apt-get install -y --no-install-recommends --only-upgrade         libpam-modules libpam-modules-bin libpam-runtime libpam0g     && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 10001 nodo \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin nodo
 

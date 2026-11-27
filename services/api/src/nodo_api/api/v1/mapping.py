@@ -4,29 +4,57 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
+from collections.abc import Callable
 from datetime import datetime
 
 from nodo_api.api.v1.schemas import (
+    CollectionOutput,
+    ConceptOutput,
     EvidenceOutput,
+    FragmentOutput,
     GraphEdgeOutput,
     GraphNodeOutput,
+    HierarchyEvidenceOutput,
+    HierarchyLinkOutput,
+    ImportOutput,
     InsightAction,
     InsightDecision,
     InsightNode,
     Insights,
     MeetingListItem,
     MeetingOutput,
+    SectionOutput,
+    SourceOutput,
+    SourceVersionOutput,
     SpeakerOutput,
     SubgraphOutput,
 )
-from nodo_api.domain.graph import EntityType, MeetingDigest, Relation, Subgraph
+from nodo_api.domain.graph import (
+    Entity,
+    EntityType,
+    Evidence,
+    MeetingDigest,
+    Relation,
+    RelationKind,
+    Subgraph,
+)
 from nodo_api.domain.models import Meeting, SpeakerSummary
+from nodo_api.domain.sources import (
+    Collection,
+    Fragment,
+    ImportJob,
+    Locator,
+    Section,
+    Source,
+    SourceVersion,
+)
 from nodo_api.errors import ValidationFailed
 from nodo_api.services.ingestion import default_title
 
 
-def encode_cursor(meeting: Meeting) -> str:
-    raw = f"{meeting.created_at.isoformat()}|{meeting.id}".encode()
+def encode_cursor(item: Meeting | Source) -> str:
+    raw = f"{item.created_at.isoformat()}|{item.id}".encode()
     return base64.urlsafe_b64encode(raw).decode()
 
 
@@ -121,9 +149,100 @@ def list_item(meeting: Meeting, digest: MeetingDigest | None) -> MeetingListItem
     )
 
 
+def source_output(source: Source) -> SourceOutput:
+    return SourceOutput(
+        id=source.id,
+        kind=source.kind,
+        title=source.title,
+        state=source.state,
+        created_at=source.created_at,
+        origin=source.origin,
+        language=source.language,
+        version=source.version,
+        retention_until=source.retention_until,
+    )
+
+
+def collection_output(collection: Collection) -> CollectionOutput:
+    return CollectionOutput(
+        id=collection.id,
+        parent_id=collection.parent_id,
+        name=collection.name,
+        created_at=collection.created_at,
+        source_count=collection.source_count,
+    )
+
+
+def import_output(
+    job: ImportJob,
+    *,
+    unchanged: bool = False,
+    existing_source_id: str | None = None,
+    warnings: tuple[str, ...] = (),
+) -> ImportOutput:
+    return ImportOutput(
+        state=job.state,
+        step=job.step,
+        done=job.done,
+        total=job.total,
+        attempt=job.attempt,
+        error_code=job.error_code,
+        unchanged=unchanged,
+        existing_source_id=existing_source_id,
+        warnings=warnings,
+    )
+
+
+def source_version_output(version: SourceVersion) -> SourceVersionOutput:
+    return SourceVersionOutput(
+        version=version.version,
+        content_hash_prefix=version.content_hash[:12],
+        parser=version.parser,
+        created_at=version.created_at,
+        size_bytes=version.size_bytes,
+    )
+
+
+def section_output(
+    section: Section, fragment_count: int = 0, first: Fragment | None = None
+) -> SectionOutput:
+    return SectionOutput(
+        id=section.id,
+        parent_id=section.parent_id,
+        ordinal=section.ordinal,
+        level=section.level,
+        title=section.title,
+        fragment_count=fragment_count,
+        first_locator=json.loads(first.locator.to_json()) if first else None,
+    )
+
+
+def fragment_output(fragment: Fragment) -> FragmentOutput:
+    return FragmentOutput(
+        id=fragment.id,
+        section_id=fragment.section_id,
+        ordinal=fragment.ordinal,
+        text=fragment.text,
+        locator=json.loads(fragment.locator.to_json()),
+        speaker_id=fragment.speaker_id,
+        confidence=fragment.confidence,
+    )
+
+
 def subgraph_output(graph: Subgraph, depth: int) -> SubgraphOutput:
+    """The legacy graph view. The store already read it meetings-only; SOURCE nodes, CHILD_OF
+    edges and edges touching a SOURCE node are dropped here too, as a guard, so the frozen
+    clients and the OpenAPI literals never see the source vocabulary."""
+    hidden = {n.id for n in graph.nodes if n.type is EntityType.SOURCE}
+    edges = [
+        edge
+        for edge in graph.edges
+        if edge.kind is not RelationKind.CHILD_OF
+        and edge.source_id not in hidden
+        and edge.target_id not in hidden
+    ]
     meeting_of: dict[str, str] = {}
-    for edge in graph.edges:
+    for edge in edges:
         if edge.evidence:
             first = edge.evidence[0].meeting_id
             meeting_of.setdefault(edge.source_id, first)
@@ -138,8 +257,9 @@ def subgraph_output(graph: Subgraph, depth: int) -> SubgraphOutput:
                 meeting_id=n.meeting_id if n.type is EntityType.MEETING else meeting_of.get(n.id),
             )
             for n in graph.nodes
+            if n.id not in hidden
         ),
-        edges=tuple(edge_output(e) for e in graph.edges),
+        edges=tuple(edge_output(e) for e in edges),
         depth=depth,
         truncated=graph.truncated,
     )
@@ -158,4 +278,36 @@ def edge_output(edge: Relation) -> GraphEdgeOutput:
         evidence=tuple(
             EvidenceOutput(meeting_id=e.meeting_id, segment_id=e.segment_id) for e in edge.evidence
         ),
+    )
+
+
+EVIDENCE_PER_LINK = 3  # keeps a hierarchy response bounded; the fragment is read for these only
+
+
+def concept_output(entity: Entity) -> ConceptOutput:
+    return ConceptOutput(
+        id=entity.id, type=entity.type.value, label=entity.label, status=entity.status
+    )
+
+
+def hierarchy_link_output(
+    edge: Relation, locate: Callable[[Evidence], Locator | None]
+) -> HierarchyLinkOutput:
+    evidence = []
+    for item in edge.evidence[:EVIDENCE_PER_LINK]:
+        locator = locate(item)
+        evidence.append(
+            HierarchyEvidenceOutput(
+                source_id=item.source_id,
+                fragment_id=item.fragment_id,
+                locator=json.loads(locator.to_json()) if locator is not None else None,
+            )
+        )
+    return HierarchyLinkOutput(
+        id=edge.id,
+        child_id=edge.source_id,
+        parent_id=edge.target_id,
+        status=edge.status.value,
+        confidence=edge.confidence,
+        evidence=tuple(evidence),
     )

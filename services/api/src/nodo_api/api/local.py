@@ -1,25 +1,32 @@
-"""Routes that exist only in the local backend (ADR-014): the audio upload link and engine status.
+"""Local-engine routes (ADR-014), plus the source upload capability used by memory development.
 
-The upload route is not behind the bearer token: the link itself is the capability (random, one
-meeting, one use, short life), exactly like an Azure blob SAS link. The rest needs the token."""
+Upload routes are not behind the bearer token: each link is the capability (random, one object,
+one use, short life), exactly like an Azure blob SAS link. The rest needs the token."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Literal
+from urllib.request import urlopen
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
+from nodo_api.adapters.local.backup import BackupError, backup, export_everything
 from nodo_api.adapters.local.blob import UploadRejected
+from nodo_api.adapters.local.model_catalog import CATALOG, HardwareTier, installed, remove
+from nodo_api.adapters.local.model_install import install
+from nodo_api.adapters.local.models import data_dir
 from nodo_api.api.v1.routes import PrincipalDep
 from nodo_api.api.v1.schemas import FrozenModel
-from nodo_api.errors import ValidationFailed
+from nodo_api.domain.source_files import UploadRejected as SourceUploadRejected
+from nodo_api.errors import NotAvailableOnEngine, ValidationFailed
 
 router = APIRouter(prefix="/v1/local")
+source_upload_router = APIRouter(prefix="/v1/local")
 
 
 class SyncStart(FrozenModel):
@@ -75,6 +82,34 @@ class LocalStatus(FrozenModel):
     gpu: bool
 
 
+class LocalModelOutput(FrozenModel):
+    id: str
+    task: str
+    name: str
+    publisher: str
+    version: str
+    size_mb: int
+    licence: str
+    licence_url: str
+    hardware: tuple[str, ...]
+    sha256: str | None
+    installable: bool
+    installed: bool
+
+
+class LocalModelsOutput(FrozenModel):
+    hardware_tier: str
+    models: tuple[LocalModelOutput, ...]
+
+
+class LocalModelRemove(FrozenModel):
+    approved: bool = False
+
+
+class LocalModelInstall(FrozenModel):
+    approved: bool = False
+
+
 @router.put("/uploads/{token}", status_code=status.HTTP_204_NO_CONTENT)
 async def upload(token: str, request: Request) -> Response:
     blobs = request.app.state.container.runtime.blobs
@@ -84,6 +119,27 @@ async def upload(token: str, request: Request) -> Response:
                 target.write(chunk)
     except UploadRejected as error:
         raise HTTPException(status_code=403) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@source_upload_router.put("/source-uploads/{token}", status_code=status.HTTP_204_NO_CONTENT)
+async def source_upload(token: str, request: Request) -> Response:
+    """The random one-use link is the credential; document bytes never need a bearer token."""
+    blobs = request.app.state.container.source_blobs
+    if blobs is None:
+        raise NotAvailableOnEngine
+    try:
+        with blobs.open_upload(token) as target:
+            async for chunk in request.stream():
+                target.write(chunk)
+    except SourceUploadRejected as error:
+        if error.code == "too_large":
+            raise HTTPException(status_code=413) from error
+        if error.code == "low_disk":
+            raise HTTPException(status_code=507) from error
+        if error.code == "size_mismatch":  # a short body: the link stays usable for a new try
+            raise HTTPException(status_code=400) from error
+        raise HTTPException(status_code=403) from error  # unknown, used, expired or revoked
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -132,6 +188,93 @@ def local_status(_: PrincipalDep, request: Request) -> LocalStatus:
         missing=tuple(runtime.models.missing()),
         pending_jobs=runtime.queue.pending(),
         gpu=gpu,
+    )
+
+
+@router.get("/models", response_model=LocalModelsOutput)
+def local_models(_: PrincipalDep, request: Request) -> LocalModelsOutput:
+    """Catalog metadata only. Installation is deliberately a separate, confirmed operation."""
+    settings = request.app.state.container.settings
+    root = settings.local_models_dir or data_dir() / "models"
+    # VRAM must not be guessed from the presence of CUDA; until a probe is added, CPU is safest.
+    tier = HardwareTier.CPU
+    return LocalModelsOutput(
+        hardware_tier=tier.value,
+        models=tuple(
+            LocalModelOutput(
+                id=entry.id,
+                task=entry.task,
+                name=entry.name,
+                publisher=entry.publisher,
+                version=entry.version,
+                size_mb=entry.size_mb,
+                licence=entry.licence,
+                licence_url=entry.licence_url,
+                hardware=tuple(item.value for item in entry.hardware),
+                sha256=entry.sha256,
+                installable=entry.installable,
+                installed=installed(entry, root),
+            )
+            for entry in CATALOG
+        ),
+    )
+
+
+@router.post("/models/{model_id}/remove", response_model=LocalModelOutput)
+def remove_local_model(
+    model_id: str, body: LocalModelRemove, _: PrincipalDep, request: Request
+) -> LocalModelOutput:
+    if not body.approved:
+        raise ValidationFailed("Model removal requires explicit approval")
+    entry = next((item for item in CATALOG if item.id == model_id), None)
+    if entry is None or not entry.installable:
+        raise NotAvailableOnEngine
+    root = request.app.state.container.settings.local_models_dir or data_dir() / "models"
+    remove(entry, root)
+    return LocalModelOutput(
+        id=entry.id,
+        task=entry.task,
+        name=entry.name,
+        publisher=entry.publisher,
+        version=entry.version,
+        size_mb=entry.size_mb,
+        licence=entry.licence,
+        licence_url=entry.licence_url,
+        hardware=tuple(item.value for item in entry.hardware),
+        sha256=entry.sha256,
+        installable=entry.installable,
+        installed=False,
+    )
+
+
+@router.post("/models/{model_id}/install", response_model=LocalModelOutput)
+def install_local_model(
+    model_id: str, body: LocalModelInstall, _: PrincipalDep, request: Request
+) -> LocalModelOutput:
+    """Install a catalog-pinned artifact only after an explicit client confirmation."""
+    if not body.approved:
+        raise ValidationFailed("Model installation requires explicit approval")
+    entry = next((item for item in CATALOG if item.id == model_id), None)
+    if entry is None or not entry.installable:
+        raise NotAvailableOnEngine
+    root = request.app.state.container.settings.local_models_dir or data_dir() / "models"
+    try:
+        install(entry, root, urlopen)
+    except (FileExistsError, ValueError) as error:
+        raise ValidationFailed(str(error)) from error
+    return LocalModelOutput(
+        id=entry.id,
+        task=entry.task,
+        name=entry.name,
+        publisher=entry.publisher,
+        version=entry.version,
+        size_mb=entry.size_mb,
+        licence=entry.licence,
+        licence_url=entry.licence_url,
+        hardware=tuple(item.value for item in entry.hardware),
+        sha256=entry.sha256,
+        installable=entry.installable,
+        installed=True,
     )
 
 
@@ -192,3 +335,36 @@ def mount_web(app, directory: Path) -> None:
     """Serve the exported web app from the engine. Mount last: API routes match first."""
     files = SinglePageFiles(directory=directory, html=True, policy=load_policy(directory))
     app.mount("/", files, name="web")
+
+
+def _data_root(request: Request) -> Path:
+    settings = request.app.state.container.settings
+    return Path(settings.local_data_dir) if settings.local_data_dir else data_dir()
+
+
+class BackupOutput(FrozenModel):
+    path: str
+
+
+@router.post("/backup", response_model=BackupOutput, status_code=status.HTTP_201_CREATED)
+def make_backup(_: PrincipalDep, request: Request) -> BackupOutput:
+    """A consistent backup zip under `<data>/backups`. Restoring is done offline (see backup.py)."""
+    from datetime import UTC, datetime
+
+    root = _data_root(request)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    try:
+        return BackupOutput(path=str(backup(root, root / "backups" / f"nodo-{stamp}.zip")))
+    except BackupError as error:
+        raise ValidationFailed(str(error)) from error
+
+
+@router.get("/export/complete")
+def complete_export(_: PrincipalDep, request: Request) -> Response:
+    """Every row of every table as JSON (Sources, Pages with revisions, Concepts, Evidence)."""
+    body = json.dumps(export_everything(_data_root(request) / "nodo.db"), ensure_ascii=False)
+    return Response(
+        body,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="nodo-complete-export.json"'},
+    )

@@ -2,7 +2,7 @@
 import type { z } from 'zod';
 
 import type { ApiClient } from './client';
-import { indexProgress, localStatus, syncProgress } from './schemas';
+import { indexProgress, localModels, localStatus, syncProgress } from './schemas';
 import { ApiError } from './client';
 
 export interface LocalStatus {
@@ -10,6 +10,24 @@ export interface LocalStatus {
   missing: string[];
   pendingJobs: number;
   gpu: boolean;
+}
+export interface LocalModel {
+  id: string;
+  task: string;
+  name: string;
+  publisher: string;
+  version: string;
+  sizeMb: number;
+  licence: string;
+  licenceUrl: string;
+  hardware: string[];
+  sha256: string | null;
+  installable: boolean;
+  installed: boolean;
+}
+export interface LocalModels {
+  hardwareTier: string;
+  models: LocalModel[];
 }
 
 export interface FailedMeeting {
@@ -56,6 +74,9 @@ export interface IndexProgress {
 
 export interface LocalEngineApi {
   getStatus(): Promise<LocalStatus>;
+  getModels(): Promise<LocalModels>;
+  installModel(id: string): Promise<void>;
+  removeModel(id: string): Promise<void>;
   startSync(input: { cloudUrl: string; accessToken: string; force: boolean }): Promise<SyncProgress>;
   getSync(): Promise<SyncProgress>;
   startIndex(mode: IndexMode): Promise<IndexProgress>;
@@ -110,6 +131,32 @@ export function createLocalEngineApi(client: ApiClient): LocalEngineApi {
     async getStatus() {
       const item = parse(localStatus, await client.get('/v1/local/status'));
       return { backend: item.backend, missing: item.missing, pendingJobs: item.pending_jobs, gpu: item.gpu };
+    },
+    async getModels() {
+      const value = parse(localModels, await client.get('/v1/local/models'));
+      return {
+        hardwareTier: value.hardware_tier,
+        models: value.models.map((model) => ({
+          id: model.id,
+          task: model.task,
+          name: model.name,
+          publisher: model.publisher,
+          version: model.version,
+          sizeMb: model.size_mb,
+          licence: model.licence,
+          licenceUrl: model.licence_url,
+          hardware: model.hardware,
+          sha256: model.sha256,
+          installable: model.installable,
+          installed: model.installed,
+        })),
+      };
+    },
+    async removeModel(id) {
+      await client.post(`/v1/local/models/${encodeURIComponent(id)}/remove`, { approved: true });
+    },
+    async installModel(id) {
+      await client.post(`/v1/local/models/${encodeURIComponent(id)}/install`, { approved: true });
     },
     async startSync({ cloudUrl, accessToken, force }) {
       return mapSync(

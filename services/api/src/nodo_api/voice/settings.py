@@ -37,7 +37,7 @@ class VoiceSettings(BaseSettings):
     redis_url: SecretStr | None = Field(default=None, repr=False)
     redis_max_connections: int = Field(default=64, ge=4, le=1000)
     recognizer: Literal["azure", "local"] = "azure"
-    synthesizer: Literal["azure", "none"] = "azure"
+    synthesizer: Literal["azure", "flock", "none"] = "azure"
 
     @property
     def limits(self) -> Limits:

@@ -1,3 +1,14 @@
+from nodo_api.domain.documents import (
+    Block,
+    BlockKind,
+    ParsedDocument,
+    ParseError,
+    build_sections_and_fragments,
+    fragment_id,
+    split_text,
+    stable_text,
+)
+from nodo_api.domain.hierarchy import MAX_DEPTH, LinkRefusal, check_link
 from nodo_api.domain.models import (
     Answerability,
     Citation,
@@ -9,15 +20,58 @@ from nodo_api.domain.models import (
     Speaker,
     TranscriptSegment,
 )
+from nodo_api.domain.pages import (
+    Page,
+    PageCitation,
+    PageClaim,
+    PageKind,
+    PageProposal,
+    PageProvenance,
+    PageRevision,
+    PageStatus,
+)
+from nodo_api.domain.sources import (
+    MAX_FRAGMENT_CHARS,
+    Fragment,
+    Locator,
+    Section,
+    Source,
+    SourceKind,
+)
 
 __all__ = [
+    "MAX_DEPTH",
+    "MAX_FRAGMENT_CHARS",
     "Answerability",
+    "Block",
+    "BlockKind",
     "Citation",
+    "Fragment",
+    "LinkRefusal",
     "Locale",
+    "Locator",
     "Meeting",
     "MeetingState",
+    "Page",
+    "PageCitation",
+    "PageClaim",
+    "PageKind",
+    "PageProposal",
+    "PageProvenance",
+    "PageRevision",
+    "PageStatus",
+    "ParseError",
+    "ParsedDocument",
     "RecordingAttestation",
     "RetentionPolicy",
+    "Section",
+    "Source",
+    "SourceKind",
     "Speaker",
     "TranscriptSegment",
+    "build_sections_and_fragments",
+    "check_link",
+    "fragment_id",
+    "split_text",
+    "stable_text",
 ]

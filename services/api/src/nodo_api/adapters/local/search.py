@@ -190,10 +190,14 @@ class SqliteRetriever:
         query: str,
         filters: dict[str, Any] | None,
         limit: int,
+        *,
+        source_ids: frozenset[str] | None = None,
     ) -> tuple[TranscriptSegment, ...]:
         project = (filters or {}).get("project")
-        text_hits = self._text_hits(workspace_id, owner_id, query, project)
-        vector_hits = self._vector_hits(workspace_id, owner_id, query, project)
+        if source_ids == frozenset():
+            return ()
+        text_hits = self._text_hits(workspace_id, owner_id, query, project, source_ids)
+        vector_hits = self._vector_hits(workspace_id, owner_id, query, project, source_ids)
         scores: dict[int, float] = {}
         for hits in (text_hits, vector_hits):
             for rank, rowid in enumerate(hits):
@@ -213,23 +217,41 @@ class SqliteRetriever:
         return tuple(candidates[i] for i in order[:limit])
 
     def _text_hits(
-        self, workspace_id: str, owner_id: str, query: str, project: str | None
+        self,
+        workspace_id: str,
+        owner_id: str,
+        query: str,
+        project: str | None,
+        source_ids: frozenset[str] | None,
     ) -> list[int]:
         expression = match_expression(query)
         if expression is None:
             return []
         extra = " AND s.project = ?" if project else ""
+        sources = f" AND s.meeting_id IN ({','.join('?' * len(source_ids))})" if source_ids else ""
         with self._db.transaction(write=False) as conn:
             rows = conn.execute(
                 "SELECT s.rowid FROM search_fts f JOIN search_segments s ON s.rowid = f.rowid"
                 " WHERE search_fts MATCH ? AND s.workspace_id = ? AND s.owner_id = ?"
-                f"{extra} ORDER BY bm25(search_fts) LIMIT ?",
-                (expression, workspace_id, owner_id, *([project] if project else []), CANDIDATES),
+                f"{extra}{sources} ORDER BY bm25(search_fts) LIMIT ?",
+                (
+                    expression,
+                    workspace_id,
+                    owner_id,
+                    *([project] if project else []),
+                    *(sorted(source_ids) if source_ids else []),
+                    CANDIDATES,
+                ),
             ).fetchall()
         return [r["rowid"] for r in rows]
 
     def _vector_hits(
-        self, workspace_id: str, owner_id: str, query: str, project: str | None
+        self,
+        workspace_id: str,
+        owner_id: str,
+        query: str,
+        project: str | None,
+        source_ids: frozenset[str] | None,
     ) -> list[int]:
         rowids, matrix = self._matrix(workspace_id, owner_id)
         if len(rowids) == 0:
@@ -239,6 +261,9 @@ class SqliteRetriever:
         scores = matrix @ vector
         if project:
             allowed = self._project_rowids(workspace_id, owner_id, project)
+            scores = np.where(np.isin(rowids, allowed), scores, -np.inf)
+        if source_ids is not None:
+            allowed = self._meeting_rowids(workspace_id, owner_id, source_ids)
             scores = np.where(np.isin(rowids, allowed), scores, -np.inf)
         finite = scores[np.isfinite(scores)]
         if finite.size == 0:
@@ -277,6 +302,19 @@ class SqliteRetriever:
                 "SELECT rowid FROM search_segments WHERE workspace_id = ? AND owner_id = ?"
                 " AND project = ?",
                 (workspace_id, owner_id, project),
+            ).fetchall()
+        return np.array([r["rowid"] for r in rows], dtype=np.int64)
+
+    def _meeting_rowids(
+        self, workspace_id: str, owner_id: str, source_ids: frozenset[str]
+    ) -> np.ndarray:
+        if not source_ids:
+            return np.empty(0, dtype=np.int64)
+        with self._db.transaction(write=False) as conn:
+            rows = conn.execute(
+                "SELECT rowid FROM search_segments WHERE workspace_id = ? AND owner_id = ?"
+                f" AND meeting_id IN ({','.join('?' * len(source_ids))})",
+                (workspace_id, owner_id, *sorted(source_ids)),
             ).fetchall()
         return np.array([r["rowid"] for r in rows], dtype=np.int64)
 

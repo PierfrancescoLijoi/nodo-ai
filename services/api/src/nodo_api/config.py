@@ -53,8 +53,26 @@ class Settings(BaseSettings):
     local_warm_up: bool = False  # load the search model at start instead of at the first use
     local_search_margin: float = Field(default=0.035, ge=0.0, le=0.5)
     # Experimental until the four-language golden set passes without precision/ACL regressions.
+    # Folder under models/embeddings. "auto" uses E5 large when it is installed (measured: +7-15 pp
+    # citation precision and recall, docs/LOCAL-PERFORMANCE-SCORECARD.md 7.5) and E5 base otherwise.
+    local_embedding_model: str = Field(
+        default="auto", pattern=r"^(auto|multilingual-e5-(small|base|large))$"
+    )
+    answer_evidence_limit: int = Field(default=20, ge=1, le=50)
     local_reranker_enabled: bool = False
     local_rerank_candidates: int = Field(default=20, ge=2, le=50)
+    local_import_max_bytes: int = Field(default=200 * 1024 * 1024, ge=1)
+    local_import_max_pages: int = Field(default=2000, ge=1)
+    local_import_max_ratio: int = Field(default=100, ge=1)
+    # Total uncompressed size of an OOXML archive, judged from its directory before any parsing.
+    local_import_max_uncompressed_bytes: int = Field(default=512 * 1024 * 1024, ge=1)
+    local_parser_timeout_seconds: float = Field(default=300.0, gt=0)
+    local_parser_memory_mb: int = Field(default=2048, ge=64)
+    watch_poll_seconds: float = Field(default=30.0, ge=5.0)  # a floor: each scan walks the tree
+    # Import responses of the local engine carry "slow_on_this_machine" (spec section 16):
+    # document extraction measured slower than the local ingest budget on the reference laptop
+    # (docs/PERFORMANCE.md section 8).
+    local_import_slow_notice: bool = True
 
     azure_storage_account: str | None = None
     azure_servicebus_fqdn: str | None = None

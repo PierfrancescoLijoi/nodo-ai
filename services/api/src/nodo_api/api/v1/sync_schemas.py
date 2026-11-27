@@ -16,6 +16,10 @@ from nodo_api.api.v1.schemas import FrozenModel
 from nodo_api.domain.graph import EntityType, RelationKind, ReviewStatus
 from nodo_api.domain.models import Locale
 
+# Source nodes and CHILD_OF (ADR-029, ADR-030) are local graph vocabulary; a sync package carries
+# one meeting in the vocabulary the cloud schema accepts.
+_LOCAL_ONLY = "Not part of a meeting package"
+
 MAX_SEGMENTS = 30_000
 MAX_ENTITIES = 500
 MAX_RELATIONS = 1_000
@@ -62,6 +66,8 @@ class SyncEntity(FrozenModel):
     def not_a_meeting(self) -> SyncEntity:
         if self.type is EntityType.MEETING:
             raise ValueError("The meeting node is created by the receiver")
+        if self.type is EntityType.SOURCE:
+            raise ValueError(_LOCAL_ONLY)
         return self
 
 
@@ -77,6 +83,8 @@ class SyncRef(FrozenModel):
             raise ValueError("A reference has a type and a label, or neither")
         if self.type is EntityType.MEETING:
             raise ValueError("The meeting is the reference with no type")
+        if self.type is EntityType.SOURCE:
+            raise ValueError(_LOCAL_ONLY)
         return self
 
 
@@ -87,6 +95,12 @@ class SyncRelation(FrozenModel):
     confidence: float = Field(ge=0, le=1)
     status: ReviewStatus
     evidence: tuple[str, ...] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def meeting_vocabulary(self) -> SyncRelation:
+        if self.kind is RelationKind.CHILD_OF:
+            raise ValueError(_LOCAL_ONLY)
+        return self
 
 
 class SyncSource(FrozenModel):

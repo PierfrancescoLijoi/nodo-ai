@@ -104,6 +104,9 @@ export function mapGraph(value: z.infer<typeof wire.subgraph>): Graph {
       kind: KINDS[edge.kind],
       ...(edge.status === 'proposed' || edge.status === 'approved' ? { status: edge.status } : {}),
       ...(edge.confidence === undefined ? {} : { confidence: edge.confidence }),
+      ...(edge.evidence?.length
+        ? { meetingIds: [...new Set(edge.evidence.map((item) => item.meeting_id))] }
+        : {}),
     })),
     truncated: value.truncated,
   };

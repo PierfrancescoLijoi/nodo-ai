@@ -152,3 +152,91 @@ as int8 ONNX loads in 1.5 s and embeds 144 sentences per second.
 | Quality | no claim | the 4B model misses tasks and owners and Whisper medium mishears product names ("Service Bus" as "Ashar Service Bus"); everything it proposes waits for approval |
 
 What the local engine cannot do at all: switch language inside one recording; use more than one GPU model at once on a 6 GB card.
+
+## 8. Document import (Phase 2)
+
+Measured on 19 and 20 November 2026 on the same laptop (AMD Ryzen 7 8845HS, 8 cores and 16
+threads, 31 GB RAM, NVIDIA RTX 4050 Laptop GPU 6 GB, Windows 11) with
+`eval/measure_import.py` (see [eval/README.md](../eval/README.md)). Models: Qwen3-4B Q5_K_M
+through llama.cpp (context 16 384) for extraction, multilingual E5 base (int8 ONNX, CPU) for the
+index. Corpus: the ten fictional documents in `eval/documents` (en, it, pl, da; Markdown, text,
+HTML, DOCX, PDF), 8 001 parsed characters in 69 fragments. A page is counted as 3 000 parsed
+characters, so the corpus is 2.67 pages; the per-50-page figures are extrapolated from it and
+include the fixed cost of one model call per short document, so they overstate long documents.
+One run per device.
+
+| Stage, seconds per 50 pages | GPU pass | CPU pass (GPU hidden, no layers offloaded) |
+|---|---|---|
+| parse (sniff, limits, parser process) | 183 | 164 |
+| index (E5 on the CPU) | 26 | 24 |
+| extraction (language model) | 3 133 (52 min) | 18 779 (5.2 h) |
+| **total** | **about 56 min** | **about 5.3 h** |
+| one short document, upload to ready | 10 to 28 s | 45 to 189 s |
+| model load before the run | E5 1.4 s, Qwen3 18.7 s | E5 1.3 s, Qwen3 3.8 s |
+| peak memory, engine process / model server | 810 MB / 5 740 MB | 809 MB / 8 251 MB |
+
+Extraction quality on the same runs, scored by the same rule (person, project, system, decision
+and action entities; topics are not scored), next to meeting extraction on the six golden-set
+transcripts:
+
+| | Documents, GPU pass | Meetings, GPU pass | Documents, CPU pass | Meetings, CPU pass |
+|---|---|---|---|---|
+| entity precision | 0.83 (40 of 48) | 0.69 (18 of 26) | 0.72 (44 of 61) | 0.72 (18 of 25) |
+| entity recall | 0.42 (40 of 95) | 0.64 (18 of 28) | 0.46 (44 of 95) | 0.64 (18 of 28) |
+| relation precision | 0.25 (1 of 4) | 0 (0 of 1) | 0.50 (3 of 6) | 0 (0 of 2) |
+| relation recall | 0.03 (1 of 33) | 0 (0 of 1) | 0.09 (3 of 33) | 0 (0 of 1) |
+
+- **Precision is not below the meeting baseline** in either run (equal on the CPU run), so
+  documents ship. The runs differ by several points: the model output differs between the two
+  devices, and ten documents are a small sample.
+- **Recall is lower than for meetings.** Inspecting the output shows why: the model often writes
+  a role ("Project lead") as the label and the name as the key, or reuses one generic key
+  ("person", "action") for several entities, and validation keeps only the first entity per key.
+  Meetings are partly protected because named speakers are added as people. This is a known
+  defect for the next extraction work; everything extracted still waits for review.
+- **Ingest is slow on this machine**: about 56 minutes of model time per 50 pages on the GPU and
+  more than five hours on the CPU, against the 20 minute budget the local engine has for one hour
+  of meeting. As the specification requires, the import ships behind a notice: every import
+  response of the local engine carries `warnings: ["slow_on_this_machine"]` (setting
+  `NODO_LOCAL_IMPORT_SLOW_NOTICE`, on by default).
+- Not measured: a long real PDF (the per-page figure is extrapolated), scanned PDFs (no OCR),
+  imported audio and video (the speech pipeline is the meeting pipeline measured in section 7),
+  and Polish and Danish speech.
+
+### 8.1 After the entity key repair (Phase 3, Task 1)
+
+Measured on 20 November 2026 on the same laptop as above (8-core laptop CPU, 31 GB RAM, 6 GB
+laptop GPU, Windows 11), GPU pass only, with `eval/measure_import.py gpu`. Models:
+`Qwen3-4B-Q5_K_M.gguf` through `llama-server.exe` and `multilingual-e5-base`. Document
+extraction `doc-1` (the prompt before this change, run from a worktree of `main`) and `doc-2`
+(key repair plus the new prompt lines) were run back to back in one session, alternating, two
+runs each, with nothing else on the GPU. Meeting extraction does not change between the
+versions; its numbers show the run-to-run noise of the model.
+
+| Run | Version | Document entity precision | Document entity recall | Document relation recall | Meeting entity precision | Extraction s per 50 pages |
+|---|---|---|---|---|---|---|
+| 1 | doc-1 | 0.80 (41 of 51) | 0.432 (41 of 95) | 0 (0 of 33) | 0.65 (17 of 26) | 3 528 |
+| 2 | doc-2 | 0.96 (53 of 55) | 0.558 (53 of 95) | 0.09 (3 of 33) | 0.73 (19 of 26) | 6 819 |
+| 3 | doc-1 | 0.78 (40 of 51) | 0.421 (40 of 95) | 0 (0 of 33) | 0.69 (18 of 26) | 3 306 |
+| 4 | doc-2 | 0.93 (54 of 58) | 0.568 (54 of 95) | 0.06 (2 of 33) | 0.76 (19 of 25) | 8 558 |
+
+- **Means:** doc-1 recall 0.427, precision 0.79; doc-2 recall 0.563, precision 0.95; meeting
+  precision over the doc-2 runs 0.75.
+- **Spread** (largest max minus min of document entity recall within one version): 0.011
+  (doc-1; doc-2 0.010).
+- **Verdict: pass.** Mean recall rises by 0.137, more than the spread, and mean document
+  precision (0.95) is above the mean meeting precision of the doc-2 runs (0.75). Relation
+  recall does not regress (0 for doc-1, 0.09 and 0.06 for doc-2) but stays low.
+- Extraction takes about twice as long with doc-2 (mean 7 689 against 3 417 seconds per 50
+  pages, same extrapolation as above): the model writes more entities per window.
+
+### 8.2 With hierarchy extraction (Phase 3, Task 10)
+
+Not measured in this task: the local setup reported the llama.cpp server, speaker separation
+models and exported embedding model missing. The Phase 3 closing gate must compare `doc-2` with
+`doc-3` using the alternating-run protocol above and report the number of `CHILD_OF` proposals.
+
+The Phase 3 closing gate rechecked availability on 21 November 2026 and the same components were
+still missing, so the alternating `doc-2`/`doc-3` model measurement could not be run. No model
+quality claim is made for hierarchy extraction; this remains a required operator measurement once
+the complete local model stack is installed.

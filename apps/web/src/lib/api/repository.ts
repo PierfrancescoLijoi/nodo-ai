@@ -5,9 +5,12 @@ import type {
   Change,
   ExportJob,
   Graph,
+  GraphInsights,
   Meeting,
   MeetingState,
   MeetingSummary,
+  WikiPage,
+  WikiRevision,
   NewMeeting,
   ReviewDecision,
   ReviewItem,
@@ -28,8 +31,12 @@ export interface Repository {
   getMeeting(id: string): Promise<Meeting | null>;
   nameSpeaker(meetingId: string, speakerId: string, name: string | null): Promise<Meeting>;
   listChanges(): Promise<Change[]>;
-  ask(question: string, locale: Locale): Promise<Answer>;
-  getGraph(options?: { seedId?: string }): Promise<Graph>;
+  ask(question: string, locale: Locale, meetingIds?: string[]): Promise<Answer>;
+  getGraph(options?: { seedId?: string; depth?: 1 | 2; limit?: number }): Promise<Graph>;
+  getGraphInsights(): Promise<GraphInsights>;
+  listWikiPages(): Promise<WikiPage[]>;
+  getWikiRevisions(id: string): Promise<WikiRevision[]>;
+  approveWikiPage(id: string): Promise<void>;
   listReviews(): Promise<ReviewItem[]>;
   reviewRelation(id: string, decision: ReviewDecision): Promise<void>;
   startExport(): Promise<ExportJob>;
@@ -155,10 +162,17 @@ export function createRepository(
       return mapMeeting(parse(wire.meetingDetail, meeting), await transcript(meetingId));
     },
 
-    async ask(question, locale) {
+    async ask(question, locale, meetingIds) {
       const raw = await client.post(
         '/v1/query',
-        { question, ui_locale: locale },
+        meetingIds?.length
+          ? {
+              question,
+              ui_locale: locale,
+              citation_format: 'source',
+              scope: { mode: 'meetings', meeting_ids: meetingIds },
+            }
+          : { question, ui_locale: locale },
         { timeoutMs: QUERY_TIMEOUT_MS },
       );
       return mapAnswer(parse(wire.answer, raw));
@@ -178,11 +192,54 @@ export function createRepository(
 
     async getGraph(options) {
       const seed = options?.seedId ? `&seed_id=${encodeURIComponent(options.seedId)}` : '';
+      const depth = options?.depth ?? 1;
+      const limit = Math.min(200, Math.max(1, options?.limit ?? 40));
       return mapGraph(
         parse(
           wire.subgraph,
-          await client.get(`/v1/graph/subgraph?depth=1&limit=40&include_proposed=true${seed}`),
+          await client.get(`/v1/graph/subgraph?depth=${depth}&limit=${limit}&include_proposed=true${seed}`),
         ),
+      );
+    },
+
+    async getGraphInsights() {
+      const raw = parse(wire.graphInsights, await client.get('/v1/graph/insights'));
+      return {
+        isolated: raw.isolated,
+        bridges: raw.bridges,
+        orphanConcepts: raw.orphan_concepts,
+        duplicateConcepts: raw.duplicate_concepts,
+        contradictingDecisions: raw.contradicting_decisions,
+        truncated: raw.truncated,
+      };
+    },
+
+    async listWikiPages() {
+      return parse(wire.pageList, await client.get('/v1/pages')).items.map((page) => ({
+        id: page.id,
+        kind: page.kind,
+        subjectId: page.subject_id,
+        status: page.status,
+        currentRevision: page.current_revision,
+      }));
+    },
+
+    async getWikiRevisions(id) {
+      return parse(wire.pageRevisions, await client.get(`/v1/pages/${encodeURIComponent(id)}/revisions`)).map(
+        (revision) => ({
+          number: revision.number,
+          body: revision.body_md,
+          authorId: revision.author_id,
+          machineGenerated: revision.machine_generated,
+        }),
+      );
+    },
+
+    async approveWikiPage(id) {
+      await client.post(
+        `/v1/pages/${encodeURIComponent(id)}/approve`,
+        {},
+        { headers: { 'Idempotency-Key': newKey() } },
       );
     },
 

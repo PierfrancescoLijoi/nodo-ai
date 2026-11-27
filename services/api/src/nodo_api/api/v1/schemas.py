@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from nodo_api.domain.models import Answerability, Locale, MeetingState
+from nodo_api.domain.retrieval import MAX_QUERY_SOURCES, CitationFormat, QueryScopeMode
+from nodo_api.domain.sources import ImportState, SourceKind, collection_name
 
 
 class FrozenModel(BaseModel):
@@ -106,6 +108,119 @@ class MeetingList(FrozenModel):
     next_cursor: str | None
 
 
+class SourceOutput(FrozenModel):
+    id: str
+    kind: SourceKind
+    title: str | None
+    state: str
+    created_at: datetime
+    origin: str | None
+    language: Locale | None
+    version: int
+    retention_until: datetime | None = None  # when the stored original is erased (FR-4)
+
+
+class SourceList(FrozenModel):
+    items: tuple[SourceOutput, ...]
+    next_cursor: str | None
+
+
+class SourceCreate(FrozenModel):
+    filename: str = Field(min_length=1, max_length=200)
+    size_bytes: int = Field(ge=1)
+    kind: SourceKind | None = None
+    origin_note: str | None = Field(default=None, max_length=500)
+
+
+class WatchFolderCreate(FrozenModel):
+    path: str = Field(min_length=1, max_length=1024)
+
+
+class WatchFolderOutput(FrozenModel):
+    """A watched folder; its path is answered to its owner only."""
+
+    id: str
+    path: str
+    enabled: bool
+    created_at: datetime
+
+
+class WatchFolderList(FrozenModel):
+    items: tuple[WatchFolderOutput, ...]
+
+
+class SourceCreateOutput(FrozenModel):
+    source: SourceOutput
+    upload_url: str
+    expires_in_seconds: int
+
+
+class ImportOutput(FrozenModel):
+    state: ImportState
+    step: str | None
+    done: int
+    total: int
+    attempt: int
+    error_code: str | None
+    unchanged: bool = False
+    existing_source_id: str | None = None
+    # Stable notice codes; "slow_on_this_machine": the local engine may take long (PERFORMANCE.md).
+    warnings: tuple[str, ...] = ()
+
+
+class ProcessingConfirmation(FrozenModel):
+    """The owner of an imported recording states "I may process this recording"."""
+
+    confirmed: Literal[True]
+
+
+class ImportStatusOutput(FrozenModel):
+    import_: ImportOutput = Field(alias="import", serialization_alias="import")
+
+
+class SourceVersionOutput(FrozenModel):
+    version: int
+    content_hash_prefix: str
+    parser: str
+    created_at: datetime
+    size_bytes: int
+
+
+class SourceVersionList(FrozenModel):
+    items: tuple[SourceVersionOutput, ...]
+
+
+class SectionOutput(FrozenModel):
+    id: str
+    parent_id: str | None
+    ordinal: int
+    level: int
+    title: str
+    fragment_count: int = 0  # fragments of the latest version directly in this section
+    first_locator: dict[str, Any] | None = None  # where its first fragment is, in reading order
+
+
+class SourceOutline(FrozenModel):
+    sections: tuple[SectionOutput, ...]
+    version: int
+
+
+class FragmentOutput(FrozenModel):
+    id: str
+    section_id: str | None
+    ordinal: int
+    text: str
+    locator: dict[str, Any]
+    speaker_id: str | None
+    confidence: float | None
+
+
+class SourceFragments(FrozenModel):
+    version: int
+    fragments: tuple[FragmentOutput, ...]
+    next_offset: int | None = None  # set only when a limit cut the answer short
+
+
 class UploadSessionOutput(FrozenModel):
     id: str
     upload_url: str
@@ -153,10 +268,37 @@ class QueryFiltersInput(FrozenModel):
     project: str | None = Field(default=None, max_length=64)
 
 
+class QueryScopeInput(FrozenModel):
+    mode: QueryScopeMode = QueryScopeMode.LEGACY
+    collection_id: str | None = Field(default=None, min_length=1, max_length=64)
+    source_ids: tuple[str, ...] = Field(default=(), max_length=MAX_QUERY_SOURCES)
+    meeting_ids: tuple[str, ...] = Field(default=(), max_length=MAX_QUERY_SOURCES)
+
+    @model_validator(mode="after")
+    def valid_shape(self):
+        if self.mode is QueryScopeMode.COLLECTION:
+            valid = self.collection_id is not None and not self.source_ids and not self.meeting_ids
+        elif self.mode is QueryScopeMode.SOURCES:
+            valid = self.collection_id is None and bool(self.source_ids) and not self.meeting_ids
+        elif self.mode is QueryScopeMode.MEETINGS:
+            valid = self.collection_id is None and not self.source_ids and bool(self.meeting_ids)
+        else:
+            valid = self.collection_id is None and not self.source_ids and not self.meeting_ids
+        if (
+            not valid
+            or len(set(self.source_ids)) != len(self.source_ids)
+            or len(set(self.meeting_ids)) != len(self.meeting_ids)
+        ):
+            raise ValueError("Invalid query scope")
+        return self
+
+
 class QueryInput(FrozenModel):
     question: str = Field(min_length=1, max_length=2000)
     ui_locale: Locale
     filters: QueryFiltersInput | None = None
+    scope: QueryScopeInput = QueryScopeInput()
+    citation_format: CitationFormat = CitationFormat.LEGACY
 
 
 class VoiceQueryInput(FrozenModel):
@@ -173,6 +315,10 @@ class CitationOutput(FrozenModel):
     end_ms: int
     quote: str
     speaker_id: str = ""
+    source_id: str | None = None
+    fragment_id: str | None = None
+    source_version: int | None = None
+    locator: dict[str, Any] | None = None
 
 
 class QueryOutput(FrozenModel):
@@ -252,3 +398,179 @@ class ExportOutput(FrozenModel):
     status: Literal["queued", "running", "ready", "failed"] = "queued"
     expires_at: datetime | None = None
     download_path: str | None = None
+
+
+# --- concept hierarchy (ADR-030): new models only, /v1/graph/* keeps hiding CHILD_OF --------------
+
+
+class ConceptOutput(FrozenModel):
+    id: str
+    type: str
+    label: str
+    status: str | None
+
+
+class SourceMentionOutput(FrozenModel):
+    source_id: str
+    title: str | None
+
+
+class HierarchyEvidenceOutput(FrozenModel):
+    source_id: str
+    fragment_id: str
+    locator: dict[str, Any] | None
+
+
+class HierarchyLinkOutput(FrozenModel):
+    id: str
+    child_id: str
+    parent_id: str
+    status: Literal["proposed", "approved", "rejected"]
+    confidence: float
+    evidence: tuple[HierarchyEvidenceOutput, ...]
+
+
+class ConceptHierarchyOutput(FrozenModel):
+    concept: ConceptOutput
+    mentioned_in: tuple[SourceMentionOutput, ...]
+    nodes: tuple[ConceptOutput, ...]
+    links: tuple[HierarchyLinkOutput, ...]
+    truncated: bool
+
+
+class HierarchyProposalList(FrozenModel):
+    items: tuple[HierarchyLinkOutput, ...]
+    nodes: tuple[ConceptOutput, ...]
+    truncated: bool
+
+
+class HierarchyReviewInput(FrozenModel):
+    status: Literal["approved", "rejected"]
+
+
+class ParentSuggestionInput(FrozenModel):
+    locale: Locale = Locale.EN
+
+
+# --- collections of sources (FR-4, FR-8); local and memory engines, 501 on Azure ----------------
+
+
+def _checked_name(name: str | None) -> str | None:
+    # collection_name raises a ValueError that never repeats the name: a plain 422.
+    return None if name is None else collection_name(name)
+
+
+class CollectionOutput(FrozenModel):
+    id: str
+    parent_id: str | None
+    name: str
+    created_at: datetime
+    source_count: int
+
+
+class CollectionList(FrozenModel):
+    items: tuple[CollectionOutput, ...]
+
+
+class PageOutput(FrozenModel):
+    id: str
+    kind: str
+    subject_id: str
+    status: str
+    current_revision: int | None
+    created_at: datetime
+
+
+class PageRevisionOutput(FrozenModel):
+    number: int
+    body_md: str
+    author_id: str
+    created_at: datetime
+    machine_generated: bool
+    claims: tuple[PageClaimOutput, ...]
+
+
+class PageCitationInput(FrozenModel):
+    source_id: str = Field(min_length=1, max_length=64)
+    fragment_id: str = Field(min_length=1, max_length=128)
+    source_version: int = Field(ge=1)
+    locator: dict[str, Any]
+    quote: str = Field(min_length=1, max_length=10_000)
+
+
+class PageClaimInput(FrozenModel):
+    span_start: int = Field(ge=0)
+    span_end: int = Field(ge=0)
+    citations: tuple[PageCitationInput, ...] = ()
+
+
+class PageEditInput(FrozenModel):
+    body_md: str = Field(min_length=1, max_length=200_000)
+    claims: tuple[PageClaimInput, ...] = ()
+
+
+class PageCreateInput(FrozenModel):
+    kind: Literal["concept", "source_summary", "saved_answer"]
+    subject_id: str = Field(min_length=1, max_length=128)
+    source_ids: tuple[str, ...] = Field(min_length=1, max_length=20)
+
+
+class PageRefreshInput(FrozenModel):
+    source_ids: tuple[str, ...] = Field(min_length=1, max_length=20)
+
+
+class PageCitationOutput(FrozenModel):
+    source_id: str
+    fragment_id: str
+    source_version: int
+    locator: dict[str, Any]
+    quote: str
+
+
+class PageClaimOutput(FrozenModel):
+    ordinal: int
+    span_start: int
+    span_end: int
+    text: str
+    machine_generated: bool
+    citations: tuple[PageCitationOutput, ...]
+
+
+class PageList(FrozenModel):
+    items: tuple[PageOutput, ...]
+
+
+class PageFindingOutput(FrozenModel):
+    kind: str
+    page_id: str
+    revision: int | None
+    claim_ordinal: int | None
+
+
+class PageHealthOutput(FrozenModel):
+    items: tuple[PageFindingOutput, ...]
+
+
+class GraphInsightsOutput(FrozenModel):
+    isolated: tuple[str, ...]
+    bridges: tuple[str, ...]
+    orphan_concepts: tuple[str, ...]
+    duplicate_concepts: tuple[str, ...]
+    contradicting_decisions: tuple[str, ...]
+    truncated: bool
+
+
+class CollectionCreate(FrozenModel):
+    name: str
+    parent_id: str | None = Field(default=None, max_length=64)
+
+    _name = field_validator("name")(_checked_name)
+
+
+class CollectionUpdate(FrozenModel):
+    """`parent_id` sent as null moves to the root; left out, the parent stays."""
+
+    name: str | None = None
+    parent_id: str | None = Field(default=None, max_length=64)
+
+    _name = field_validator("name")(_checked_name)

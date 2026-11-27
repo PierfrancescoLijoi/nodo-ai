@@ -45,6 +45,19 @@ def strip_query(url: str) -> str:
     return url.split("?", 1)[0].split("#", 1)[0]
 
 
+# Upload links whose last path segment is the credential (one use, short life, no bearer token).
+CAPABILITY_PREFIXES = ("/v1/local/uploads/", "/v1/local/source-uploads/")
+REDACTED_TOKEN = "{token}"
+
+
+def redact_path(path: str) -> str:
+    """The request path with the token of an upload link replaced by a fixed marker."""
+    for prefix in CAPABILITY_PREFIXES:
+        if path.startswith(prefix):
+            return prefix + REDACTED_TOKEN
+    return path
+
+
 # --------------------------------------------------------------------------------------- spans
 
 
@@ -55,7 +68,11 @@ def tracer() -> trace.Tracer:
 @contextmanager
 def span(name: str, **attributes: Any) -> Iterator[Span]:
     """A span that records an exception's type (never its message) and marks itself failed."""
-    with tracer().start_as_current_span(name) as current:
+    # The SDK defaults would record the exception message and stack trace as a span event, and
+    # an error message can quote a document or a transcript: only the type is recorded here.
+    with tracer().start_as_current_span(
+        name, record_exception=False, set_status_on_exception=False
+    ) as current:
         for key, value in attributes.items():
             if value is not None:
                 current.set_attribute(key, value)
@@ -63,7 +80,7 @@ def span(name: str, **attributes: Any) -> Iterator[Span]:
             yield current
         except BaseException as error:
             current.set_attribute("error.type", type(error).__name__)
-            current.set_status(Status(StatusCode.ERROR))
+            current.set_status(Status(StatusCode.ERROR, type(error).__name__))
             raise
 
 
@@ -297,11 +314,30 @@ def _instrument_libraries() -> None:
         logging.getLogger("nodo_telemetry").info("psycopg instrumentation not installed")
 
 
-def instrument_app(app: Any) -> None:
-    """Server spans for every request of a FastAPI app, minus the health probes."""
+def _redact_server(span_: Span, scope: Mapping[str, Any]) -> None:
+    """Server spans record the raw path and URL at start; replace an upload token in them."""
+    path = str(scope.get("path") or "")
+    clean = redact_path(path)
+    attributes = getattr(span_, "attributes", None)
+    if clean == path or not attributes:
+        return
+    for key in ("http.target", "url.path", "http.url", "url.full"):
+        value = attributes.get(key)
+        if isinstance(value, str):
+            span_.set_attribute(key, value.replace(path, clean))
+
+
+def instrument_app(app: Any, tracer_provider: Any = None) -> None:
+    """Server spans for every request of a FastAPI app, minus the health probes. The provider
+    defaults to the global one (tests pass their own: the global is set once per process)."""
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        FastAPIInstrumentor.instrument_app(app, excluded_urls="healthz,readyz")
+        FastAPIInstrumentor.instrument_app(
+            app,
+            excluded_urls="healthz,readyz",
+            server_request_hook=_redact_server,
+            tracer_provider=tracer_provider,
+        )
     except ImportError:  # pragma: no cover - optional package
         pass

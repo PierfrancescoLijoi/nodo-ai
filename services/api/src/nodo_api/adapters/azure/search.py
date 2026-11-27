@@ -172,15 +172,25 @@ class AzureSearchRetriever:
         query: str,
         filters: dict[str, Any] | None,
         limit: int,
+        *,
+        source_ids: frozenset[str] | None = None,
     ) -> tuple[TranscriptSegment, ...]:
+        if source_ids == frozenset():
+            return ()
         vector = self._embedder.embed([query])[0]
+        scope_filter = access_filter(workspace_id, owner_id, (filters or {}).get("project"))
+        if source_ids:
+            ids = " or ".join(
+                f"meeting_id eq {odata_string(source_id)}" for source_id in sorted(source_ids)
+            )
+            scope_filter = f"{scope_filter} and ({ids})"
         results = self._client.search(
             search_text=query,
             search_fields=TEXT_FIELDS,
             vector_queries=[
                 VectorizedQuery(vector=vector, k_nearest_neighbors=limit, fields="vector")
             ],
-            filter=access_filter(workspace_id, owner_id, (filters or {}).get("project")),
+            filter=scope_filter,
             select=SELECT_FIELDS,
             top=limit,
         )

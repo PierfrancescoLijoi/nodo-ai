@@ -12,6 +12,7 @@ import { usePrefs } from '@/providers/prefs';
 import { useRouter } from 'next/navigation';
 import styles from '../features.module.css';
 import { MeetingRow, meetingHref } from '../meetings/MeetingRow';
+import { FirstRunNotice } from './FirstRunNotice';
 
 type StatKey = 'meetings' | 'decisions' | 'links';
 
@@ -46,6 +47,8 @@ export function HomeScreen() {
           }}
         />
       ) : null}
+
+      <FirstRunNotice />
 
       <Surface tone="accent" as="section" aria-labelledby="record-title">
         <h2 id="record-title">{t('home.record.title')}</h2>
