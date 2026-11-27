@@ -36,6 +36,33 @@ sentences it used as evidence. On your computer, nothing leaves the machine.
 > an auditable product control; it does not replace consent or another legal basis when one is
 > required.
 
+## Demo
+
+<p align="center">
+  <a href="docs/media/nodo-demo.mp4">
+    <img src="docs/images/nodo-demo-poster.png" alt="NODO AI demo video: recording, transcript, grounded answers, graph, review and settings" width="720">
+  </a>
+</p>
+
+<p align="center"><a href="docs/media/nodo-demo.mp4">Watch the 66-second demo with voice-over</a>. It shows the real interface on sample data, with stand-in models.</p>
+
+## What's new
+
+NODO started as a cloud design for a meeting recorder. These pieces turned it into a local-first
+knowledge base:
+
+| Area           | What was added                                                                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Documents      | Import of PDF, Word, PowerPoint, Excel, HTML, Markdown, text, audio and video, with citations at the page, slide or timestamp.                     |
+| Knowledge base | Source collections, concept hierarchies, wiki Pages with per-claim citations, health checks, a Brain view and an Obsidian vault export.            |
+| Live meetings  | Streaming transcript while you record, and Ask while recording, answering only from finalized transcript lines.                                    |
+| Voice          | Hold-to-dictate input using a local recognizer, and spoken answers in English with the Flock Speech voice.                                         |
+| Retrieval      | Multilingual E5 embeddings (large when the hardware allows), pinned per data folder. A larger BGE model and reranker were tested and did not help. |
+| Models         | A Models screen with size, licence, hardware fit and state. Every download needs your confirmation and is verified against its SHA-256.            |
+| Integration    | A loopback-only HTTP API and a read-only MCP server (`POST /mcp`), protected by the per-launch secret.                                             |
+| Data ownership | Backup and restore of the data folder, a complete export, and complete deletion.                                                                   |
+| Installation   | A one-click Windows installer with an offline bundle, and first-run guidance toward the Models screen.                                             |
+
 ## Product capabilities
 
 | Capability       | What NODO does                                                                                                                                                 |
