@@ -123,7 +123,11 @@ class Engine:
             attestation_hmac_key=load_or_create_key(self.folder),
         )
         config = uvicorn.Config(
-            create_app(settings), host="127.0.0.1", port=self.port, log_level="warning"
+            create_app(settings),
+            host="127.0.0.1",
+            port=self.port,
+            log_level="warning",
+            access_log=False,  # the app logs each request itself, upload tokens redacted
         )
         self._server = uvicorn.Server(config)
         self._thread = threading.Thread(target=self._server.run, name="nodo-engine", daemon=True)

@@ -10,11 +10,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from nodo_api.adapters.azure.openai_extractor import AzureOpenAiExtractor
+from nodo_api.adapters.azure.openai_extractor import (
+    AzureOpenAiExtractor,
+    AzureOpenAiFragmentExtractor,
+)
+from nodo_api.adapters.azure.openai_hierarchy import AzureOpenAiParentSuggester
 from nodo_api.adapters.azure.openai_llm import AzureOpenAiLlm
 from nodo_api.adapters.local.models import GpuArbiter, LlamaServer
 from nodo_api.domain.graph import Entity, Extraction, Subgraph
 from nodo_api.domain.models import Locale, TranscriptSegment
+from nodo_api.domain.sources import Fragment, SectionSummary
 
 REQUEST_TIMEOUT_SECONDS = 900
 ANSWER_OPTIONS: dict[str, Any] = {
@@ -51,17 +56,24 @@ class _LocalServer:
 
 
 class LocalLlm(_LocalServer):
+    def __init__(
+        self, server: LlamaServer, arbiter: GpuArbiter, options: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(server, arbiter)
+        self._answer_options = options or ANSWER_OPTIONS
+
     def answer(
         self,
         workspace_id: str,
         question: str,
         locale: Locale,
-        evidence: tuple[TranscriptSegment, ...],
+        evidence: tuple[TranscriptSegment | Fragment, ...],
         graph: Subgraph,
+        summaries: tuple[SectionSummary, ...] = (),
     ) -> Any:
         with self.lease():
-            llm = AzureOpenAiLlm(self.client(), MODEL_NAME, ANSWER_OPTIONS)
-            return llm.answer(workspace_id, question, locale, evidence, graph)
+            llm = AzureOpenAiLlm(self.client(), MODEL_NAME, self._answer_options)
+            return llm.answer(workspace_id, question, locale, evidence, graph, summaries)
 
 
 class LocalExtractor(_LocalServer):
@@ -75,3 +87,31 @@ class LocalExtractor(_LocalServer):
         with self.lease():
             extractor = AzureOpenAiExtractor(self.client(), MODEL_NAME, EXTRACTION_OPTIONS)
             return extractor.extract(segments, locale, known_decisions, speakers)
+
+
+class LocalFragmentExtractor(_LocalServer):
+    """Entities and relations from document fragments, with the same model and options."""
+
+    def extract(
+        self,
+        fragments: tuple[Fragment, ...],
+        section_path: tuple[str, ...],
+        locale: Locale,
+        known_decisions: tuple[Entity, ...] = (),
+    ) -> Extraction:
+        with self.lease():
+            extractor = AzureOpenAiFragmentExtractor(self.client(), MODEL_NAME, EXTRACTION_OPTIONS)
+            return extractor.extract(fragments, section_path, locale, known_decisions)
+
+
+class LocalParentSuggester(_LocalServer):
+    def suggest(
+        self,
+        concept: Entity,
+        candidates: tuple[Entity, ...],
+        fragments: tuple[Fragment, ...],
+        locale: Locale,
+    ):
+        with self.lease():
+            suggester = AzureOpenAiParentSuggester(self.client(), MODEL_NAME, EXTRACTION_OPTIONS)
+            return suggester.suggest(concept, candidates, fragments, locale)

@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { PageHeader } from '@/components/shell/PageHeader';
 import { ErrorNotice, LinkButton, Segmented, Skeleton, Surface, Tag } from '@/components/ui/primitives';
 import type { EntityType, Graph } from '@/lib/domain/types';
 import { useGraph, useReviews } from '@/lib/queries';
@@ -134,40 +133,58 @@ export function GraphScreen() {
           0));
 
   return (
-    <>
-      <PageHeader title={t('graph.title')} intro={t('graph.intro')} />
+    <section className={styles.knowledgeBrain} aria-label={t('graph.title')}>
+      <header className={styles.brainToolbar}>
+        <div>
+          <p className={styles.brainEyebrow}>{t('app.name')}</p>
+          <h1>{t('graph.title')}</h1>
+        </div>
+        <LinkButton href="/ask/" variant="secondary">
+          {t('tabs.ask')}
+        </LinkButton>
+      </header>
       <ReviewLink />
-      <Segmented<'list' | 'map'>
-        label={t('graph.viewLabel')}
-        value={view}
-        onChange={setView}
-        options={[
-          { value: 'list', label: t('graph.viewList') },
-          { value: 'map', label: t('graph.viewMap') },
-        ]}
-      />
-      {graph.isError ? (
-        <ErrorNotice
-          onRetry={() => {
-            void graph.refetch();
-          }}
-        />
-      ) : null}
-      {graph.isPending ? <Skeleton size="tall" /> : null}
-      {data ? (
-        <>
-          {partial ? <p className={styles.muted}>{t('graph.truncated')}</p> : null}
-          {data.nodes.length === 0 ? <p className={styles.muted}>{t('graph.noRelations')}</p> : null}
-          {view === 'list' ? (
-            <EntityList graph={data} selected={effective} onSelect={select} />
-          ) : (
+      <div className={styles.brainWorkspace}>
+        <aside className={styles.brainExplorer} aria-label={t('graph.viewList')}>
+          <Segmented<'list' | 'map'>
+            label={t('graph.viewLabel')}
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'list', label: t('graph.viewList') },
+              { value: 'map', label: t('graph.viewMap') },
+            ]}
+          />
+          {data ? <EntityList graph={data} selected={effective} onSelect={select} /> : null}
+        </aside>
+        <div className={styles.brainCanvas}>
+          {graph.isError ? (
+            <ErrorNotice
+              onRetry={() => {
+                void graph.refetch();
+              }}
+            />
+          ) : null}
+          {graph.isPending ? <Skeleton size="tall" /> : null}
+          {data ? (
             <>
-              <GraphMap graph={data} selected={effective} onSelect={select} />
-              <NodeDetail graph={data} nodeId={effective} />
+              {partial ? <p className={styles.muted}>{t('graph.truncated')}</p> : null}
+              {data.nodes.length === 0 ? <p className={styles.muted}>{t('graph.noRelations')}</p> : null}
+              {view === 'map' ? <GraphMap graph={data} selected={effective} onSelect={select} /> : null}
             </>
+          ) : null}
+        </div>
+        <aside className={styles.brainInspector} aria-label={t('brain.nodeDetails')}>
+          {data ? (
+            <NodeDetail graph={data} nodeId={effective} />
+          ) : (
+            <p className={styles.muted}>{t('graph.noRelations')}</p>
           )}
-        </>
-      ) : null}
-    </>
+          <LinkButton href="/ask/" variant="secondary">
+            {t('tabs.ask')}
+          </LinkButton>
+        </aside>
+      </div>
+    </section>
   );
 }

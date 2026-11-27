@@ -8,6 +8,7 @@ with another writer. Transactions nest by joining the outer one."""
 from __future__ import annotations
 
 import contextlib
+import logging
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -16,8 +17,11 @@ from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
 
+logger = logging.getLogger("nodo_db")
+
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f+00:00"
 BUSY_TIMEOUT_MS = 30_000
+FOREIGN_KEYS_OFF = "-- nodo:foreign-keys-off"  # first line of a migration that rebuilds tables
 
 
 def to_text(moment: datetime | None) -> str | None:
@@ -35,6 +39,11 @@ def from_text(value: str | None) -> datetime | None:
 
 def now_text() -> str:
     return datetime.now(UTC).strftime(TIME_FORMAT)
+
+
+def _casefold(value: object) -> str:
+    """Unicode case folding shared by SQLite title filters and the memory repository."""
+    return value.casefold() if isinstance(value, str) else ""
 
 
 class LocalDatabase:
@@ -57,9 +66,12 @@ class LocalDatabase:
                 check_same_thread=False,  # each thread keeps its own; close() runs elsewhere
             )
             conn.row_factory = sqlite3.Row
+            conn.create_function("nodo_casefold", 1, _casefold, deterministic=True)
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
             conn.execute("PRAGMA foreign_keys = ON")
+            # Deleted rows are overwritten with zeros, so erased text does not linger in free pages.
+            conn.execute("PRAGMA secure_delete = ON")
             conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
             self._threads.conn = conn
             self._threads.depth = 0
@@ -89,6 +101,22 @@ class LocalDatabase:
         finally:
             self._threads.depth = 0
 
+    def truncate_wal(self, busy_ms: int = 200) -> bool:
+        """Copy the write-ahead log into the file and empty it, so old page images (deleted text)
+        are gone from disk. Best effort on its own short-lived connection: a reader that holds the
+        log open makes it give up after `busy_ms`; the next delete or checkpoint tries again.
+        Returns whether it finished; logs only a code."""
+        try:
+            with contextlib.closing(sqlite3.connect(self._path, timeout=busy_ms / 1000)) as conn:
+                conn.execute(f"PRAGMA busy_timeout = {int(busy_ms)}")
+                busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+        except sqlite3.Error as error:
+            logger.warning("wal_truncate_failed type=%s", type(error).__name__)
+            return False
+        if busy:
+            logger.warning("wal_truncate_incomplete")
+        return not busy
+
     def _migrate(self) -> None:
         conn = self.connection()
         conn.execute(
@@ -99,11 +127,14 @@ class LocalDatabase:
         for version, name, script in migration_files():
             if version in done:
                 continue
-            conn.executescript(
+            body = (
                 f"BEGIN IMMEDIATE;\n{script}\n"
                 f"INSERT INTO schema_migrations VALUES ({version}, '{name}', '{now_text()}');\n"
-                "COMMIT;"
             )
+            if script.lstrip().startswith(FOREIGN_KEYS_OFF):
+                _run_without_foreign_keys(conn, body)
+            else:
+                conn.executescript(body + "COMMIT;")
 
     def close(self) -> None:
         with self._guard:
@@ -111,6 +142,26 @@ class LocalDatabase:
                 with contextlib.suppress(sqlite3.ProgrammingError):
                     conn.close()
             self._open.clear()
+
+
+def _run_without_foreign_keys(conn: sqlite3.Connection, body: str) -> None:
+    """A migration that rebuilds a table other tables point at (SQLite's 12-step procedure):
+    dropping the old table with foreign keys on would cascade into its children. The pragma is a
+    no-op inside a transaction, so it is set before BEGIN; the migration commits only when
+    PRAGMA foreign_key_check finds nothing dangling."""
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(body)
+        broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if broken:
+            raise sqlite3.IntegrityError(f"foreign key check failed: {[tuple(r) for r in broken]}")
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def migration_files() -> list[tuple[int, str, str]]:

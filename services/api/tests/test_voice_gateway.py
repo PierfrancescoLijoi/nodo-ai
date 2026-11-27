@@ -124,6 +124,34 @@ def test_a_spoken_question_is_answered_from_the_meetings_with_citations_and_audi
     assert answer["citations"][0]["segment_id"] in {c["segment_id"] for c in written["citations"]}
 
 
+def test_dictation_returns_a_final_transcript_without_answering(voice_client, auth_headers):
+    session = open_session(voice_client, auth_headers, mode="dictation", locale="en")
+
+    with voice_client.websocket_connect(session["stream_path"]) as ws:
+        assert hello(ws, session["ticket"])["mode"] == "dictation"
+        ws.send_text('{"type":"ptt.start","offset_ms":0}')
+        speak(ws, 0, 1500)
+        ws.send_text('{"type":"ptt.end"}')
+        events = collect(ws, "transcript.final")
+        final = next(event for event in events if event["type"] == "transcript.final")
+
+    assert final["text"] == QUESTION
+
+
+def test_synthesis_speaks_visible_text_without_running_a_query(voice_client, auth_headers):
+    session = open_session(voice_client, auth_headers, mode="synthesis", locale="en")
+
+    with voice_client.websocket_connect(session["stream_path"]) as ws:
+        assert hello(ws, session["ticket"])["mode"] == "synthesis"
+        ws.send_text('{"type":"speak","text":"Read this answer."}')
+        events = collect(ws, "assistant.done")
+
+    assert any(isinstance(event, tuple) for event in events), (
+        "no synthesis audio reached the client"
+    )
+    assert any(event.get("type") == "assistant.text" for event in events if isinstance(event, dict))
+
+
 def test_a_ticket_works_once(voice_client, auth_headers):
     session = open_session(voice_client, auth_headers, mode="assistant", locale="en")
 
@@ -239,6 +267,31 @@ def test_a_live_meeting_reconnects_and_ends_as_a_normal_meeting_ready_for_the_pi
         assert state["state"] == "transcribing"
         assert [s["text"] for s in transcript["items"]] == phrases
         assert [s["speaker_id"] for s in transcript["items"]] == ["S1", "S1", "S1"]
+
+
+def test_live_query_uses_only_finalized_session_phrases(settings, attestation):
+    with make_client(settings, ["the deployment date is monday"]) as client:
+        headers = {"Authorization": "Bearer test-dev-token-0123456789"}
+        meeting = client.post(
+            "/v1/meetings",
+            headers={**headers, "Idempotency-Key": "live-meeting-query-0001"},
+            json={"recording_attestation": attestation},
+        ).json()["id"]
+        session = open_session(client, headers, mode="meeting", locale="en", meeting_id=meeting)
+        with client.websocket_connect(session["stream_path"]) as ws:
+            assert hello(ws, session["ticket"])["type"] == "session.ready"
+            speak(ws, 0, 1500)
+            collect_finals(ws, 1)
+            response = client.post(
+                f"/v1/voice/sessions/{session['session_id']}/query",
+                headers=headers,
+                json={"question": "When is the deployment date?", "ui_locale": "en"},
+            )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["retrieval_version"] == "live-final-v1"
+    assert {citation["segment_id"] for citation in body["citations"]} <= {"live-0"}
 
 
 def collect_finals(ws, count: int) -> list[dict[str, Any]]:

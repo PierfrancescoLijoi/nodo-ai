@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -25,10 +26,27 @@ from nodo_api.errors import NodoError
 from nodo_api.jwks import JwksCache
 from nodo_api.middleware import EdgeProtection
 from nodo_api.resilience import Bulkhead, DependencyUnavailable, is_transient
-from nodo_api.services import EvidenceValidator, GraphService, MeetingService, QueryService
+from nodo_api.services import (
+    EvidenceValidator,
+    GraphInsightService,
+    GraphService,
+    HierarchyService,
+    MeetingService,
+    PageHealthService,
+    PageService,
+    QueryService,
+    SourceImportService,
+    SourceService,
+)
 from nodo_api.services.exports import ExportService
 from nodo_api.services.sync_import import SyncImportService
-from nodo_api.telemetry import configure, configure_logging, instrument_app, request_id_var
+from nodo_api.telemetry import (
+    configure,
+    configure_logging,
+    instrument_app,
+    redact_path,
+    request_id_var,
+)
 
 logger = logging.getLogger("nodo_api")
 
@@ -59,7 +77,22 @@ class AppContainer:
     runtime: Any = None
     readiness: tuple[tuple[str, Callable[[], None]], ...] = ()
     query_gate: Bulkhead | None = None
+    suggestion_gate: Bulkhead | None = None
     speech: Any = None  # the speech adapter, for the local push-to-talk path
+    sources: Any = None
+    fragments: Any = None
+    source_service: SourceService | None = None
+    # Local and memory engines only; None on Azure (routes answer 501 there, Task 13).
+    imports: Any = None
+    source_blobs: Any = None
+    source_import: SourceImportService | None = None
+    folder_watcher: Any = None
+    hierarchy: HierarchyService | None = None  # None on Azure: routes answer 501
+    collections: Any = None  # None on Azure: routes answer 501
+    pages: Any = None  # None on Azure: Wiki APIs answer 501
+    page_service: PageService | None = None
+    page_health: PageHealthService | None = None
+    graph_insights: GraphInsightService | None = None
 
 
 @asynccontextmanager
@@ -70,6 +103,14 @@ async def _lifespan(app: FastAPI):
         await voice.startup()
     if runtime is not None:
         runtime.start()
+    sources = app.state.container.source_service
+    # After runtime.start (imports resumed, watcher running) is safe: resume_interrupted skips a
+    # source with no content hash (tombstones clear it) and _check/_gone stop work on tombstones.
+    if sources is not None:  # after the engine lock: deletes a failure or crash left unfinished
+        try:
+            sources.finish_deletes()
+        except Exception as error:
+            logger.error("finish_deletes_failed type=%s", type(error).__name__)
     try:
         yield
     finally:
@@ -104,6 +145,11 @@ def create_app(
     instrument_app(app)
     app.state.container = _container(effective_settings, oidc_key_provider)
     app.include_router(router)
+    # The capability route also serves the in-memory development engine. Other local-only routes
+    # need a LocalRuntime and remain mounted below only for backend=local.
+    from nodo_api.api import local, mcp
+
+    app.include_router(local.source_upload_router)
     _configure_voice(app, effective_settings, voice_factory)
     _configure_cors(app, effective_settings)
     _configure_middleware(app)
@@ -114,6 +160,7 @@ def create_app(
         body_limits=(
             ("/v1/sync/", SYNC_BODY_LIMIT),
             ("/v1/local/uploads/", LOCAL_UPLOAD_LIMIT),
+            ("/v1/local/source-uploads/", effective_settings.local_import_max_bytes),
         ),
         # The local engine also serves the web app, which needs scripts and styles.
         security_headers=effective_settings.backend != "local",
@@ -149,11 +196,10 @@ def create_app(
         return {"status": "ready"}
 
     if effective_settings.backend == "local":
-        from nodo_api.api import local
-
         _only_loopback_hosts(app, effective_settings)
 
         app.include_router(local.router)
+        app.include_router(mcp.router)
         web = effective_settings.local_web_dir
         if web is not None and web.is_dir():
             local.mount_web(app, web)  # last: it matches everything the API did not
@@ -189,17 +235,67 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         settings.known_notice_versions,
         settings.known_retention_policies,
         a.answers,
+        collections=a.collections,
     )
     query_service = QueryService(
         a.meetings,
         a.retriever,
         a.graph,
         a.llm,
-        EvidenceValidator(a.transcripts),
+        EvidenceValidator(a.transcripts, a.fragments),
         settings.graph_node_limit,
         a.entity_indexer,
         a.answers,
+        a.sources,
+        a.fragment_index,
+        a.fragments,
+        a.section_summary_service,
+        settings.answer_evidence_limit,
     )
+    source_service = (
+        SourceService(
+            sources=a.sources,
+            fragments=a.fragments,
+            graph=a.graph,
+            answers=a.answers,
+            audit=a.audit,
+            clock=lambda: datetime.now(UTC),
+            fragment_index=a.fragment_index,
+            blobs=a.source_blobs,
+            imports=a.imports,
+            jobs=a.jobs,
+            watch=a.folder_watcher.repository if a.folder_watcher is not None else None,
+            collections=a.collections,
+            pages=a.pages,
+        )
+        if all(
+            port is not None
+            for port in (
+                a.sources,
+                a.fragments,
+                a.fragment_index,
+                a.source_blobs,
+                a.imports,
+                a.jobs,
+            )
+        )
+        else None
+    )
+    graph_service = GraphService(a.graph, a.audit, a.answers)
+    graph_insights = GraphInsightService(a.graph) if a.hierarchy_store is not None else None
+    hierarchy = (
+        HierarchyService(
+            a.hierarchy_store, graph_service, a.fragments, a.sources, a.parent_suggester
+        )
+        if a.hierarchy_store is not None and a.fragments is not None and a.sources is not None
+        else None
+    )
+    page_service = (
+        PageService(a.pages, EvidenceValidator(a.transcripts, a.fragments))
+        if a.pages is not None
+        else None
+    )
+    page_health = PageHealthService(a.pages, a.fragments) if a.pages is not None else None
     return AppContainer(
         settings,
         AuthManager(settings, key_provider),
@@ -213,7 +309,7 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.audit,
         meeting_service,
         query_service,
-        GraphService(a.graph, a.audit, a.answers),
+        graph_service,
         SyncImportService(
             a.meetings,
             a.transcripts,
@@ -227,7 +323,21 @@ def _container(settings: Settings, key_provider) -> AppContainer:
         a.runtime,
         a.readiness,
         Bulkhead("query", settings.max_concurrent_queries, wait_seconds=0.0),
+        Bulkhead("parent_suggestions", 1, wait_seconds=0.0),
         a.speech,
+        a.sources,
+        a.fragments,
+        source_service,
+        a.imports,
+        a.source_blobs,
+        a.source_import,
+        a.folder_watcher,
+        hierarchy,
+        collections=a.collections,
+        pages=a.pages,
+        page_service=page_service,
+        page_health=page_health,
+        graph_insights=graph_insights,
     )
 
 
@@ -275,7 +385,7 @@ def _configure_middleware(app: FastAPI) -> None:
                 {
                     "event": "http_request",
                     "method": request.method,
-                    "path": request.url.path,
+                    "path": redact_path(request.url.path),  # never an upload token
                     "status_code": response.status_code,
                     "request_id": request_id,
                 }

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from collections import deque
 from typing import Annotated, Any, Literal
@@ -22,10 +23,11 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import Field
 
 from nodo_api.api.v1.routes import PrincipalDep
-from nodo_api.api.v1.schemas import FrozenModel
+from nodo_api.api.v1.schemas import CitationOutput, FrozenModel, QueryOutput
 from nodo_api.domain.models import Locale, MeetingState
 from nodo_api.errors import ConflictError, NotFoundError, ValidationFailed
 from nodo_api.resilience import Overloaded
+from nodo_api.services.query import QueryRequest
 from nodo_api.voice.hub import Busy, VoiceRuntime, new_session_id
 from nodo_api.voice.live import LiveSession, SessionClosed, SessionState
 from nodo_api.voice.protocol import (
@@ -38,6 +40,7 @@ from nodo_api.voice.protocol import (
     ProtocolError,
     PttEnd,
     PttStart,
+    Speak,
     parse_audio_frame,
     parse_client_message,
     server_event,
@@ -53,7 +56,7 @@ MAX_PENDING_AUDIO = 64  # chunks of 40 ms or more waiting for a slow listener
 
 
 class SessionCreate(FrozenModel):
-    mode: Literal["meeting", "assistant"]
+    mode: Literal["meeting", "assistant", "dictation", "synthesis"]
     locale: Locale
     meeting_id: Annotated[str | None, Field(max_length=64)] = None
 
@@ -71,6 +74,11 @@ class SessionOutput(FrozenModel):
 class TicketOutput(FrozenModel):
     ticket: str
     ticket_expires_in: int
+
+
+class LiveQuery(FrozenModel):
+    question: str = Field(min_length=1, max_length=2000)
+    ui_locale: Locale
 
 
 def _runtime(request: Request) -> VoiceRuntime:
@@ -93,7 +101,9 @@ async def open_session(payload: SessionCreate, actor: PrincipalDep, request: Req
         if meeting.state is not MeetingState.UPLOADING:
             raise ConflictError
     elif payload.meeting_id is not None:
-        raise ValidationFailed("The assistant does not record into a meeting")
+        raise ValidationFailed(
+            "An assistant, dictation, or synthesis session does not record into a meeting"
+        )
     record = SessionRecord(
         new_session_id(),
         actor.workspace_id,
@@ -137,6 +147,64 @@ async def new_ticket(session_id: str, actor: PrincipalDep, request: Request):
     return TicketOutput(
         ticket=runtime.signer.issue(session_id, actor.user_id, actor.workspace_id),
         ticket_expires_in=runtime.signer.ttl_seconds,
+    )
+
+
+@router.post("/sessions/{session_id}/query", response_model=QueryOutput)
+async def query_live_session(
+    session_id: str, payload: LiveQuery, actor: PrincipalDep, request: Request
+) -> QueryOutput:
+    runtime = _runtime(request)
+    record = await runtime.deps.store.get(session_id)
+    if (
+        record is None
+        or record.mode != "meeting"
+        or record.meeting_id is None
+        or (record.user_id, record.workspace_id) != (actor.user_id, actor.workspace_id)
+    ):
+        raise NotFoundError
+    phrases = [json.loads(value) for value in await runtime.deps.store.finals(session_id)]
+    from nodo_api.domain.models import TranscriptSegment
+
+    segments = tuple(
+        TranscriptSegment(
+            id=f"live-{item['start_ms']}",
+            meeting_id=record.meeting_id,
+            speaker_id=f"S{item['speaker']}",
+            start_ms=item["start_ms"],
+            end_ms=item["end_ms"],
+            text=item["text"],
+            confidence=item["confidence"],
+            version=1,
+            locale=Locale(item["locale"]),
+        )
+        for item in phrases
+    )
+    result = request.app.state.container.query_service.query_live(
+        actor.workspace_id,
+        actor.user_id,
+        QueryRequest(payload.question, payload.ui_locale),
+        segments,
+    )
+    return QueryOutput(
+        answer=result.answer,
+        answerability=result.answerability,
+        citations=tuple(
+            CitationOutput(
+                meeting_id=c.meeting_id,
+                segment_id=c.segment_id,
+                start_ms=c.start_ms,
+                end_ms=c.end_ms,
+                quote=c.quote,
+                speaker_id=c.speaker_id,
+            )
+            for c in result.citations
+        ),
+        related_entities=result.related_entities,
+        query_trace_id=result.query_trace_id,
+        model_version=result.model_version,
+        retrieval_version=result.retrieval_version,
+        degraded=result.degraded,
     )
 
 
@@ -296,6 +364,8 @@ async def _pump(ws: WebSocket, live: LiveSession, runtime: VoiceRuntime) -> None
                 await live.ptt_end()
             case BargeIn():
                 await live.barge_in()
+            case Speak():
+                await live.speak(control.text)
             case End():
                 await live.end()
                 return

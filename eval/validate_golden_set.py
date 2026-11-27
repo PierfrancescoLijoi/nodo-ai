@@ -5,6 +5,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from golden import expanded_cases
+
 
 ROOT = Path(__file__).resolve().parent
 FIXTURES_PATH = ROOT / "golden_set" / "fixtures" / "meetings.json"
@@ -103,7 +105,7 @@ def validate_fixtures(data: Any) -> tuple[dict[str, dict[str, Any]], set[str]]:
 
 
 def validate_cases(cases: list[dict[str, Any]], segments: dict[str, dict[str, Any]], workspaces: set[str]) -> None:
-    require(len(cases) >= 60, "at least 60 cases are required")
+    require(len(cases) >= 150, "at least 150 cases are required")
     ids: set[str] = set()
     categories = Counter()
     localized_count = 0
@@ -153,7 +155,7 @@ def main() -> int:
     schema = load_json(SCHEMA_PATH)
     require(isinstance(schema, dict) and "$defs" in schema, "schema.json must define reusable schemas")
     segments, workspaces = validate_fixtures(load_json(FIXTURES_PATH))
-    cases = load_cases(CASES_PATH)
+    cases = expanded_cases(load_cases(CASES_PATH))
     validate_cases(cases, segments, workspaces)
     print(f"PASS: 6 meetings, {len(segments)} segments, {len(cases)} cases, 10 balanced categories")
     return 0

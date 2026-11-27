@@ -7,6 +7,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from nodo_api.adapters.local.model_catalog import CATALOG
 from nodo_api.adapters.memory import MemorySpeech
 from nodo_api.adapters.memory.extractor import KeywordExtractor
 from nodo_api.config import Settings
@@ -151,6 +152,59 @@ def test_the_upload_link_is_single_use_and_everything_else_needs_the_token(clien
     assert client.get("/v1/meetings").status_code == 401
     assert client.get("/v1/meetings", headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert client.get("/v1/local/status", headers=HEADERS).json()["backend"] == "local"
+
+
+def test_local_models_expose_catalog_metadata_without_starting_a_download(client) -> None:
+    response = client.get("/v1/local/models", headers=HEADERS)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hardware_tier"] == "cpu"
+    llama = next(item for item in body["models"] if item["id"] == "llama-cpp")
+    assert llama["installable"] is True and len(llama["sha256"]) == 64
+    qwen = next(item for item in body["models"] if item["id"] == "qwen3-4b-q5")
+    assert qwen["installable"] is False and qwen["installed"] is False
+
+
+def test_model_removal_requires_approval_and_stays_inside_the_model_root(tmp_path) -> None:
+    models = tmp_path / "models"
+    entry = CATALOG[0]
+    owned = entry.owned_paths(models)[0]
+    owned.mkdir(parents=True)
+    (owned / "model.bin").write_bytes(b"model")
+    outside = tmp_path / "keep.txt"
+    outside.write_text("keep")
+    with TestClient(create_app(_settings(tmp_path / "data", local_models_dir=models))) as local:
+        denied = local.post(f"/v1/local/models/{entry.id}/remove", headers=HEADERS, json={})
+        assert denied.status_code == 422 and owned.exists()
+        removed = local.post(
+            f"/v1/local/models/{entry.id}/remove", headers=HEADERS, json={"approved": True}
+        )
+    assert removed.status_code == 200 and removed.json()["installed"] is False
+    assert not owned.exists() and outside.read_text() == "keep"
+
+
+def test_model_installation_requires_approval_and_uses_only_catalog_entry(
+    tmp_path, monkeypatch
+) -> None:
+    models = tmp_path / "models"
+    entry = CATALOG[0]
+    calls = []
+
+    def fake_install(candidate, root, opener):
+        calls.append((candidate, root, opener))
+        target = candidate.owned_paths(root)[0]
+        target.mkdir(parents=True)
+        return target
+
+    monkeypatch.setattr("nodo_api.api.local.install", fake_install)
+    with TestClient(create_app(_settings(tmp_path / "data", local_models_dir=models))) as local:
+        denied = local.post(f"/v1/local/models/{entry.id}/install", headers=HEADERS, json={})
+        assert denied.status_code == 422 and not calls
+        installed = local.post(
+            f"/v1/local/models/{entry.id}/install", headers=HEADERS, json={"approved": True}
+        )
+    assert installed.status_code == 200 and installed.json()["installed"] is True
+    assert calls and calls[0][0] is entry and calls[0][1] == models
 
 
 @pytest.mark.parametrize(

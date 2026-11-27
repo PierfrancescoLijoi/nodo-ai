@@ -325,11 +325,19 @@ class SqliteAuditLog:
     def __init__(self, db: LocalDatabase) -> None:
         self._db = db
 
-    def append(self, workspace_id: str, event_type: str, metadata: dict[str, str]) -> str:
-        event_id = str(uuid4())
+    def append(
+        self,
+        workspace_id: str,
+        event_type: str,
+        metadata: dict[str, str],
+        *,
+        event_id: str | None = None,
+    ) -> str:
+        event_id = event_id or str(uuid4())
         with self._db.transaction() as conn:
             conn.execute(
-                "INSERT INTO audit_events (workspace_id, id, event_type, metadata, occurred_at)"
+                "INSERT OR IGNORE INTO audit_events"
+                " (workspace_id, id, event_type, metadata, occurred_at)"
                 " VALUES (?, ?, ?, ?, ?)",
                 (workspace_id, event_id, event_type, json.dumps(metadata), now_text()),
             )

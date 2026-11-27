@@ -29,6 +29,49 @@ START_TIMEOUT_SECONDS = 180
 IDLE_UNLOAD_SECONDS = 600
 
 
+EMBEDDING_PIN = "embedding-model.txt"
+_E5_BASE, _E5_LARGE = "multilingual-e5-base", "multilingual-e5-large"
+
+
+def choose_embedding(models_root: Path, data_root: Path | None) -> str:
+    """E5 large for a fresh data folder when installed, otherwise what the data was indexed with.
+
+    Vectors of different sizes cannot be compared, so the model is pinned in the data folder as soon
+    as there is anything indexed: installing the large model later never breaks an existing archive.
+    """
+    root = data_root if data_root is not None else data_dir()
+    pin = root / EMBEDDING_PIN
+    installed = lambda name: (models_root / "embeddings" / name / "model.int8.onnx").exists()  # noqa: E731
+    if pin.is_file():
+        name = pin.read_text(encoding="utf-8").strip()
+        return name  # a removed model reads as "not installed", never as a different vector size
+    database = root / "nodo.db"
+    indexed = False
+    if database.is_file():
+        import sqlite3
+
+        with contextlib.closing(
+            sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True)
+        ) as db:
+            try:
+                indexed = any(
+                    db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+                    for table in ("search_segments", "search_fragments", "entity_vectors")
+                )
+            except sqlite3.Error:
+                indexed = False
+    if indexed:
+        with contextlib.suppress(OSError):
+            pin.write_text(_E5_BASE, encoding="utf-8")
+        return _E5_BASE
+    if installed(_E5_LARGE):
+        with contextlib.suppress(OSError):
+            root.mkdir(parents=True, exist_ok=True)
+            pin.write_text(_E5_LARGE, encoding="utf-8")
+        return _E5_LARGE
+    return _E5_BASE
+
+
 def data_dir() -> Path:
     base = (
         os.environ.get("LOCALAPPDATA")
@@ -42,6 +85,15 @@ def find_gguf(repo_dir: str, pattern: str = "*.gguf") -> Path | None:
     """The first matching file of a model already downloaded into the Hugging Face cache."""
     for path in sorted((HF_CACHE / repo_dir / "snapshots").glob(f"*/{pattern}")):
         return path.resolve()
+    return None
+
+
+def first_gguf(*candidates: tuple[str, str]) -> Path | None:
+    """The locally installed model wins; no download or model-manager mutation happens here."""
+    for repo_dir, pattern in candidates:
+        found = find_gguf(repo_dir, pattern)
+        if found is not None:
+            return found
     return None
 
 
@@ -72,12 +124,24 @@ class LocalModelPaths:
     ffmpeg: str | None = None
 
     @classmethod
-    def discover(cls, models_dir: Path | None = None) -> LocalModelPaths:
+    def discover(
+        cls,
+        models_dir: Path | None = None,
+        embedding_model: str = "auto",
+        data_root: Path | None = None,
+    ) -> LocalModelPaths:
         root = models_dir or data_dir() / "models"
         server = root / "llama.cpp" / "llama-server.exe"
         server = server if server.exists() else root / "llama.cpp" / "llama-server"
+        if not server.exists():
+            import shutil
+
+            installed = shutil.which("llama-server")
+            server = Path(installed) if installed else server
         diarization = root / "diarization"
-        embeddings = root / "embeddings" / "multilingual-e5-base"
+        if embedding_model == "auto":
+            embedding_model = choose_embedding(root, data_root)
+        embeddings = root / "embeddings" / embedding_model
         reranker = find_snapshot(
             "models--Horizon-Labs--multilingual-reranker-small",
             "onnx/model_quantized.onnx",
@@ -86,7 +150,13 @@ class LocalModelPaths:
 
         return cls(
             llama_server=server if server.exists() else None,
-            llm_gguf=find_gguf("models--Qwen--Qwen3-4B-GGUF", "Qwen3-4B-*.gguf"),
+            llm_gguf=first_gguf(
+                (
+                    "models--ggml-org--Qwen2.5-VL-3B-Instruct-GGUF",
+                    "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+                ),
+                ("models--Qwen--Qwen3-4B-GGUF", "Qwen3-4B-*.gguf"),
+            ),
             diarization_dir=diarization if diarization.exists() else None,
             embedding_dir=embeddings if (embeddings / "model.int8.onnx").exists() else None,
             reranker_dir=reranker,

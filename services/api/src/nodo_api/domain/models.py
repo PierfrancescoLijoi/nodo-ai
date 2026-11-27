@@ -4,6 +4,10 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nodo_api.domain.sources import Locator
 
 
 class MeetingState(StrEnum):
@@ -100,12 +104,26 @@ class TranscriptSegment:
 
 @dataclass(frozen=True, slots=True)
 class Citation:
-    meeting_id: str
-    segment_id: str
-    start_ms: int
-    end_ms: int
-    quote: str
+    # The meeting-shaped fields stay first and keep their defaults so old positional constructors
+    # and stored answers remain readable while document citations can use only the source fields.
+    meeting_id: str = ""
+    segment_id: str = ""
+    start_ms: int = 0
+    end_ms: int = 0
+    quote: str = ""
     speaker_id: str = ""
+    source_id: str | None = None
+    fragment_id: str | None = None
+    source_version: int | None = None
+    locator: Locator | None = None
+
+    @property
+    def evidence_source_id(self) -> str:
+        return self.source_id or self.meeting_id
+
+    @property
+    def evidence_fragment_id(self) -> str:
+        return self.fragment_id or self.segment_id
 
 
 @dataclass(frozen=True, slots=True)

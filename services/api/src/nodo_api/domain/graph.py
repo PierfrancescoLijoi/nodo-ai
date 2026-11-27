@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 
+from nodo_api.domain.sources import SourceKind
+
 NAMESPACE = uuid.UUID("5d3b7a8e-2f1c-4c6a-9a55-3f0e6a1b7c20")
 MAX_LABEL = 120
 MAX_ENTITIES = 60
@@ -30,6 +32,7 @@ class EntityType(StrEnum):
     DECISION = "decision"
     ACTION = "action"
     MEETING = "meeting"
+    SOURCE = "source"  # a non-meeting source node (ADR-029)
 
 
 class RelationKind(StrEnum):
@@ -41,6 +44,7 @@ class RelationKind(StrEnum):
     DEPENDS_ON = "DEPENDS_ON"
     SUPERSEDES = "SUPERSEDES"
     CONTRADICTS = "CONTRADICTS"
+    CHILD_OF = "CHILD_OF"  # child concept to parent concept (ADR-030)
 
 
 class ReviewStatus(StrEnum):
@@ -49,22 +53,23 @@ class ReviewStatus(StrEnum):
     REJECTED = "rejected"
 
 
-_ANY = frozenset(EntityType) - {EntityType.MEETING}
+ORIGIN_TYPES = frozenset({EntityType.MEETING, EntityType.SOURCE})  # the nodes evidence comes from
+_ANY = frozenset(EntityType) - ORIGIN_TYPES
 _THINGS = frozenset({EntityType.PROJECT, EntityType.SYSTEM, EntityType.TOPIC})
 _DECISION = frozenset({EntityType.DECISION})
 _PERSON = frozenset({EntityType.PERSON})
-_MEETING = frozenset({EntityType.MEETING})
 
 # (allowed source types, allowed target types) per relation kind.
 ENDPOINTS: dict[RelationKind, tuple[frozenset[EntityType], frozenset[EntityType]]] = {
-    RelationKind.MENTIONED_IN: (_ANY, _MEETING),
+    RelationKind.MENTIONED_IN: (_ANY, ORIGIN_TYPES),
     RelationKind.ABOUT: (frozenset({EntityType.DECISION, EntityType.ACTION}), _THINGS),
-    RelationKind.DECIDED_IN: (_DECISION, _MEETING),
+    RelationKind.DECIDED_IN: (_DECISION, ORIGIN_TYPES),
     RelationKind.PROPOSED_BY: (_DECISION, _PERSON),
     RelationKind.ASSIGNED_TO: (frozenset({EntityType.ACTION}), _PERSON),
     RelationKind.DEPENDS_ON: (_THINGS, _THINGS),
     RelationKind.SUPERSEDES: (_DECISION, _DECISION),
     RelationKind.CONTRADICTS: (_DECISION, _DECISION),
+    RelationKind.CHILD_OF: (_THINGS, _THINGS),
 }
 
 # Facts of record that the system derives itself are approved at once; what the model infers waits
@@ -91,6 +96,10 @@ def meeting_entity_id(workspace_id: str, owner_id: str, meeting_id: str) -> str:
     return entity_id(workspace_id, owner_id, EntityType.MEETING, meeting_id)
 
 
+def source_entity_id(workspace_id: str, owner_id: str, source_id: str) -> str:
+    return entity_id(workspace_id, owner_id, EntityType.SOURCE, source_id)
+
+
 def relation_id(
     workspace_id: str, owner_id: str, source_id: str, kind: RelationKind, target_id: str
 ) -> str:
@@ -101,8 +110,19 @@ def relation_id(
 
 @dataclass(frozen=True, slots=True)
 class Evidence:
-    meeting_id: str
-    segment_id: str
+    """A source and one fragment of it that supports a relation. For a meeting the source id is
+    the meeting id and the fragment id the segment id."""
+
+    source_id: str
+    fragment_id: str
+
+    @property
+    def meeting_id(self) -> str:
+        return self.source_id
+
+    @property
+    def segment_id(self) -> str:
+        return self.fragment_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +134,7 @@ class Entity:
     effective_at: datetime | None = None
     due_at: datetime | None = None
     meeting_id: str | None = None  # set on meeting nodes only
+    source_id: str | None = None  # set on source nodes only
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +201,21 @@ class MeetingRef:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceRef:
+    """A non-meeting source as the graph needs it: the node it hangs its evidence on."""
+
+    id: str
+    title: str | None
+    created_at: datetime
+    kind: SourceKind
+
+    @property
+    def label(self) -> str:
+        """The source node label: the title, or the kind when there is none."""
+        return " ".join((self.title or "").split())[:MAX_LABEL] or self.kind.value
+
+
+@dataclass(frozen=True, slots=True)
 class ExtractedEntity:
     key: str
     type: EntityType
@@ -204,6 +240,20 @@ class Extraction:
     summary: str = ""
     entities: tuple[ExtractedEntity, ...] = ()
     relations: tuple[ExtractedRelation, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentExtraction:
+    """An extraction of a whole document with the accounting of what could not be read.
+
+    `skipped_windows` counts windows that lost at least one fragment to a model failure and
+    `skipped_fragment_ids` names those fragments (ids only, never text). When it is above zero
+    the extraction is partial and must not be recorded as the current extraction version."""
+
+    extraction: Extraction
+    total_windows: int
+    skipped_windows: int
+    skipped_fragment_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,7 +282,13 @@ class Change:
 
 
 class ExtractionError(RuntimeError):
-    """The model's answer could not be used (not valid, or cut off before it was complete)."""
+    """The model's answer could not be used (not valid, or cut off before it was complete).
+
+    `code` is a stable machine-readable reason; the message never holds model or document text."""
+
+    def __init__(self, message: str = "", code: str = "extraction_failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 ANONYMOUS_SPEAKER = re.compile(r"s[0-9]+")
@@ -265,7 +321,7 @@ def _clean_entities(
         label = " ".join(item.label.split())[:MAX_LABEL]
         normalized = normalize_label(label)
         evidence = tuple(dict.fromkeys(s for s in item.evidence if s in valid))
-        if item.type is EntityType.MEETING or not normalized or not evidence:
+        if item.type in ORIGIN_TYPES or not normalized or not evidence:
             continue
         if item.type is EntityType.PERSON and ANONYMOUS_SPEAKER.fullmatch(normalized):
             continue  # "S1" is a diarization label, not someone's name (ADR-004, ADR-013)

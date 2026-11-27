@@ -11,6 +11,7 @@ import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from typing import Protocol
 
 from nodo_api.domain.graph import (
     EXISTING_PREFIX,
@@ -31,12 +32,15 @@ MAX_SUMMARY_SENTENCES = 3
 SUMMARY_LIMIT = 700
 
 
-def windows(
-    segments: Sequence[TranscriptSegment], max_tokens: int
-) -> list[tuple[TranscriptSegment, ...]]:
-    """Consecutive segments grouped so each group stays under the token budget."""
+class HasText(Protocol):
+    @property
+    def text(self) -> str: ...
+
+
+def windows[T: HasText](segments: Sequence[T], max_tokens: int) -> list[tuple[T, ...]]:
+    """Consecutive segments (or fragments) grouped so each group stays under the token budget."""
     budget = int(max_tokens * CHARS_PER_TOKEN)
-    groups: list[list[TranscriptSegment]] = [[]]
+    groups: list[list[T]] = [[]]
     used = 0
     for segment in segments:
         size = len(segment.text) + 12  # speaker label and numbering the prompt adds

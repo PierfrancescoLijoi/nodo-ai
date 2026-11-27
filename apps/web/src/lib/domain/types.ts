@@ -98,12 +98,37 @@ export interface GraphEdge {
   kind: RelationKind;
   status?: 'proposed' | 'approved';
   confidence?: number;
+  meetingIds?: string[];
 }
 
 export interface Graph {
   nodes: GraphNode[];
   edges: GraphEdge[];
   truncated: boolean;
+}
+
+export interface GraphInsights {
+  isolated: string[];
+  bridges: string[];
+  orphanConcepts: string[];
+  duplicateConcepts: string[];
+  contradictingDecisions: string[];
+  truncated: boolean;
+}
+
+export interface WikiPage {
+  id: string;
+  kind: 'concept' | 'source_summary' | 'saved_answer';
+  subjectId: string;
+  status: 'proposed' | 'approved' | 'rejected' | 'stale';
+  currentRevision: number | null;
+}
+
+export interface WikiRevision {
+  number: number;
+  body: string;
+  authorId: string;
+  machineGenerated: boolean;
 }
 
 export interface Change {

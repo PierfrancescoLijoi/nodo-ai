@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Annotated
+import json
+from datetime import UTC, datetime
+from functools import partial
+from typing import Annotated, Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import (
     APIRouter,
@@ -18,38 +21,103 @@ from fastapi.concurrency import run_in_threadpool
 from opentelemetry import trace
 
 from nodo_api.api.v1.mapping import (
+    collection_output,
+    concept_output,
     decode_cursor,
     edge_output,
     encode_cursor,
+    fragment_output,
+    hierarchy_link_output,
+    import_output,
     list_item,
     meeting_output,
+    section_output,
+    source_output,
+    source_version_output,
     subgraph_output,
 )
 from nodo_api.api.v1.schemas import (
     ChangeOutput,
     ChangesOutput,
+    CitationOutput,
+    CollectionCreate,
+    CollectionList,
+    CollectionOutput,
+    CollectionUpdate,
+    ConceptHierarchyOutput,
     ExportInput,
     ExportOutput,
     GraphEdgeOutput,
+    GraphInsightsOutput,
+    HierarchyLinkOutput,
+    HierarchyProposalList,
+    HierarchyReviewInput,
+    ImportStatusOutput,
     MeetingCreate,
     MeetingList,
     MeetingOutput,
+    PageCitationOutput,
+    PageClaimOutput,
+    PageCreateInput,
+    PageEditInput,
+    PageFindingOutput,
+    PageHealthOutput,
+    PageList,
+    PageOutput,
+    PageRefreshInput,
+    PageRevisionOutput,
+    ParentSuggestionInput,
+    ProcessingConfirmation,
     QueryFiltersInput,
     QueryInput,
     QueryOutput,
+    QueryScopeInput,
     ReviewInput,
     ReviewOutput,
     ReviewRelationInput,
+    SourceCreate,
+    SourceCreateOutput,
+    SourceFragments,
+    SourceList,
+    SourceMentionOutput,
+    SourceOutline,
+    SourceOutput,
+    SourceVersionList,
     SpeakerNameInput,
     SubgraphOutput,
     TranscriptPage,
     UploadSessionOutput,
     VoiceQueryInput,
+    WatchFolderCreate,
+    WatchFolderList,
+    WatchFolderOutput,
 )
 from nodo_api.api.v1.sync_schemas import SyncPackage, SyncResult
 from nodo_api.auth import AuthError, Principal
 from nodo_api.domain.graph import ReviewStatus
-from nodo_api.errors import AuthenticationError, ValidationFailed
+from nodo_api.domain.hierarchy import MAX_DEPTH
+from nodo_api.domain.pages import (
+    Page,
+    PageCitation,
+    PageClaim,
+    PageKind,
+    PageStatus,
+    claim_text_hash,
+)
+from nodo_api.domain.retrieval import (
+    CitationFormat,
+    QueryScope,
+    ResolvedQueryScope,
+    resolve_query_scope,
+)
+from nodo_api.domain.source_files import UploadRejected
+from nodo_api.domain.sources import CLEAR, Fragment, Locator, SourceKind
+from nodo_api.errors import (
+    AuthenticationError,
+    NotAvailableOnEngine,
+    NotFoundError,
+    ValidationFailed,
+)
 from nodo_api.services.query import QueryFilters, QueryRequest
 from nodo_api.telemetry import pseudonym
 
@@ -135,6 +203,557 @@ def list_meetings(
     )
 
 
+def _source_stores(container):
+    if container.sources is None or container.fragments is None:
+        raise NotAvailableOnEngine
+    return container.sources, container.fragments
+
+
+def _source_import(container):
+    if container.source_import is None:
+        raise NotAvailableOnEngine
+    return container.source_import
+
+
+def _source_delete(container):
+    _source_import(container)
+    if container.source_service is None:
+        raise NotAvailableOnEngine
+    return container.source_service
+
+
+def _pages(container):
+    if container.pages is None:
+        raise NotAvailableOnEngine
+    return container.pages
+
+
+@router.get("/graph/insights", response_model=GraphInsightsOutput)
+def graph_insights(actor: PrincipalDep, request: Request):
+    service = request.app.state.container.graph_insights
+    if service is None:
+        raise NotAvailableOnEngine
+    result = service.analyze(actor.workspace_id, actor.user_id)
+    return GraphInsightsOutput(
+        isolated=result.isolated,
+        bridges=result.bridges,
+        orphan_concepts=result.orphan_concepts,
+        duplicate_concepts=result.duplicate_concepts,
+        contradicting_decisions=result.contradicting_decisions,
+        truncated=result.truncated,
+    )
+
+
+def _page_output(page):
+    return PageOutput(
+        id=page.id,
+        kind=page.kind.value,
+        subject_id=page.subject_id,
+        status=page.status.value,
+        current_revision=page.current_revision,
+        created_at=page.created_at,
+    )
+
+
+def _page_revision_output(revision):
+    return PageRevisionOutput(
+        number=revision.number,
+        body_md=revision.body_md,
+        author_id=revision.author_id,
+        created_at=revision.created_at,
+        machine_generated=revision.provenance.machine_generated,
+        claims=tuple(
+            PageClaimOutput(
+                ordinal=claim.ordinal,
+                span_start=claim.span[0],
+                span_end=claim.span[1],
+                text=claim.text,
+                machine_generated=claim.machine_generated,
+                citations=tuple(
+                    PageCitationOutput(
+                        source_id=citation.source_id,
+                        fragment_id=citation.fragment_id,
+                        source_version=citation.source_version,
+                        locator=json.loads(citation.locator.to_json()),
+                        quote=citation.quote,
+                    )
+                    for citation in claim.citations
+                ),
+            )
+            for claim in revision.claims
+        ),
+    )
+
+
+@router.get("/pages", response_model=PageList)
+def list_pages(
+    actor: PrincipalDep,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    pages = _pages(request.app.state.container).list_owned(actor.workspace_id, actor.user_id)
+    return PageList(items=tuple(_page_output(page) for page in pages[:limit]))
+
+
+@router.post("/pages", response_model=PageOutput, status_code=status.HTTP_201_CREATED)
+def create_page(
+    payload: PageCreateInput,
+    actor: PrincipalDep,
+    request: Request,
+    idempotency_key: PageCommandKey,
+):
+    container = request.app.state.container
+    service = container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    identity = f"{actor.workspace_id}:{actor.user_id}:{idempotency_key}"
+    page_id = f"page-{uuid5(NAMESPACE_URL, identity).hex}"
+    pages = _pages(container)
+    try:
+        return _page_output(pages.get_owned(actor.workspace_id, actor.user_id, page_id))
+    except NotFoundError:
+        pass
+    sources, fragments = _source_stores(container)
+    evidence = []
+    for source_id in dict.fromkeys(payload.source_ids):
+        sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+        evidence.extend(fragments.latest(actor.workspace_id, source_id))
+    page = Page(
+        page_id,
+        actor.workspace_id,
+        actor.user_id,
+        PageKind(payload.kind),
+        payload.subject_id,
+        PageStatus.PROPOSED,
+        datetime.now(UTC),
+    )
+    service.compile(
+        page,
+        tuple(evidence),
+        model_version="extractive-page-compiler-v1",
+        prompt_version="page-create-v1",
+    )
+    return _page_output(page)
+
+
+@router.get("/pages/health", response_model=PageHealthOutput)
+def page_health(actor: PrincipalDep, request: Request):
+    service = request.app.state.container.page_health
+    if service is None:
+        raise NotAvailableOnEngine
+    findings = service.verify(actor.workspace_id, actor.user_id)
+    return PageHealthOutput(
+        items=tuple(
+            PageFindingOutput(
+                kind=finding.kind.value,
+                page_id=finding.page_id,
+                revision=finding.revision,
+                claim_ordinal=finding.claim_ordinal,
+            )
+            for finding in findings
+        )
+    )
+
+
+@router.get("/pages/{page_id}", response_model=PageOutput)
+def get_page(page_id: str, actor: PrincipalDep, request: Request):
+    page = _pages(request.app.state.container).get_owned(actor.workspace_id, actor.user_id, page_id)
+    return _page_output(page)
+
+
+@router.get("/pages/{page_id}/revisions", response_model=tuple[PageRevisionOutput, ...])
+def get_page_revisions(page_id: str, actor: PrincipalDep, request: Request):
+    revisions = _pages(request.app.state.container).revisions(
+        actor.workspace_id, actor.user_id, page_id
+    )
+    return tuple(_page_revision_output(revision) for revision in revisions)
+
+
+PageCommandKey = Annotated[
+    str,
+    Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+]
+
+
+@router.post("/pages/{page_id}/approve", response_model=PageOutput)
+def approve_page(
+    page_id: str, actor: PrincipalDep, request: Request, _idempotency_key: PageCommandKey
+):
+    service = request.app.state.container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    page = service.approve_proposal(actor.workspace_id, actor.user_id, page_id)
+    return _page_output(page)
+
+
+@router.post("/pages/{page_id}/reject", response_model=PageOutput)
+def reject_page(
+    page_id: str, actor: PrincipalDep, request: Request, _idempotency_key: PageCommandKey
+):
+    service = request.app.state.container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    return _page_output(service.reject_proposal(actor.workspace_id, actor.user_id, page_id))
+
+
+@router.patch("/pages/{page_id}", response_model=PageOutput)
+def edit_page(
+    page_id: str,
+    payload: PageEditInput,
+    actor: PrincipalDep,
+    request: Request,
+    _idempotency_key: PageCommandKey,
+):
+    container = request.app.state.container
+    service = container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    sources, fragments = _source_stores(container)
+    claims, evidence = [], {}
+    for ordinal, item in enumerate(payload.claims):
+        if item.span_end < item.span_start or item.span_end > len(payload.body_md):
+            raise ValidationFailed("A Page claim span is outside the body")
+        text = payload.body_md[item.span_start : item.span_end]
+        if not text.strip():
+            raise ValidationFailed("A Page claim needs body text")
+        citations = []
+        for raw in item.citations:
+            sources.get_owned(actor.workspace_id, actor.user_id, raw.source_id)
+            fragment = fragments.get_fragment(actor.workspace_id, raw.source_id, raw.fragment_id)
+            if fragment is None:
+                raise ValidationFailed("A Page citation fragment is unavailable")
+            locator = Locator.from_json(json.dumps(raw.locator))
+            citations.append(
+                PageCitation(
+                    raw.source_id,
+                    raw.fragment_id,
+                    raw.source_version,
+                    locator,
+                    raw.quote,
+                )
+            )
+            evidence[raw.source_id, raw.fragment_id] = fragment
+        claims.append(
+            PageClaim(
+                ordinal,
+                (item.span_start, item.span_end),
+                text,
+                claim_text_hash(text),
+                tuple(citations),
+            )
+        )
+    page = service.edit(
+        actor.workspace_id,
+        actor.user_id,
+        page_id,
+        payload.body_md,
+        tuple(claims),
+        tuple(evidence.values()),
+    )
+    return _page_output(page)
+
+
+@router.post("/pages/{page_id}/refresh", response_model=PageOutput)
+def refresh_page(
+    page_id: str,
+    payload: PageRefreshInput,
+    actor: PrincipalDep,
+    request: Request,
+    _idempotency_key: PageCommandKey,
+):
+    container = request.app.state.container
+    service = container.page_service
+    if service is None:
+        raise NotAvailableOnEngine
+    page = _pages(container).get_owned(actor.workspace_id, actor.user_id, page_id)
+    sources, fragments = _source_stores(container)
+    evidence = []
+    for source_id in dict.fromkeys(payload.source_ids):
+        sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+        evidence.extend(fragments.latest(actor.workspace_id, source_id))
+    service.compile(
+        page,
+        tuple(evidence),
+        model_version="extractive-page-compiler-v1",
+        prompt_version="page-refresh-v1",
+    )
+    return _page_output(page)
+
+
+@router.post("/sources", response_model=SourceCreateOutput, status_code=status.HTTP_201_CREATED)
+def create_source(
+    payload: SourceCreate,
+    actor: PrincipalDep,
+    request: Request,
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+    ],
+):
+    container = request.app.state.container
+    service = _source_import(container)
+    try:
+        source, session = service.create(
+            actor.workspace_id,
+            actor.user_id,
+            filename=payload.filename,
+            size_bytes=payload.size_bytes,
+            kind=payload.kind,
+            origin_note=payload.origin_note,
+            idempotency_key=idempotency_key,
+        )
+    except UploadRejected as error:
+        if error.code == "too_large":
+            raise HTTPException(status_code=413) from error
+        if error.code == "low_disk":
+            raise HTTPException(status_code=507) from error
+        raise HTTPException(status_code=409) from error
+    return SourceCreateOutput(
+        source=source_output(source),
+        upload_url=f"/v1/local/source-uploads/{session.token}",
+        expires_in_seconds=container.settings.upload_session_seconds,
+    )
+
+
+@router.get("/sources", response_model=SourceList)
+def list_sources(
+    actor: PrincipalDep,
+    request: Request,
+    kind: SourceKind | None = None,
+    state: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    q: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+):
+    sources, _ = _source_stores(request.app.state.container)
+    kinds = None if kind is None else frozenset({kind})
+    page = sources.list_owned(
+        actor.workspace_id,
+        actor.user_id,
+        limit + 1,
+        decode_cursor(cursor),
+        kinds,
+        state,
+        q,
+    )
+    items, has_more = page[:limit], len(page) > limit
+    return SourceList(
+        items=tuple(source_output(item) for item in items),
+        next_cursor=encode_cursor(items[-1]) if has_more and items else None,
+    )
+
+
+def _folder_watcher(container):
+    if getattr(container, "folder_watcher", None) is None:
+        raise NotAvailableOnEngine
+    return container.folder_watcher
+
+
+def _watch_folder_output(folder) -> WatchFolderOutput:
+    return WatchFolderOutput(
+        id=folder.id, path=folder.path, enabled=folder.enabled, created_at=folder.created_at
+    )
+
+
+# Before /sources/{source_id}: these paths would otherwise be read as a source id.
+@router.get("/sources/watch-folders", response_model=WatchFolderList)
+def list_watch_folders(actor: PrincipalDep, request: Request):
+    watcher = _folder_watcher(request.app.state.container)
+    folders = watcher.list_folders(actor.workspace_id, actor.user_id)
+    return WatchFolderList(items=tuple(_watch_folder_output(f) for f in folders))
+
+
+@router.post(
+    "/sources/watch-folders",
+    response_model=WatchFolderOutput,
+    status_code=status.HTTP_201_CREATED,
+    description="Watch a folder on this computer: supported files in it (down to five folder "
+    "levels) are imported once they stop changing, a changed file becomes a new version, and "
+    "recordings wait for a processing confirmation. 422 for a relative path, a missing folder, a "
+    "network share, a link or a folder that overlaps the NODO data folder; 409 when it is "
+    "watched already.",
+)
+def add_watch_folder(payload: WatchFolderCreate, actor: PrincipalDep, request: Request):
+    watcher = _folder_watcher(request.app.state.container)
+    folder = watcher.add_folder(actor.workspace_id, actor.user_id, payload.path)
+    return _watch_folder_output(folder)
+
+
+@router.delete(
+    "/sources/watch-folders/{folder_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    description="Stop watching. Sources already imported from the folder stay.",
+)
+def delete_watch_folder(folder_id: str, actor: PrincipalDep, request: Request) -> Response:
+    watcher = _folder_watcher(request.app.state.container)
+    watcher.delete_folder(actor.workspace_id, actor.user_id, folder_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+SLOW_ON_THIS_MACHINE = "slow_on_this_machine"
+
+
+def _import_status(job, container, *, requested_source_id: str | None = None) -> ImportStatusOutput:
+    unchanged = requested_source_id is not None and job.source_id != requested_source_id
+    settings = container.settings
+    slow = settings.backend == "local" and settings.local_import_slow_notice
+    return ImportStatusOutput(
+        **{
+            "import": import_output(
+                job,
+                unchanged=unchanged,
+                existing_source_id=job.source_id if unchanged else None,
+                warnings=(SLOW_ON_THIS_MACHINE,) if slow else (),
+            )
+        }
+    )
+
+
+@router.post(
+    "/sources/{source_id}/complete",
+    response_model=ImportStatusOutput,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def complete_source(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    job = _source_import(container).complete(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container, requested_source_id=source_id)
+
+
+@router.get("/sources/{source_id}/import", response_model=ImportStatusOutput)
+def source_import_status(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    _source_import(container)
+    job = container.imports.get_owned(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
+
+
+@router.post(
+    "/sources/{source_id}/cancel",
+    response_model=ImportStatusOutput,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def cancel_source_import(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    job = _source_import(container).cancel(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
+
+
+@router.post(
+    "/sources/{source_id}/retry",
+    response_model=ImportStatusOutput,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_source_import(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    job = _source_import(container).retry(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
+
+
+@router.post(
+    "/sources/{source_id}/confirm-processing",
+    response_model=ImportStatusOutput,
+    status_code=status.HTTP_202_ACCEPTED,
+    description="Imported audio or video waits in awaiting_confirmation until its owner confirms "
+    '"I may process this recording". The confirmation is audited (kind only) and starts the '
+    "transcription. A second call answers the current state; a cancelled, failed or deleted "
+    "import, or a document, is refused. 409 original_missing once the original was erased.",
+)
+def confirm_source_processing(
+    source_id: str, payload: ProcessingConfirmation, actor: PrincipalDep, request: Request
+):
+    container = request.app.state.container
+    job = _source_import(container).confirm(actor.workspace_id, actor.user_id, source_id)
+    return _import_status(job, container)
+
+
+@router.get("/sources/{source_id}/versions", response_model=SourceVersionList)
+def source_versions(source_id: str, actor: PrincipalDep, request: Request):
+    container = request.app.state.container
+    _source_import(container)
+    source = container.sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    if source.kind is SourceKind.MEETING:
+        raise NotFoundError  # like complete, import, cancel and retry: not an imported source
+    versions = container.fragments.versions(actor.workspace_id, actor.user_id, source_id)
+    return SourceVersionList(items=tuple(source_version_output(item) for item in versions))
+
+
+@router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_source(source_id: str, actor: PrincipalDep, request: Request) -> Response:
+    _source_delete(request.app.state.container).delete(actor.workspace_id, actor.user_id, source_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/sources/{source_id}", response_model=SourceOutput)
+def get_source(source_id: str, actor: PrincipalDep, request: Request):
+    sources, _ = _source_stores(request.app.state.container)
+    source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    return source_output(source)
+
+
+@router.get("/sources/{source_id}/outline", response_model=SourceOutline)
+def get_source_outline(source_id: str, actor: PrincipalDep, request: Request):
+    sources, fragments = _source_stores(request.app.state.container)
+    source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    latest = fragments.latest(actor.workspace_id, source_id)
+    counts: dict[str | None, int] = {}
+    first: dict[str | None, Fragment] = {}
+    for item in latest:  # reading order, so the first one seen opens the section
+        counts[item.section_id] = counts.get(item.section_id, 0) + 1
+        first.setdefault(item.section_id, item)
+    return SourceOutline(
+        sections=tuple(
+            section_output(item, counts.get(item.id, 0), first.get(item.id))
+            for item in fragments.outline(actor.workspace_id, source_id)
+        ),
+        version=_fragments_version(latest, source),
+    )
+
+
+def _fragments_version(latest, source) -> int:
+    # A meeting is versioned by its transcript, not by the sources row.
+    return latest[0].version if latest else source.version
+
+
+def _section_scope(sections, section_id: str, include_subsections: bool) -> set[str]:
+    if all(item.id != section_id for item in sections):
+        raise NotFoundError  # also for a meeting, which has no sections
+    scope = {section_id}
+    if include_subsections:
+        for item in sections:  # outline order puts parents before their children
+            if item.parent_id in scope:
+                scope.add(item.id)
+    return scope
+
+
+@router.get("/sources/{source_id}/fragments", response_model=SourceFragments)
+def get_source_fragments(
+    source_id: str,
+    actor: PrincipalDep,
+    request: Request,
+    section_id: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    include_subsections: bool = False,
+    limit: Annotated[int | None, Query(ge=1, le=500)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    sources, fragments = _source_stores(request.app.state.container)
+    source = sources.get_owned(actor.workspace_id, actor.user_id, source_id)
+    latest = fragments.latest(actor.workspace_id, source_id)
+    version = _fragments_version(latest, source)
+    if section_id is not None:
+        outline = fragments.outline(actor.workspace_id, source_id)
+        scope = _section_scope(outline, section_id, include_subsections)
+        latest = tuple(item for item in latest if item.section_id in scope)
+    # Without a limit every fragment comes back, as before the paging parameters existed.
+    page = latest[offset:] if limit is None else latest[offset : offset + limit + 1]
+    more = limit is not None and len(page) > limit
+    return SourceFragments(
+        version=version,
+        fragments=tuple(fragment_output(item) for item in page[:limit]),
+        next_offset=offset + limit if more else None,
+    )
+
+
 @router.get("/meetings/{meeting_id}", response_model=MeetingOutput)
 def get_meeting(meeting_id: str, actor: PrincipalDep, request: Request):
     container = request.app.state.container
@@ -197,17 +816,61 @@ def review_meeting(meeting_id: str, payload: ReviewInput, actor: PrincipalDep, r
 
 @router.post("/query", response_model=QueryOutput)
 def query(payload: QueryInput, actor: PrincipalDep, request: Request):
-    return _ask(request, actor, payload.question, payload.ui_locale, payload.filters)
+    scope = _resolved_query_scope(request, actor, payload.scope, payload.citation_format)
+    return _ask(
+        request,
+        actor,
+        payload.question,
+        payload.ui_locale,
+        payload.filters,
+        scope=scope,
+        citation_format=payload.citation_format,
+    )
 
 
-def _ask(request: Request, actor: Principal, text: str, locale, filters):
+def _ask(
+    request: Request,
+    actor: Principal,
+    text: str,
+    locale,
+    filters,
+    *,
+    scope=None,
+    citation_format: CitationFormat = CitationFormat.LEGACY,
+):
     """Questions are the expensive request (a model call each). A replica answers a limited number
     at once and tells the rest to come back, so a burst of questions can not starve reads."""
     container = request.app.state.container
     with container.query_gate:
-        return container.query_service.query(
-            actor.workspace_id, actor.user_id, _query_request(text, locale, filters)
+        result = container.query_service.query(
+            actor.workspace_id,
+            actor.user_id,
+            _query_request(text, locale, filters, scope, citation_format),
         )
+    return QueryOutput(
+        answer=result.answer,
+        answerability=result.answerability,
+        citations=tuple(
+            CitationOutput(
+                meeting_id=c.meeting_id,
+                segment_id=c.segment_id,
+                start_ms=c.start_ms,
+                end_ms=c.end_ms,
+                quote=c.quote,
+                speaker_id=c.speaker_id,
+                source_id=c.source_id,
+                fragment_id=c.fragment_id,
+                source_version=c.source_version,
+                locator=json.loads(c.locator.to_json()) if c.locator else None,
+            )
+            for c in result.citations
+        ),
+        related_entities=result.related_entities,
+        query_trace_id=result.query_trace_id,
+        model_version=result.model_version,
+        retrieval_version=result.retrieval_version,
+        degraded=result.degraded,
+    )
 
 
 @router.post("/voice-query", response_model=QueryOutput)
@@ -235,6 +898,7 @@ def graph_subgraph(
         include_proposed=include_proposed,
         as_of=as_of,
         limit=limit,
+        meetings_only=True,  # /v1 is the frozen clients' view
     )
     return subgraph_output(graph, depth)
 
@@ -247,7 +911,7 @@ def graph_reviews(
 ):
     """The inbox: relations the model proposed that nobody has decided yet (ADR-025)."""
     graph = request.app.state.container.graph_service.reviews(
-        actor.workspace_id, actor.user_id, limit
+        actor.workspace_id, actor.user_id, limit, meetings_only=True
     )
     return subgraph_output(graph, 1)
 
@@ -257,7 +921,11 @@ def review_relation(
     relation_id: str, payload: ReviewRelationInput, actor: PrincipalDep, request: Request
 ):
     relation = request.app.state.container.graph_service.review(
-        actor.workspace_id, actor.user_id, relation_id, ReviewStatus(payload.status)
+        actor.workspace_id,
+        actor.user_id,
+        relation_id,
+        ReviewStatus(payload.status),
+        meetings_only=True,  # a relation /v1 never shows answers 404, before any write
     )
     return edge_output(relation)
 
@@ -269,7 +937,7 @@ def graph_changes(
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ):
     changes = request.app.state.container.graph_service.changes(
-        actor.workspace_id, actor.user_id, limit
+        actor.workspace_id, actor.user_id, limit, meetings_only=True
     )
     return ChangesOutput(
         items=tuple(
@@ -332,9 +1000,39 @@ def delete_meeting(meeting_id: str, actor: PrincipalDep, request: Request) -> Re
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _query_request(question, locale, filters: QueryFiltersInput | None) -> QueryRequest:
+def _query_request(
+    question,
+    locale,
+    filters: QueryFiltersInput | None,
+    scope=None,
+    citation_format: CitationFormat = CitationFormat.LEGACY,
+) -> QueryRequest:
     service_filters = QueryFilters(**filters.model_dump()) if filters else None
-    return QueryRequest(question, locale, service_filters)
+    return QueryRequest(
+        question,
+        locale,
+        service_filters,
+        scope or ResolvedQueryScope.legacy(),
+        citation_format,
+    )
+
+
+def _resolved_query_scope(
+    request: Request,
+    actor: Principal,
+    value: QueryScopeInput,
+    citation_format: CitationFormat,
+):
+    container = request.app.state.container
+    return resolve_query_scope(
+        actor.workspace_id,
+        actor.user_id,
+        QueryScope(value.mode, value.collection_id, value.source_ids, value.meeting_ids),
+        citation_format,
+        container.sources,
+        container.collections,
+        container.meetings,
+    )
 
 
 MAX_SYNC_BYTES = 40 * 1024 * 1024  # a long meeting with many versions is a few MB
@@ -360,3 +1058,209 @@ async def import_meeting(meeting_id: str, actor: PrincipalDep, request: Request)
         actor.user_id,
         package,
     )
+
+
+# --- concept hierarchy (ADR-030); local and memory engines, 501 on Azure --------------------------
+
+
+def _hierarchy(container):
+    if getattr(container, "hierarchy", None) is None:
+        raise NotAvailableOnEngine
+    return container.hierarchy
+
+
+@router.get("/concepts/{concept_id}/hierarchy", response_model=ConceptHierarchyOutput)
+def concept_hierarchy(
+    concept_id: Annotated[str, Path(max_length=64)],
+    actor: PrincipalDep,
+    request: Request,
+    direction: Literal["parents", "children", "both"] = "both",
+    depth: Annotated[int, Query(ge=1, le=MAX_DEPTH)] = 1,
+    include_proposed: bool = False,
+    limit: Annotated[int, Query(ge=1, le=200)] = 60,
+):
+    service = _hierarchy(request.app.state.container)
+    found = service.concept(
+        actor.workspace_id,
+        actor.user_id,
+        concept_id,
+        direction=direction,
+        depth=depth,
+        include_proposed=include_proposed,
+        limit=limit,
+    )
+    locate = partial(service.locate, actor.workspace_id)
+    return ConceptHierarchyOutput(
+        concept=concept_output(found.concept),
+        mentioned_in=tuple(
+            SourceMentionOutput(source_id=source_id, title=title)
+            for source_id, title in found.mentioned_in
+        ),
+        nodes=tuple(concept_output(node) for node in found.graph.nodes),
+        links=tuple(hierarchy_link_output(edge, locate) for edge in found.graph.edges),
+        truncated=found.graph.truncated,
+    )
+
+
+@router.get("/hierarchy/proposals", response_model=HierarchyProposalList)
+def hierarchy_proposals(
+    actor: PrincipalDep,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+):
+    """Parent links the model or a document proposed that nobody has decided yet."""
+    service = _hierarchy(request.app.state.container)
+    graph = service.proposals(actor.workspace_id, actor.user_id, limit)
+    locate = partial(service.locate, actor.workspace_id)
+    return HierarchyProposalList(
+        items=tuple(hierarchy_link_output(edge, locate) for edge in graph.edges),
+        nodes=tuple(concept_output(node) for node in graph.nodes),
+        truncated=graph.truncated,
+    )
+
+
+@router.post("/concepts/{concept_id}/parent-suggestions", response_model=HierarchyProposalList)
+def suggest_concept_parents(
+    concept_id: Annotated[str, Path(max_length=64)],
+    payload: ParentSuggestionInput,
+    actor: PrincipalDep,
+    request: Request,
+):
+    container = request.app.state.container
+    service = _hierarchy(container)
+    if not service.can_suggest or getattr(container, "suggestion_gate", None) is None:
+        raise NotAvailableOnEngine
+    with container.suggestion_gate:
+        relations = service.suggest_parents(
+            actor.workspace_id, actor.user_id, concept_id, payload.locale
+        )
+    ids = {relation.id for relation in relations}
+    graph = service.proposals(actor.workspace_id, actor.user_id, 200)
+    chosen = tuple(edge for edge in graph.edges if edge.id in ids)
+    node_ids = {value for edge in chosen for value in (edge.source_id, edge.target_id)}
+    locate = partial(service.locate, actor.workspace_id)
+    return HierarchyProposalList(
+        items=tuple(hierarchy_link_output(edge, locate) for edge in chosen),
+        nodes=tuple(concept_output(node) for node in graph.nodes if node.id in node_ids),
+        truncated=False,
+    )
+
+
+@router.patch("/hierarchy/links/{relation_id}", response_model=HierarchyLinkOutput)
+def review_hierarchy_link(
+    relation_id: Annotated[str, Path(max_length=64)],
+    payload: HierarchyReviewInput,
+    actor: PrincipalDep,
+    request: Request,
+):
+    service = _hierarchy(request.app.state.container)
+    relation = service.review(
+        actor.workspace_id, actor.user_id, relation_id, ReviewStatus(payload.status)
+    )
+    return hierarchy_link_output(relation, partial(service.locate, actor.workspace_id))
+
+
+# --- collections of sources (FR-4, FR-8); local and memory engines, 501 on Azure ----------------
+# Names stay out of logs and errors: the repositories and these routes log nothing about them.
+
+
+def _collections(container):
+    if getattr(container, "collections", None) is None:
+        raise NotAvailableOnEngine
+    return container.collections
+
+
+CollectionId = Annotated[str, Path(max_length=64)]
+MemberId = Annotated[str, Path(max_length=64)]
+
+
+@router.get("/collections", response_model=CollectionList)
+def list_collections(
+    actor: PrincipalDep,
+    request: Request,
+    source_id: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+):
+    """Every collection of the caller, parents first; with `source_id`, only those holding it."""
+    container = request.app.state.container
+    collections = _collections(container)
+    items = collections.list_owned(actor.workspace_id, actor.user_id)
+    if source_id is not None:
+        sources, _ = _source_stores(container)
+        sources.get_owned(actor.workspace_id, actor.user_id, source_id)  # 404 unless live and mine
+        held = set(collections.collections_of(actor.workspace_id, actor.user_id, source_id))
+        items = tuple(item for item in items if item.id in held)
+    return CollectionList(items=tuple(collection_output(item) for item in items))
+
+
+@router.post("/collections", response_model=CollectionOutput, status_code=status.HTTP_201_CREATED)
+def create_collection(payload: CollectionCreate, actor: PrincipalDep, request: Request):
+    created = _collections(request.app.state.container).create(
+        actor.workspace_id, actor.user_id, name=payload.name, parent_id=payload.parent_id
+    )
+    return collection_output(created)
+
+
+@router.patch("/collections/{collection_id}", response_model=CollectionOutput)
+def update_collection(
+    collection_id: CollectionId, payload: CollectionUpdate, actor: PrincipalDep, request: Request
+):
+    moves_to_root = "parent_id" in payload.model_fields_set and payload.parent_id is None
+    updated = _collections(request.app.state.container).update(
+        actor.workspace_id,
+        actor.user_id,
+        collection_id,
+        name=payload.name,
+        parent_id=CLEAR if moves_to_root else payload.parent_id,
+    )
+    return collection_output(updated)
+
+
+@router.delete("/collections/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_collection(collection_id: CollectionId, actor: PrincipalDep, request: Request):
+    """The collection and its subtree; the sources in them stay in the library."""
+    _collections(request.app.state.container).delete(
+        actor.workspace_id, actor.user_id, collection_id
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/collections/{collection_id}/sources", response_model=SourceList)
+def list_collection_sources(
+    collection_id: CollectionId,
+    actor: PrincipalDep,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+):
+    page = _collections(request.app.state.container).list_sources(
+        actor.workspace_id, actor.user_id, collection_id, limit + 1, decode_cursor(cursor)
+    )
+    items, has_more = page[:limit], len(page) > limit
+    return SourceList(
+        items=tuple(source_output(item) for item in items),
+        next_cursor=encode_cursor(items[-1]) if has_more and items else None,
+    )
+
+
+@router.put(
+    "/collections/{collection_id}/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def add_collection_source(
+    collection_id: CollectionId, source_id: MemberId, actor: PrincipalDep, request: Request
+):
+    _collections(request.app.state.container).add_source(
+        actor.workspace_id, actor.user_id, collection_id, source_id
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/collections/{collection_id}/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def remove_collection_source(
+    collection_id: CollectionId, source_id: MemberId, actor: PrincipalDep, request: Request
+):
+    collections = _collections(request.app.state.container)
+    collections.get_owned(actor.workspace_id, actor.user_id, collection_id)  # 404 unless mine
+    collections.remove_source(actor.workspace_id, actor.user_id, collection_id, source_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

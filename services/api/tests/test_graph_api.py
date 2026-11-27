@@ -234,3 +234,137 @@ def test_a_decision_about_a_proposal_is_written_to_the_audit_trail_by_id_only(
     target = inbox["edges"][0]["id"]
     client.patch(f"/v1/graph/relations/{target}", headers=auth_headers, json={"status": "rejected"})
     assert ("relation_reviewed", {"relation_id": target, "status": "rejected"}) in log
+
+
+# --- sources stay out of the legacy graph view (ADR-029, ADR-030) ---------------------------------
+
+LEGACY_NODE_TYPES = ["person", "project", "system", "topic", "decision", "action", "meeting"]
+LEGACY_EDGE_KINDS = [
+    "MENTIONED_IN",
+    "ABOUT",
+    "DECIDED_IN",
+    "PROPOSED_BY",
+    "ASSIGNED_TO",
+    "DEPENDS_ON",
+    "SUPERSEDES",
+    "CONTRADICTS",
+]
+
+
+def _write_document_graph(app) -> None:
+    """A document that mentions a seed topic and two of its own, a hierarchy between them, a
+    dependency only the document supports and a decision that supersedes another."""
+    from nodo_api.domain.graph import EntityType, Extraction, RelationKind, SourceRef
+    from tests.graph_contract import ent, rel
+    from tests.source_contract import source
+
+    container = app.state.container
+    stored = container.sources.add("workspace-a", source("doc1", ws="workspace-a"))
+    seed_topic = container.graph.overview("workspace-a", "user-a", 1)[0]
+    t, d, k = EntityType.TOPIC, EntityType.DECISION, RelationKind
+    extraction = Extraction(
+        "",
+        (
+            ent("s", seed_topic.type, seed_topic.label, "f1"),
+            ent("c", t, "Ingestion stage", "f1"),
+            ent("p", t, "Platform layer", "f2"),
+            ent("old", d, "Keep the cron job", "f2"),
+            ent("new", d, "Replace the cron job", "f2"),
+        ),
+        (
+            rel("c", k.CHILD_OF, "p", "f1"),
+            rel("c", k.DEPENDS_ON, "p", "f2"),
+            rel("new", k.SUPERSEDES, "old", "f2"),
+        ),
+    )
+    ref = SourceRef(stored.id, stored.title, stored.created_at, stored.kind)
+    container.graph.replace_source_evidence("workspace-a", "user-a", ref, extraction)
+
+
+def _assert_legacy(body) -> None:
+    assert {n["type"] for n in body["nodes"]} <= set(LEGACY_NODE_TYPES)
+    assert {e["kind"] for e in body["edges"]} <= set(LEGACY_EDGE_KINDS)
+    ids = {n["id"] for n in body["nodes"]}
+    assert all(e["source"] in ids and e["target"] in ids for e in body["edges"])
+    assert all(ev["meeting_id"] != "doc1" for e in body["edges"] for ev in e["evidence"])
+    assert all(n["meeting_id"] != "doc1" for n in body["nodes"])
+
+
+LEGACY_URLS = [
+    "/v1/graph/subgraph?depth=2&limit=200&include_proposed=true",
+    "/v1/graph/subgraph?depth=1",
+    "/v1/graph/subgraph?entity=queue&depth=1",
+    "/v1/graph/subgraph?entity=platform&depth=2&include_proposed=true",
+    "/v1/graph/reviews?limit=200",
+    "/v1/graph/reviews?limit=2",
+    "/v1/graph/changes?limit=50",
+]
+
+
+def _hidden_ids(app) -> tuple[list[str], list[str]]:
+    """The document-only node ids and the relation ids the legacy view must never show."""
+    from nodo_api.domain.graph import (
+        EntityType,
+        RelationKind,
+        entity_id,
+        normalize_label,
+        relation_id,
+        source_entity_id,
+    )
+
+    ws, user = "workspace-a", "user-a"
+    seed_topic = app.state.container.graph.overview(ws, user, 1)[0]
+
+    def topic(label: str) -> str:
+        return entity_id(ws, user, EntityType.TOPIC, normalize_label(label))
+
+    node = source_entity_id(ws, user, "doc1")
+    child, parent = topic("Ingestion stage"), topic("Platform layer")
+    nodes = [node, child, parent]
+    relations = [
+        relation_id(ws, user, child, RelationKind.CHILD_OF, parent),
+        relation_id(ws, user, child, RelationKind.DEPENDS_ON, parent),
+        relation_id(ws, user, seed_topic.id, RelationKind.MENTIONED_IN, node),
+    ]
+    return nodes, relations
+
+
+def test_legacy_graph_hides_source_nodes_and_child_of_edges(app, client, auth_headers) -> None:
+    before = [client.get(url, headers=auth_headers).json() for url in LEGACY_URLS]
+    _write_document_graph(app)
+    nodes, relations = _hidden_ids(app)
+
+    after = [client.get(url, headers=auth_headers) for url in LEGACY_URLS]
+    assert [r.status_code for r in after] == [200] * len(LEGACY_URLS)
+    # Meeting data reads exactly as before: documents take no page, fanout or seed slot.
+    assert [r.json() for r in after] == before
+    for reply in after[:-1]:
+        _assert_legacy(reply.json())
+
+    refused = [
+        client.patch(
+            f"/v1/graph/relations/{rid}", headers=auth_headers, json={"status": "approved"}
+        )
+        for rid in relations
+    ]
+    assert [r.status_code for r in refused] == [404] * len(relations)
+    pending = {
+        e.id for e in app.state.container.graph.pending_review("workspace-a", "user-a", 500).edges
+    }
+    assert set(relations[:2]) <= pending  # the stored review is unchanged
+    shown = "".join(r.text for r in (*after, *refused))
+    assert not [i for i in (*nodes, *relations) if i in shown]
+
+
+def test_openapi_graph_literals_are_unchanged(app) -> None:
+    import json
+    from pathlib import Path
+
+    contract = Path(__file__).resolve().parents[3] / "packages" / "contracts" / "openapi.json"
+    for schemas in (
+        app.openapi()["components"]["schemas"],
+        json.loads(contract.read_text(encoding="utf-8"))["components"]["schemas"],
+    ):
+        assert schemas["GraphNodeOutput"]["properties"]["type"]["enum"] == LEGACY_NODE_TYPES
+        assert schemas["GraphEdgeOutput"]["properties"]["kind"]["enum"] == LEGACY_EDGE_KINDS
+        assert set(schemas["EvidenceOutput"]["properties"]) == {"meeting_id", "segment_id"}

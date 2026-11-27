@@ -1,8 +1,9 @@
 'use client';
 
-import { ArrowUpRight, PaperPlaneTilt, Warning } from '@phosphor-icons/react';
+import { ArrowUpRight, Microphone, PaperPlaneTilt, SpeakerHigh, Stop, Warning } from '@phosphor-icons/react';
 import Link from 'next/link';
-import { useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 
 import { PageHeader } from '@/components/shell/PageHeader';
@@ -12,8 +13,11 @@ import type { Answer, Citation } from '@/lib/domain/types';
 import { formatClock } from '@/lib/i18n/format';
 import { useMeeting, useMeetings } from '@/lib/queries';
 import { usePrefs } from '@/providers/prefs';
-import { useRepository } from '@/providers/data';
+import { useRepository, useVoiceApi } from '@/providers/data';
 import styles from '../features.module.css';
+import { BrowserPcmCapture } from '../capture/pcm';
+import { VoiceSessionClient, type VoiceEvent } from '../capture/voiceClient';
+import { PcmPlayback } from './pcmPlayback';
 import { meetingHref } from '../meetings/MeetingRow';
 
 interface Turn {
@@ -46,10 +50,14 @@ function AnswerCard({
   turn,
   titles,
   onRetry,
+  onSpeak,
+  speaking,
 }: {
   turn: Turn;
   titles: Map<string, string>;
   onRetry: () => void;
+  onSpeak: () => void;
+  speaking: boolean;
 }) {
   const { t } = useTranslation();
   const { answer } = turn;
@@ -74,6 +82,9 @@ function AnswerCard({
           ) : null}
           {answer.degraded ? <Tag label={t('web.degraded')} tone="warning" /> : null}
           <p>{unanswerable ? t('ask.unanswerableBody') : answer.text}</p>
+          <Button variant="secondary" icon={speaking ? Stop : SpeakerHigh} onClick={onSpeak}>
+            {speaking ? t('ask.stopSpeaking') : t('ask.speak')}
+          </Button>
           {answer.citations.length > 0 ? (
             <div className={styles.stack}>
               <p className={styles.label}>{t('ask.sources')}</p>
@@ -93,10 +104,22 @@ function Conversation() {
   const { t } = useTranslation();
   const { locale } = usePrefs();
   const repository = useRepository();
+  const voice = useVoiceApi();
+  const searchParams = useSearchParams();
   const meetings = useMeetings();
   const [text, setText] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [dictating, setDictating] = useState(false);
+  const [dictationError, setDictationError] = useState(false);
   const nextId = useRef(0);
+  const dictationHeld = useRef(false);
+  const dictationClient = useRef<VoiceSessionClient | undefined>(undefined);
+  const dictationCapture = useRef<BrowserPcmCapture | undefined>(undefined);
+  const speechClient = useRef<VoiceSessionClient | undefined>(undefined);
+  const playback = useRef(new PcmPlayback());
+  const [speakingId, setSpeakingId] = useState<number>();
+  const nodeLabel = searchParams.get('node');
+  const meetingIds = (searchParams.get('meetings') ?? '').split(',').filter(Boolean);
 
   const titles = new Map((meetings.data ?? []).map((meeting) => [meeting.id, meeting.title]));
 
@@ -105,7 +128,7 @@ function Conversation() {
 
   const run = (id: number, question: string) => {
     update(id, { state: 'pending', answer: undefined });
-    repository.ask(question, locale).then(
+    repository.ask(question, locale, meetingIds).then(
       (answer) => update(id, { state: 'done', answer }),
       () => update(id, { state: 'failed' }),
     );
@@ -121,8 +144,115 @@ function Conversation() {
     run(id, question);
   };
 
+  const finishDictation = useCallback(() => {
+    dictationHeld.current = false;
+    if (!dictationClient.current && !dictationCapture.current) return;
+    void dictationCapture.current?.stop();
+    dictationClient.current?.end();
+    dictationClient.current = undefined;
+    dictationCapture.current = undefined;
+    setDictating(false);
+  }, []);
+
+  const startDictation = async () => {
+    if (dictating) return;
+    setDictationError(false);
+    try {
+      const session = await voice.openDictation(locale);
+      const capture = new BrowserPcmCapture();
+      const client = new VoiceSessionClient(
+        session,
+        (event: VoiceEvent) => {
+          if (event.type === 'transcript.final' && typeof event.text === 'string') {
+            setText((current) => [current, event.text].filter(Boolean).join(' ').trim());
+            finishDictation();
+          }
+        },
+        {
+          refreshTicket: voice.refreshTicket,
+          onError: () => {
+            setDictationError(true);
+            finishDictation();
+          },
+        },
+      );
+      dictationClient.current = client;
+      dictationCapture.current = capture;
+      await capture.start(
+        ({ offsetMs, pcm }) => client.sendPcm(offsetMs, pcm),
+        () => undefined,
+      );
+      if (!dictationHeld.current) {
+        await capture.stop();
+        dictationClient.current = undefined;
+        dictationCapture.current = undefined;
+        return;
+      }
+      client.startPushToTalk();
+      client.connect();
+      setDictating(true);
+    } catch {
+      finishDictation();
+      setDictationError(true);
+    }
+  };
+
+  const stopSpeaking = useCallback(() => {
+    speechClient.current?.stopSpeaking();
+    speechClient.current?.end();
+    speechClient.current = undefined;
+    playback.current.close();
+    setSpeakingId(undefined);
+  }, []);
+
+  const speakAnswer = async (id: number, value: string) => {
+    if (speakingId === id) {
+      stopSpeaking();
+      return;
+    }
+    stopSpeaking();
+    try {
+      const session = await voice.openSynthesis(locale);
+      const client = new VoiceSessionClient(
+        session,
+        (event) => {
+          if (event.type === 'assistant.done' || event.type === 'assistant.cancelled') stopSpeaking();
+        },
+        {
+          refreshTicket: voice.refreshTicket,
+          onAudio: (frame) => playback.current.play(frame),
+          onError: stopSpeaking,
+        },
+      );
+      speechClient.current = client;
+      client.speak(value);
+      client.connect();
+      setSpeakingId(id);
+    } catch {
+      stopSpeaking();
+    }
+  };
+
+  useEffect(() => {
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') finishDictation();
+    };
+    window.addEventListener('keydown', cancel);
+    return () => {
+      window.removeEventListener('keydown', cancel);
+      finishDictation();
+      stopSpeaking();
+    };
+  }, [finishDictation, stopSpeaking]);
+
   return (
     <>
+      {nodeLabel && meetingIds.length ? (
+        <Surface tone="accent" as="section">
+          <p className={styles.label}>{t('ask.nodeContext')}</p>
+          <p>{t('ask.nodeContextBody', { node: nodeLabel })}</p>
+        </Surface>
+      ) : null}
       <form className={styles.askForm} onSubmit={submit}>
         <TextField
           label={t('ask.inputLabel')}
@@ -131,11 +261,49 @@ function Conversation() {
           onChange={setText}
           autoComplete="off"
         />
-        <Button type="submit" icon={PaperPlaneTilt} disabled={!text.trim()} aria-label={t('ask.send')} />
+        <div className={styles.row}>
+          <Button
+            variant={dictating ? 'danger' : 'secondary'}
+            icon={Microphone}
+            aria-label={t('ask.dictate')}
+            aria-pressed={dictating}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              dictationHeld.current = true;
+              void startDictation();
+            }}
+            onPointerUp={finishDictation}
+            onPointerCancel={finishDictation}
+            onKeyDown={(event) => {
+              if (!event.repeat && (event.key === ' ' || event.key === 'Enter')) {
+                dictationHeld.current = true;
+                void startDictation();
+              }
+            }}
+            onKeyUp={(event) => {
+              if (event.key === ' ' || event.key === 'Enter') finishDictation();
+            }}
+          >
+            {dictating ? t('ask.dictating') : t('ask.dictate')}
+          </Button>
+          <Button type="submit" icon={PaperPlaneTilt} disabled={!text.trim()} aria-label={t('ask.send')} />
+        </div>
       </form>
+      {dictationError ? (
+        <Surface tone="warning">
+          <p role="alert">{t('ask.dictationUnavailable')}</p>
+        </Surface>
+      ) : null}
       <div className={styles.stack} aria-live="polite">
         {turns.map((turn) => (
-          <AnswerCard key={turn.id} turn={turn} titles={titles} onRetry={() => run(turn.id, turn.question)} />
+          <AnswerCard
+            key={turn.id}
+            turn={turn}
+            titles={titles}
+            onRetry={() => run(turn.id, turn.question)}
+            onSpeak={() => void speakAnswer(turn.id, turn.answer?.text ?? '')}
+            speaking={speakingId === turn.id}
+          />
         ))}
       </div>
     </>

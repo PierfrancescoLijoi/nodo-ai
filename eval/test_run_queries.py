@@ -10,6 +10,7 @@ import pytest
 pytest.importorskip("nodo_api")
 
 import run_queries  # noqa: E402
+from golden import expanded_cases
 
 ROOT = Path(__file__).resolve().parent
 
@@ -17,7 +18,9 @@ ROOT = Path(__file__).resolve().parent
 def _predictions(tmp_path: Path) -> tuple[dict[str, dict], dict[str, dict]]:
     cases = {
         c["id"]: c
-        for c in map(json.loads, (ROOT / "golden_set/cases.jsonl").read_text("utf-8").splitlines())
+        for c in expanded_cases(
+            list(map(json.loads, (ROOT / "golden_set/cases.jsonl").read_text("utf-8").splitlines()))
+        )
     }
     meetings = json.loads((ROOT / "golden_set/fixtures/meetings.json").read_text("utf-8"))["meetings"]
     _, adapters = run_queries.build_adapters("memory", tmp_path)

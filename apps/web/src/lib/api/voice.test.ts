@@ -32,4 +32,24 @@ describe('createVoiceApi', () => {
     await expect(api.refreshTicket('s/1')).resolves.toBe('fresh-ticket-ticket-ticket');
     expect(post).toHaveBeenCalledWith('/v1/voice/sessions/s%2F1/tickets', {});
   });
+
+  it('queries a live session through its finalised-evidence route', async () => {
+    const post = vi.fn().mockResolvedValue({
+      answer: 'Monday.',
+      answerability: 'supported',
+      citations: [],
+      related_entities: [],
+      query_trace_id: 'trace',
+      model_version: 'local',
+      retrieval_version: 'live-final-v1',
+      degraded: false,
+    });
+    const api = createVoiceApi({ post } as unknown as ApiClient, 'http://localhost:8080');
+
+    await expect(api.queryLive('s/1', 'When?', 'en')).resolves.toMatchObject({ text: 'Monday.' });
+    expect(post).toHaveBeenCalledWith('/v1/voice/sessions/s%2F1/query', {
+      question: 'When?',
+      ui_locale: 'en',
+    });
+  });
 });

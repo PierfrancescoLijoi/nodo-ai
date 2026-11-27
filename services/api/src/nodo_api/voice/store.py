@@ -23,7 +23,7 @@ class SessionRecord:
     session_id: str
     workspace_id: str
     user_id: str
-    mode: str  # "meeting" or "assistant"
+    mode: str  # "meeting", "assistant", or one-shot "dictation"
     locale: str
     meeting_id: str | None = None
     audio_ack_ms: int = 0

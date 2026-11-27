@@ -288,3 +288,31 @@ def test_a_meeting_copied_from_the_desktop_drops_the_owners_cached_answers(
         report = _sync(app, cloud_client)
     assert (report.state, report.pushed, report.failed) == ("done", 1, [])
     assert cloud_rig.epoch() > 0
+
+
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        ("SyncEntity", {"type": "source", "label": "Handbook", "evidence": ["s1"]}),
+        ("SyncRef", {"type": "source", "label": "Handbook"}),
+        (
+            "SyncRelation",
+            {
+                "source": {"type": "topic", "label": "Ingestion"},
+                "kind": "CHILD_OF",
+                "target": {"type": "topic", "label": "Platform"},
+                "confidence": 0.5,
+                "status": "proposed",
+                "evidence": ["s1"],
+            },
+        ),
+    ],
+)
+def test_sync_packages_keep_the_meeting_vocabulary(model, payload) -> None:
+    """Source nodes and CHILD_OF are local graph vocabulary (ADR-029, ADR-030), not sync input."""
+    from pydantic import ValidationError
+
+    from nodo_api.api.v1 import sync_schemas
+
+    with pytest.raises(ValidationError):
+        getattr(sync_schemas, model).model_validate(payload)

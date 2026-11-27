@@ -83,7 +83,11 @@ test.describe('local engine', () => {
     const label = ((await nodes.nth(1).getAttribute('aria-label')) ?? '').split(', ')[0] ?? '';
     await nodes.nth(1).focus();
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { name: label, level: 3 })).toBeVisible();
+    await expect(
+      page
+        .getByRole('complementary', { name: 'Node details' })
+        .getByRole('heading', { name: label, level: 3 }),
+    ).toBeVisible();
 
     await page.getByRole('link', { name: 'Review proposals' }).click();
     const waiting = page

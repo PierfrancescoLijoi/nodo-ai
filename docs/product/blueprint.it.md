@@ -1,3 +1,5 @@
+> Superseded by [docs/product/PRODUCT.md (v0.2)](PRODUCT.md). Kept as history.
+
 # NODO AI — Product Design & Solution Architecture
 
 **Versione:** 0.1 · **Data:** 22 ottobre 2026 · **Target:** Android-first, uso personale, architettura estensibile enterprise  

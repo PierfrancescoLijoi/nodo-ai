@@ -135,9 +135,15 @@ class AnswerCache:
         self._keep = keep
         self._clock = clock
 
-    def key(self, question: str, locale: Locale, filters: dict[str, Any] | None) -> AnswerKey:
+    def key(
+        self,
+        question: str,
+        locale: Locale,
+        filters: dict[str, Any] | None,
+        context: dict[str, Any] | None = None,
+    ) -> AnswerKey:
         shape = json.dumps(
-            {"filters": filters or {}, **discriminators(question)},
+            {"filters": filters or {}, "context": context or {}, **discriminators(question)},
             sort_keys=True,
             default=str,
             separators=(",", ":"),
@@ -151,13 +157,14 @@ class AnswerCache:
         question: str,
         locale: Locale,
         filters: dict[str, Any] | None,
+        context: dict[str, Any] | None = None,
     ) -> Lookup:
         try:
             vector = self._embed(question)
             if not vector:
                 return Lookup()
             vector = tuple(float(x) for x in vector)
-            key = self.key(question, locale, filters)
+            key = self.key(question, locale, filters, context)
             hit = self._store.nearest(
                 workspace_id,
                 owner_id,

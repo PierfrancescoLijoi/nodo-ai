@@ -3,9 +3,9 @@
 The app runs in its own window on Windows. It works in one of two ways, chosen on first start and changeable later:
 
 - **On this computer.** Speech, search, graph and answers are produced by models on your machine. Nothing leaves it. Needs a GPU for comfortable speed (an NVIDIA card with 6 GB is enough; the CPU works but is slow).
-- **Azure.** The app talks to your deployed NODO API (see [AZURE-ARCHITECTURE.md](AZURE-ARCHITECTURE.md)). Needs the deployment and an Entra sign in.
+- **Azure.** The app talks to a NODO API you deployed (see [AZURE-ARCHITECTURE.md](AZURE-ARCHITECTURE.md)). Needs the deployment and an Entra sign in. This mode has not been tried against a live subscription.
 
-You can start local and connect Azure later: **Settings, Copy to Azure** sends your meetings to the cloud (see [ADR-015](adr/015-sync-local-to-azure.md)).
+You can start local and connect Azure later: **Settings, Copy to Azure** sends your meetings one way to the cloud (see [ADR-015](adr/015-sync-local-to-azure.md)). Documents, hierarchy, Pages and review state are not copied yet.
 
 ## Install and start (developer setup)
 
@@ -42,13 +42,18 @@ Shortcut: `NODO.cmd` at the repository root starts the app.
 
 | Path | Content |
 |---|---|
-| `nodo.db` | meetings, transcripts, graph, search index, queue |
+| `nodo.db` | meetings, transcripts, imported sources with their sections, fragments and versions, graph, search indexes, queue, watched folders |
 | `audio/` | the recordings, until you delete the meeting |
+| `sources/` | the original files of imported documents, one folder per source and version, until you delete the source; imported audio and video are erased 30 days after upload (their transcript stays) |
 | `attestation.key` | signs the record that you declared you may record |
 | `window/` | the app window's profile (microphone permission) |
 | `models/` | llama.cpp, the speaker models and the search model (int8 ONNX, 280 MB); Whisper and the language model live in the Hugging Face cache |
 
 Deleting a meeting removes its audio, transcript, search entries and graph entries from this computer, and from Azure on the next copy.
+
+Deleting an imported source removes its original files, sections, fragments, search entries and graph evidence from this computer. The engine then asks SQLite to empty its write-ahead log; when another reader holds the database at that moment, deleted text can stay in `nodo.db-wal` until a later checkpoint succeeds. The copy to Azure carries meetings only; imported sources stay on this computer.
+
+Document import works but is slow on the reference laptop (about an hour of model time per 50 pages on its 6 GB GPU, extrapolated from a 2.67-page corpus; see [PERFORMANCE.md](PERFORMANCE.md#8-document-import-phase-2)), so every import response of the local engine carries the notice `slow_on_this_machine`. Set `NODO_LOCAL_IMPORT_SLOW_NOTICE=false` to hide it on a faster computer.
 
 ## What the models are good and bad at
 
@@ -77,3 +82,26 @@ The check also makes sure every entity of the graph can be found by meaning (a q
 | Questions are slow while a recording is processed | speech and the language model take turns on the GPU; wait for the recording to finish |
 | First question after a pause takes about 20 seconds | the language model unloads after ten idle minutes and reloads |
 | No microphone prompt | open Settings of the window's browser profile; the permission is stored in `window/` |
+
+## One-click installer (Windows)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\package\build_installer.ps1
+```
+
+builds `dist\NODO-Setup.exe` (about 140 MB). It carries the Python runtime, the engine and its
+packages (the dependency closure read from package metadata, without PyTorch) and the web
+interface, and uses only what Windows ships (IExpress and PowerShell). Running it installs for the
+current user into `%LOCALAPPDATA%\Programs\NODO`, adds a Start menu entry and needs no administrator
+rights, Python, pip or compiler. `Uninstall-NODO.cmd` in that folder removes the program and leaves
+`%LOCALAPPDATA%\NODO` (meetings, models) alone.
+
+Models, llama.cpp and ffmpeg are not inside the installer: on first run the Home screen sends the
+owner to the Models screen, where each download needs a confirmation and is checked against its
+SHA-256.
+
+Verified on the development machine only: the bundle starts from an environment with no Python on
+the PATH, serves the web interface, `/v1/local/status` and `/mcp`, and installs, runs and uninstalls
+in a scratch user profile. Not verified: a clean Windows machine or virtual machine, code signing
+(the executable is unsigned, so SmartScreen warns), and the GPU runtime libraries (CUDA 12) that
+Whisper needs, which are not bundled.
